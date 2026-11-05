@@ -1,0 +1,9 @@
+[submodule "upstream/prism"]
+	path = upstream/prism
+	url = https://github.com/PrismLauncher/PrismLauncher.git
+[submodule "upstream/theseus"]
+	path = upstream/theseus
+	url = https://github.com/modrinth/theseus.git
+[submodule "upstream/freesm"]
+	path = upstream/freesm
+	url = https://github.com/FreesmTeam/FreesmLauncher.git

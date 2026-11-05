@@ -1,0 +1,11 @@
+[package]
+name = "twilight-manifest"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Parses Mojang version manifests (version.json) and evaluates rules for TwilightMC"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
