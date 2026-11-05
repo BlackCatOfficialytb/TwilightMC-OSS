@@ -1,0 +1,16 @@
+[package]
+name = "twilight-launch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "JVM/game argument template resolution, classpath building and async process spawning for TwilightMC"
+
+[dependencies]
+tokio = { workspace = true }
+thiserror = { workspace = true }
+
+twilight-manifest = { path = "../twilight-manifest" }
+twilight-auth = { path = "../twilight-auth" }
+
+[dev-dependencies]
+serde_json = { workspace = true }

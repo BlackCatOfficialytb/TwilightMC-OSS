@@ -58,6 +58,15 @@ impl Account {
     pub fn requires_online_validation(&self) -> bool {
         matches!(self.account_type, AccountType::Microsoft)
     }
+
+    /// `--userType` for the game process (Mojang for real accounts, legacy otherwise).
+    pub fn user_type(&self) -> &'static str {
+        if self.requires_online_validation() {
+            "mojang"
+        } else {
+            "legacy"
+        }
+    }
 }
 
 /// Hostname for id disambiguation; falls back to the raw URL when it cannot be parsed.

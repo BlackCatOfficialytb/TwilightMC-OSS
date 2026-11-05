@@ -1,0 +1,18 @@
+[package]
+name = "twilight-downloader"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Async failover metadata fetching (piston-meta + meta.prismlauncher.org + meta.freesmlauncher.org), asset index parsing and parallel SHA-1 verified downloads for TwilightMC"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+bytes = { workspace = true }
+sha1 = { workspace = true }
+futures = { workspace = true }
+
+twilight-manifest = { path = "../twilight-manifest" }

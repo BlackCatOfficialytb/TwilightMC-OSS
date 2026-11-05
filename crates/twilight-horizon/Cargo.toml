@@ -1,0 +1,17 @@
+[package]
+name = "twilight-horizon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Clean-room Horizon native-engine asset pipeline: verified vanilla asset stores and Horizon manifests, nothing Mojang-copyrighted is bundled"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+twilight-downloader = { path = "../twilight-downloader" }
+
+[dev-dependencies]
+sha1 = { workspace = true }
