@@ -1,10 +1,153 @@
-# Contributing
+# Contributing to TwilightMC
 
-1. This project is licensed under **AGPLv3**. All contributions are licensed under the same.
-2. Crates live under `crates/`. Keep crates small, single-purpose and `no`-Qt (native Rust only).
-3. CI gates: `cargo test --workspace` and `cargo clippy --workspace -- -D warnings` must pass with zero warnings.
-4. Commits: conventional style, `feat(<crate>): <description>` / `fix(<crate>): ...` / `test(<crate>): ...`.
+> **Project Ownership & Governance:** All repositories under the TwilightMC project are owned and maintained by `BlackCatOfficialytb`.
 
-## Agent contributions
+Thank you for your interest in contributing to **TwilightMC** — an ultra-fast, clean, and modern Minecraft client and launcher built with pure Rust. 
 
-Every commit message and PR description authored by an automated agent **must** conclude with the signature `🤖🤖🤖` on its own line.
+To maintain high code quality, memory safety, legal compliance, and protect the project against automated AI spam and patent trolling, all contributors (both humans and automated agents) must strictly adhere to the guidelines below.
+
+---
+
+## Table of Contents
+1. [Contributor License Agreement (CLA)](#1-contributor-license-agreement-cla)
+2. [Human Contributors](#2-human-contributors)
+3. [Automated Agents Policy (OpenClaw, Copilot, etc.)](#3-automated-agents-policy)
+4. [Architecture & Technical Standards](#4-architecture--technical-standards)
+5. [Target Engines & Compliance Rules](#5-target-engines--compliance-rules)
+6. [Quality Gates & Testing](#6-quality-gates--testing)
+7. [Commit & Pull Request Conventions](#7-commit--pull-request-conventions)
+
+---
+
+## 1. Contributor License Agreement (CLA)
+
+By submitting a Pull Request, commit, or patch to TwilightMC, you accept and agree to the following binding terms:
+
+1. **Grant of Copyright License:** You grant `BlackCatOfficialytb` (and designated project maintainers) a perpetual, worldwide, non-exclusive, royalty-free, transferable, and irrevocable license to reproduce, prepare derivative works of, publicly display, publicly perform, sublicense, and distribute your contribution and such derivative works.
+2. **Grant of Patent License (Apache 2.0 Standard):** You grant `BlackCatOfficialytb` and recipients of software distributed by the project a perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable patent license to make, have made, use, offer to sell, sell, import, and otherwise transfer the Work, where such license applies only to those patent claims licensable by you that are necessarily infringed by your Contribution alone or by combination of your Contribution with the Work.
+3. **Patent Retaliation & Termination:** If you institute patent litigation against `BlackCatOfficialytb`, any maintainer, or any contributor (including a cross-claim or counterclaim in a lawsuit) alleging that the Work or a Contribution incorporated within the Work constitutes direct or contributory patent infringement, then any patent licenses granted to you under this Agreement for that Work shall terminate as of the date such litigation is filed.
+4. **Dual-Licensing & Distribution Rights:** While the public source code of TwilightMC remains licensed under the **GNU Affero General Public License v3 (AGPLv3)**, you expressly grant `BlackCatOfficialytb` the unilateral right to relicense, bundle, compile, and distribute official binaries, variants (e.g., TwilightMC Plus), or hosted network services under alternate or commercial licensing terms without further notice or compensation.
+5. **Original Work & No Warranty:** You represent that each Contribution is entirely your original work. Unless required by applicable law or agreed to in writing, your Contribution is provided on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied, including, without limitation, any warranties of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A PARTICULAR PURPOSE.
+
+---
+
+## 2. Human Contributors
+
+* **Scope:** All contributions are welcome: bug fixes, performance optimizations, new features, documentation, and refactors.
+* **Workflow:**
+  1. For non-trivial features or breaking changes, please open an Issue to discuss the architecture before submitting code.
+  2. Fork the repository, create a descriptive feature branch (`feat/asset-pipeline` or `fix/uuid-v3-generation`).
+  3. Ensure all CI gates pass before requesting review. Keep PRs scoped to one feature or fix at a time.
+
+---
+
+## 3. Automated Agents Policy
+
+Automated coding agents (including OpenClaw, NanoClaw, Cursor Agent, Devin, etc.) are strictly regulated to avoid noise, bloat, and regression.
+
+### Scope & Permissions:
+* **Prohibited by default:**
+  - Introducing new external dependencies (`Cargo.toml`) without prior human approval in a linked issue.
+  - Architectural rewrites or broad refactorings across multiple crates.
+  - Modifying files inside `upstream/` submodules.
+* **Allowed without prior approval:**
+  - Bug fixes directly addressing an existing, linked issue.
+  - Security and vulnerability patches.
+  - Adding unit/integration tests to improve coverage.
+* **Conditional approval:** Small feature additions *only* if explicitly approved by a maintainer in a referenced issue.
+
+### Agent Mandatory Requirements:
+1. **Linkage:** Every agent PR must clearly link the issue or human authorization it addresses.
+2. **Minimal Diff:** Keep changes strictly scoped to the exact problem.
+3. **Mandatory Signature:** Every commit message and PR description generated by an automated agent **MUST** conclude with the exact signature on its own line:
+   ```text
+   🤖🤖🤖
+   ```
+   *Any commit or PR identified as agent-generated lacking this signature will be rejected immediately.*
+
+---
+
+## 4. Architecture & Technical Standards
+
+TwilightMC is built from the ground up as a high-performance, modular Rust workspace.
+
+```text
+TwilightMC/
+├── Cargo.toml               # Workspace Root
+├── crates/                  # Modular Rust Crates
+│   ├── twilight-manifest/   # Version & metadata parsers (Mojang, Quilt, Fabric)
+│   ├── twilight-downloader/ # Concurrent async download engine
+│   ├── twilight-launch/     # JVM argument builder & process spawner
+│   ├── twilight-auth/       # Offline & Custom Yggdrasil authentication
+│   └── twilight-horizon/    # Clean asset pipeline for Horizon Rust engine
+└── upstream/                # Submodules for reference only (Prism, Freesm, Theseus)
+```
+
+### Strict Coding Rules:
+1. **Pure Idiomatic Rust (No Qt Residue):**
+   - Do **NOT** translate C++/Qt classes mechanically. 
+   - Never use Qt concepts (`QObject`, `QString`, `QList`, signals/slots, `QThread`).
+   - Use standard Rust types (`String`, `Vec`, `HashMap`, `bytes::Bytes`).
+   - Use `tokio` for async runtimes and `tokio::sync::mpsc` for message passing.
+2. **Submodule Isolation:**
+   - Code inside `upstream/prism`, `upstream/freesm`, and `upstream/theseus` is strictly for **clean-room reverse-engineering and architectural reference**.
+   - Do **not** compile, alter, or link upstream C++ code directly into TwilightMC crates.
+3. **Robust Error Handling:**
+   - Define domain-specific errors using `thiserror` in each crate.
+   - Do **NOT** use `.unwrap()` or `.expect()` in production library code. Always propagate errors using `Result<T, E>`.
+4. **Serialization:**
+   - Use `serde` and `serde_json` with strict type definitions (`enum`, `struct`) for all JSON manifests.
+
+---
+
+## 5. Target Engines & Compliance Rules
+
+### A. Offline Mode & Custom Auth
+* Offline accounts must generate standard Minecraft UUID v3 hashes derived from MD5 over UTF-8 `"OfflinePlayer:" + username`.
+* Never bypass game code; launch instances using standard Mojang offline arguments (`--accessToken 0`).
+* Support custom auth services cleanly via `-javaagent:authlib-injector.jar`.
+
+### B. Horizon (Rust Engine) & Asset Integrity
+* **Zero Bundled Assets:** Never commit, bundle, or redistribute copyrighted Mojang assets (textures, audio, lang files, or `client.jar`).
+* To feed the native Horizon engine, the launcher must download clean vanilla assets directly from Mojang CDN (`piston-meta`) to the local machine and extract them on the fly.
+
+---
+
+## 6. Quality Gates & Testing
+
+Before opening any PR, ensure your branch passes all workspace checks:
+
+```bash
+# 1. Format verification
+cargo fmt --all -- --check
+
+# 2. Strict linter check (Zero warnings tolerated)
+cargo clippy --workspace --all-targets -- -D warnings
+
+# 3. Comprehensive test suite
+cargo test --workspace
+```
+
+---
+
+## 7. Commit & Pull Request Conventions
+
+Commit messages must follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:
+
+```text
+<type>(<scope>): <short description>
+
+[optional body explaining WHAT and WHY]
+
+[optional footer / Agent signature]
+```
+
+### Permitted Types:
+* `feat`: A new feature (e.g., `feat(downloader): implement parallel sha1 verification`)
+* `fix`: A bug fix (e.g., `fix(manifest): correct rule evaluation on macOS arm64`)
+* `test`: Adding or refactoring tests (e.g., `test(auth): add offline uuid v3 verification`)
+* `refactor`: Code change that neither fixes a bug nor adds a feature
+* `docs`: Documentation updates only
+* `chore`: Build tasks, workspace maintenance, or submodule bumps
+
+*For automated agents, always append `🤖🤖🤖` as the final line of the commit message.*
