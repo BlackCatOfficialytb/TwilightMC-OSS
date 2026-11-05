@@ -131,7 +131,10 @@ mod tests {
         let f = parse_version_file(SAMPLE).unwrap();
         assert_eq!(f.id, "1.21.4");
         assert_eq!(f.r#type.as_deref(), Some("release"));
-        assert_eq!(f.main_class.as_deref(), Some("net.minecraft.client.main.Main"));
+        assert_eq!(
+            f.main_class.as_deref(),
+            Some("net.minecraft.client.main.Main")
+        );
         assert!(f.arguments.is_none());
         assert_eq!(f.effective_asset_index().unwrap().id, "17");
         assert_eq!(f.libraries.len(), 2);
@@ -142,7 +145,10 @@ mod tests {
         let idx = f.effective_asset_index().unwrap();
         assert!(!idx.is_known());
         assert!(idx.url.contains("piston-meta"));
-        assert_eq!(parse_version_file(legacy_y).unwrap().assets.as_deref(), Some("legacy"));
+        assert_eq!(
+            parse_version_file(legacy_y).unwrap().assets.as_deref(),
+            Some("legacy")
+        );
     }
 
     #[test]
@@ -158,7 +164,11 @@ mod tests {
         assert!(f.launcher_compatible());
         let f = parse_version_file(r#"{ "id": "x", "minimumLauncherVersion": 99 }"#).unwrap();
         assert!(!f.launcher_compatible());
-        assert!(parse_version_file(r#"{ "id": "x" }"#).unwrap().launcher_compatible());
+        assert!(
+            parse_version_file(r#"{ "id": "x" }"#)
+                .unwrap()
+                .launcher_compatible()
+        );
     }
 
     #[test]

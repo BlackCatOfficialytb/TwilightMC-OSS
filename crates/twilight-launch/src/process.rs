@@ -48,11 +48,18 @@ pub fn build_command(plan: &LaunchPlan) -> Command {
 
 /// Spawns the game, streams stdout/stderr lines through `events`, then returns
 /// the exit status. Pump tasks outlive `wait` only until both pipes close.
-pub async fn run(plan: LaunchPlan, events: mpsc::Sender<LaunchEvent>) -> Result<ExitStatus, LaunchError> {
+pub async fn run(
+    plan: LaunchPlan,
+    events: mpsc::Sender<LaunchEvent>,
+) -> Result<ExitStatus, LaunchError> {
     let mut cmd = build_command(&plan);
-    cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
-    let mut child =
-        cmd.spawn().map_err(|e| LaunchError::Spawn { executable: plan.java_executable.display().to_string(), source: e })?;
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e| LaunchError::Spawn {
+        executable: plan.java_executable.display().to_string(),
+        source: e,
+    })?;
 
     let stdout = child.stdout.take().map(BufReader::new);
     let stderr = child.stderr.take().map(BufReader::new);
@@ -129,19 +136,42 @@ mod tests {
             work_dir: std::env::temp_dir(),
             env: HashMap::new(),
         };
-        let argv: Vec<String> = build_command(&with_cp).as_std().get_args().map(|a| a.to_string_lossy().to_string()).collect();
-        assert_eq!(argv, vec!["-Xms128M", "-cp", "/a:/b", "net.minecraft.client.main.Main", "--fullscreen"]);
+        let argv: Vec<String> = build_command(&with_cp)
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert_eq!(
+            argv,
+            vec![
+                "-Xms128M",
+                "-cp",
+                "/a:/b",
+                "net.minecraft.client.main.Main",
+                "--fullscreen"
+            ]
+        );
 
         let mut without_cp = with_cp;
         without_cp.classpath = String::new();
-        let argv: Vec<String> = build_command(&without_cp).as_std().get_args().map(|a| a.to_string_lossy().to_string()).collect();
-        assert!(argv.iter().all(|arg| arg != "-cp"), "no stray -cp when classpath empty");
+        let argv: Vec<String> = build_command(&without_cp)
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect();
+        assert!(
+            argv.iter().all(|arg| arg != "-cp"),
+            "no stray -cp when classpath empty"
+        );
     }
 
     #[tokio::test]
     async fn missing_executable_is_an_error() {
         let (tx, _rx) = mpsc::channel(64);
-        let plan = LaunchPlan { java_executable: "/definitely/missing/java".into(), ..Default::default() };
+        let plan = LaunchPlan {
+            java_executable: "/definitely/missing/java".into(),
+            ..Default::default()
+        };
         let err = run(plan, tx).await.unwrap_err();
         assert!(matches!(err, LaunchError::Spawn { .. }));
     }

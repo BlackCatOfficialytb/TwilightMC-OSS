@@ -40,7 +40,11 @@ impl Account {
     }
 
     /// Custom Yggdrasil (Ely.by et al.) account.
-    pub fn custom_yggdrasil(username: impl Into<String>, server_url: impl Into<String>, access_token: Option<String>) -> Self {
+    pub fn custom_yggdrasil(
+        username: impl Into<String>,
+        server_url: impl Into<String>,
+        access_token: Option<String>,
+    ) -> Self {
         let username = username.into();
         let server_url = server_url.into();
         let uuid = generate_offline_uuid(&username);
@@ -48,7 +52,9 @@ impl Account {
             id: format!("{username}@{}", host_of(&server_url)),
             username,
             uuid,
-            account_type: AccountType::CustomYggdrasil { auth_server_url: server_url },
+            account_type: AccountType::CustomYggdrasil {
+                auth_server_url: server_url,
+            },
             access_token,
         }
     }
@@ -126,7 +132,11 @@ mod tests {
         assert!(!off.requires_online_validation());
         assert!(ms.requires_online_validation());
         // custom server behaves like offline: no Microsoft step
-        let ygg = Account::custom_yggdrasil("Steve", "https://authserver.ely.by/api/authlib-injector", None);
+        let ygg = Account::custom_yggdrasil(
+            "Steve",
+            "https://authserver.ely.by/api/authlib-injector",
+            None,
+        );
         assert!(!ygg.requires_online_validation());
         assert!(matches!(
             ygg.account_type,
@@ -138,12 +148,19 @@ mod tests {
     async fn store_round_trip_and_atomic_write() {
         let mut store = AccountStore::default();
         store.add(Account::offline("Steve"));
-        store.add(Account::custom_yggdrasil("Ely", "https://authserver.ely.by/api/authlib-injector", Some("tok".into())));
+        store.add(Account::custom_yggdrasil(
+            "Ely",
+            "https://authserver.ely.by/api/authlib-injector",
+            Some("tok".into()),
+        ));
 
         let dir = std::env::temp_dir().join(format!(
             "twi-auth-test-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_nanos()).unwrap_or(0)
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0)
         ));
         tokio::fs::create_dir_all(&dir).await.unwrap();
         let path = dir.join("accounts.json");
@@ -151,7 +168,10 @@ mod tests {
 
         let loaded = AccountStore::load(&path).await.unwrap();
         assert_eq!(loaded, store);
-        assert_eq!(loaded.find("Steve").unwrap().uuid.to_string(), "5627dd98-e6be-3c21-b8a8-e92344183641");
+        assert_eq!(
+            loaded.find("Steve").unwrap().uuid.to_string(),
+            "5627dd98-e6be-3c21-b8a8-e92344183641"
+        );
         tokio::fs::remove_dir_all(&dir).await.unwrap();
     }
 

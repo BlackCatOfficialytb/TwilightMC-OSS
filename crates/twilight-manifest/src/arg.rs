@@ -5,8 +5,8 @@ use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::rule::{eval_rule_list, Rule, RuleResult};
 use crate::RuntimeContext;
+use crate::rule::{Rule, RuleResult, eval_rule_list};
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Arguments {
@@ -94,10 +94,16 @@ mod tests {
             resolve_arg_items(&args.game, &ctx(), &none),
             vec!["--main".to_string(), "--fullscreen".to_string()]
         );
-        assert_eq!(resolve_arg_items(&args.jvm, &ctx(), &none), vec!["-Xms512m", "-Xss1M"]);
+        assert_eq!(
+            resolve_arg_items(&args.jvm, &ctx(), &none),
+            vec!["-Xms512m", "-Xss1M"]
+        );
 
         let demo = features(&["is_demo_user"]);
-        assert_eq!(resolve_arg_items(&args.jvm, &ctx(), &demo), vec!["-Xms512m", "-Xss1M", "--demo"]);
+        assert_eq!(
+            resolve_arg_items(&args.jvm, &ctx(), &demo),
+            vec!["-Xms512m", "-Xss1M", "--demo"]
+        );
     }
 
     #[test]
@@ -109,7 +115,10 @@ mod tests {
         ]"#,
         )
         .unwrap();
-        assert_eq!(resolve_arg_items(&items, &ctx(), &features(&[])), vec!["--native"]);
+        assert_eq!(
+            resolve_arg_items(&items, &ctx(), &features(&[])),
+            vec!["--native"]
+        );
     }
 
     #[test]

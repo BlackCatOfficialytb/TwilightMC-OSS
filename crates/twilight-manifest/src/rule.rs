@@ -36,7 +36,11 @@ pub struct OsRule {
 /// the known keys when writing back as well).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rule {
-    #[serde(default, deserialize_with = "Rule::deserialize_lenient_action", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "Rule::deserialize_lenient_action",
+        skip_serializing_if = "Option::is_none"
+    )]
     action: Option<Action>,
     os: Option<OsRule>,
     /// Mojang feature-flag gate: the rule applies only when every flagged
@@ -47,7 +51,9 @@ pub struct Rule {
 
 impl Rule {
     /// Lenient JSON deserializer: unknown action strings become `None` (defer).
-    fn deserialize_lenient_action<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Action>, D::Error> {
+    fn deserialize_lenient_action<'de, D: Deserializer<'de>>(
+        d: D,
+    ) -> Result<Option<Action>, D::Error> {
         let raw = Option::<String>::deserialize(d)?;
         Ok(raw.as_deref().and_then(|raw| match raw {
             "allow" => Some(Action::Allow),
@@ -59,8 +65,16 @@ impl Rule {
 
 /// Evaluates every rule and returns the **last** non-deferring outcome,
 /// matching `Library::isActive`'s fold. All-`Defer` (or empty) input yields `Defer`.
-pub fn eval_rule_list(rules: &[Rule], ctx: &RuntimeContext, features: &BTreeSet<String>) -> RuleResult {
-    match rules.iter().filter_map(|rule| rule.eval(ctx, features)).next_back() {
+pub fn eval_rule_list(
+    rules: &[Rule],
+    ctx: &RuntimeContext,
+    features: &BTreeSet<String>,
+) -> RuleResult {
+    match rules
+        .iter()
+        .filter_map(|rule| rule.eval(ctx, features))
+        .next_back()
+    {
         Some(true) => RuleResult::Allow,
         Some(false) => RuleResult::Disallow,
         None => RuleResult::Defer,
@@ -130,7 +144,10 @@ mod tests {
     fn os_rule_matches_precise_classifier() {
         let r = rule(r#"{"action":"allow","os":{"name":"linux-x86_64"}}"#);
         assert_eq!(r.eval(&linux_ctx(), &BTreeSet::new()), Some(true));
-        assert_eq!(r.eval(&RuntimeContext::new("linux", "aarch64"), &BTreeSet::new()), None);
+        assert_eq!(
+            r.eval(&RuntimeContext::new("linux", "aarch64"), &BTreeSet::new()),
+            None
+        );
     }
 
     #[test]
@@ -138,7 +155,10 @@ mod tests {
         let r = rule(r#"{"action":"disallow","os":{"name":"linux"}}"#);
         assert_eq!(r.eval(&linux_ctx(), &BTreeSet::new()), Some(false));
         // arm64 is not a "legacy" arch, so the imprecise match must not apply
-        assert_eq!(r.eval(&RuntimeContext::new("linux", "aarch64"), &BTreeSet::new()), None);
+        assert_eq!(
+            r.eval(&RuntimeContext::new("linux", "aarch64"), &BTreeSet::new()),
+            None
+        );
     }
 
     #[test]
@@ -148,7 +168,10 @@ mod tests {
         assert_eq!(r.eval(&linux_ctx(), &BTreeSet::new()), None);
         // "os" object present without name -> no OS restriction at all
         let r = rule(r#"{"action":"allow","os":{}}"#);
-        assert_eq!(r.eval(&RuntimeContext::new("windows", "x86"), &BTreeSet::new()), Some(true));
+        assert_eq!(
+            r.eval(&RuntimeContext::new("windows", "x86"), &BTreeSet::new()),
+            Some(true)
+        );
     }
 
     #[test]
@@ -165,9 +188,16 @@ mod tests {
         let on: BTreeSet<String> = ["is_demo_user".to_owned()].into();
         assert_eq!(r.eval(&linux_ctx(), &on), Some(true));
         // entries explicitly set to false invert the requirement
-        let inv = serde_json::from_str::<Rule>(r#"{"action":"allow","features":{"has_custom_resolution":false}}"#).unwrap();
+        let inv = serde_json::from_str::<Rule>(
+            r#"{"action":"allow","features":{"has_custom_resolution":false}}"#,
+        )
+        .unwrap();
         assert_eq!(inv.eval(&linux_ctx(), &on), Some(true));
-        let res: BTreeSet<String> = ["is_demo_user".to_owned(), "has_custom_resolution".to_owned()].into();
+        let res: BTreeSet<String> = [
+            "is_demo_user".to_owned(),
+            "has_custom_resolution".to_owned(),
+        ]
+        .into();
         assert_eq!(inv.eval(&linux_ctx(), &res), None);
     }
 
@@ -177,9 +207,16 @@ mod tests {
             r#"[{"action":"disallow","os":{"name":"windows"}},{"action":"allow","os":{"name":"linux-x86_64"}}]"#,
         )
         .unwrap();
-        assert_eq!(eval_rule_list(&rules, &linux_ctx(), &BTreeSet::new()), RuleResult::Allow);
+        assert_eq!(
+            eval_rule_list(&rules, &linux_ctx(), &BTreeSet::new()),
+            RuleResult::Allow
+        );
         // nothing applies -> defer
-        let none: Vec<Rule> = serde_json::from_str(r#"[{"action":"allow","os":{"name":"osx-arm64"}}]"#).unwrap();
-        assert_eq!(eval_rule_list(&none, &linux_ctx(), &BTreeSet::new()), RuleResult::Defer);
+        let none: Vec<Rule> =
+            serde_json::from_str(r#"[{"action":"allow","os":{"name":"osx-arm64"}}]"#).unwrap();
+        assert_eq!(
+            eval_rule_list(&none, &linux_ctx(), &BTreeSet::new()),
+            RuleResult::Defer
+        );
     }
 }

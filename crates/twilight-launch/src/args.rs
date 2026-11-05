@@ -4,7 +4,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use twilight_auth::Account;
-use twilight_manifest::{resolve_arg_items, RuntimeContext, VersionFile};
+use twilight_manifest::{RuntimeContext, VersionFile, resolve_arg_items};
 
 /// Interpolation variables for a resolved launch profile.
 pub type Vars = HashMap<String, String>;
@@ -89,16 +89,16 @@ pub fn replace_tokens_in(text: &str, vars: &Vars) -> String {
     let mut out = String::with_capacity(text.len());
     let mut cursor = 0usize;
     loop {
-        let Some(rel) = text[cursor ..].find("${") else {
-            out.push_str(&text[cursor ..]);
+        let Some(rel) = text[cursor..].find("${") else {
+            out.push_str(&text[cursor..]);
             return out;
         };
         let start = cursor + rel;
-        out.push_str(&text[cursor .. start]);
-        let body = &text[start + 2 ..];
+        out.push_str(&text[cursor..start]);
+        let body = &text[start + 2..];
         let Some(close) = body.find('}') else {
             // unterminated token stays literal
-            out.push_str(&text[start ..]);
+            out.push_str(&text[start..]);
             return out;
         };
         if let Some(value) = vars.get(&body[..close]) {
@@ -138,7 +138,11 @@ pub fn game_arguments(
     if let Some(address) = &options.quick_play.server_address {
         if traits.contains("feature:is_quick_play_multiplayer") {
             args.push("--quickPlayMultiplayer".into());
-            args.push(format!("{}:{}", address, options.quick_play.server_port.unwrap_or(25565)));
+            args.push(format!(
+                "{}:{}",
+                address,
+                options.quick_play.server_port.unwrap_or(25565)
+            ));
         } else {
             args.push("--server".into());
             args.push(address.clone());
@@ -157,7 +161,9 @@ pub fn game_arguments(
         args.push("--demo".into());
     }
 
-    args.into_iter().map(|arg| replace_tokens_in(&arg, vars)).collect()
+    args.into_iter()
+        .map(|arg| replace_tokens_in(&arg, vars))
+        .collect()
 }
 
 /// Builds the JVM-side argument vector; injects the authlib-injector agent
@@ -174,9 +180,14 @@ pub fn jvm_arguments(
         None => Vec::new(),
     };
     if let Some((jar_path, auth_server_url)) = authlib_injector {
-        args.extend(twilight_auth::authlib_injector_jvm_args(&jar_path.display().to_string(), auth_server_url));
+        args.extend(twilight_auth::authlib_injector_jvm_args(
+            &jar_path.display().to_string(),
+            auth_server_url,
+        ));
     }
-    args.into_iter().map(|arg| replace_tokens_in(&arg, vars)).collect()
+    args.into_iter()
+        .map(|arg| replace_tokens_in(&arg, vars))
+        .collect()
 }
 
 #[cfg(test)]
@@ -196,11 +207,20 @@ mod tests {
         let v = vars();
         assert_eq!(replace_tokens_in("${auth_player_name}!", &v), "Steve!");
         // known tokens are the shortest match ending at the first `}`
-        assert_eq!(replace_tokens_in("--${natives_directory}\\libs", &v), "--/g/natives\\libs");
+        assert_eq!(
+            replace_tokens_in("--${natives_directory}\\libs", &v),
+            "--/g/natives\\libs"
+        );
         // ${unclosed stays literal; unknown forms vanish entirely
         assert_eq!(replace_tokens_in("keep ${unclosed", &v), "keep ${unclosed");
-        assert_eq!(replace_tokens_in("drop ${unknown_token} here", &v), "drop  here");
-        assert_eq!(replace_tokens_in("no tokens at all", &v), "no tokens at all");
+        assert_eq!(
+            replace_tokens_in("drop ${unknown_token} here", &v),
+            "drop  here"
+        );
+        assert_eq!(
+            replace_tokens_in("no tokens at all", &v),
+            "no tokens at all"
+        );
     }
 
     #[test]
@@ -260,7 +280,10 @@ mod tests {
     #[test]
     fn modern_arguments_resolve_rules_then_tokens() {
         let version = twilight_manifest::parse_version_file(MODERN).unwrap();
-        let demo: GameOptions = GameOptions { demo: true, ..Default::default() };
+        let demo: GameOptions = GameOptions {
+            demo: true,
+            ..Default::default()
+        };
         let demo_features: BTreeSet<String> = ["is_demo_user".to_owned()].into();
 
         let game = game_arguments(&version, &ctx(), &none(), &none(), &vars(), &demo);
@@ -277,7 +300,14 @@ mod tests {
         let version = twilight_manifest::parse_version_file(LEGACY).unwrap();
         let mut vars = vars();
         inject_account_vars(&mut vars, &Account::offline("Steve"));
-        let game = game_arguments(&version, &ctx(), &none(), &none(), &vars, &GameOptions::default());
+        let game = game_arguments(
+            &version,
+            &ctx(),
+            &none(),
+            &none(),
+            &vars,
+            &GameOptions::default(),
+        );
         assert_eq!(game, vec!["--username", "Steve", "--accessToken", "0"]);
     }
 
@@ -287,13 +317,27 @@ mod tests {
         // (traits try in upstream launches is profile data; simulate both paths)
 
         let version = twilight_manifest::parse_version_file(modern_quickplay).unwrap();
-        let legacy_opts = GameOptions { quick_play: QuickPlay { server_address: Some("mc.example".into()), server_port: Some(2026), ..Default::default() }, ..Default::default() };
+        let legacy_opts = GameOptions {
+            quick_play: QuickPlay {
+                server_address: Some("mc.example".into()),
+                server_port: Some(2026),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         // no quickplay trait: classic in --server ... --port ...
         let classic = game_arguments(&version, &ctx(), &none(), &none(), &vars(), &legacy_opts);
         assert_eq!(classic, vec!["--server", "mc.example", "--port", "2026"]);
 
         let with_trait: BTreeSet<String> = ["feature:is_quick_play_multiplayer".to_owned()].into();
-        let quick = game_arguments(&version, &ctx(), &none(), &with_trait.clone(), &vars(), &legacy_opts);
+        let quick = game_arguments(
+            &version,
+            &ctx(),
+            &none(),
+            &with_trait.clone(),
+            &vars(),
+            &legacy_opts,
+        );
         assert_eq!(quick, vec!["--quickPlayMultiplayer", "mc.example:2026"]);
         let _ = with_trait;
     }
@@ -301,7 +345,19 @@ mod tests {
     #[test]
     fn authlib_injector_arrives_as_javaagent() {
         let version = twilight_manifest::parse_version_file(r#"{ "id": "x" }"#).unwrap();
-        let jvm = jvm_arguments(&version, &ctx(), &none(), &vars(), Some((std::path::Path::new("/l/ai.jar"), "https://ely.by/api/auth")));
-        assert_eq!(jvm, vec!["-javaagent:/l/ai.jar=https://ely.by/api/auth", "-Dauthlibinjector.side=client"]);
+        let jvm = jvm_arguments(
+            &version,
+            &ctx(),
+            &none(),
+            &vars(),
+            Some((std::path::Path::new("/l/ai.jar"), "https://ely.by/api/auth")),
+        );
+        assert_eq!(
+            jvm,
+            vec![
+                "-javaagent:/l/ai.jar=https://ely.by/api/auth",
+                "-Dauthlibinjector.side=client"
+            ]
+        );
     }
 }

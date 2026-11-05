@@ -12,7 +12,9 @@ type Routes = HashMap<String, (u16, Vec<u8>)>;
 /// Spawns a one-connection-per-request HTTP server on loopback so tests can
 /// exercise failover/parallel logic entirely offline.
 pub async fn spawn(routes: Routes) -> std::net::SocketAddr {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind loopback");
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind loopback");
     let addr = listener.local_addr().expect("bound address");
     tokio::spawn(async move {
         while let Ok((sock, _)) = listener.accept().await {
@@ -49,7 +51,10 @@ async fn serve(sock: TcpStream, routes: Routes) -> std::io::Result<()> {
         Some((code, body)) => (*code, body.clone()),
         None => (404, b"no route".to_vec()),
     };
-    let head = format!("HTTP/1.1 {status} t\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len());
+    let head = format!(
+        "HTTP/1.1 {status} t\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
     let mut full = head.into_bytes();
     full.extend_from_slice(&body);
     let mut sock = reader.into_inner();

@@ -19,7 +19,10 @@ pub enum DownloadError {
     #[error("HTTP status {status} from {url}")]
     HttpStatus { url: String, status: u16 },
     #[error("malformed JSON payload from {url}")]
-    BadJson { url: String, source: serde_json::Error },
+    BadJson {
+        url: String,
+        source: serde_json::Error,
+    },
     #[error("I/O on {path}: {source}")]
     Io {
         path: std::path::PathBuf,

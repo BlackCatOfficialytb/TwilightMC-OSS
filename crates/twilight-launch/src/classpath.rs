@@ -27,7 +27,9 @@ pub fn active_paths(
         if !library.is_active(ctx, features) {
             continue;
         }
-        let Some(spec) = library.storage_spec(ctx) else { continue };
+        let Some(spec) = library.storage_spec(ctx) else {
+            continue;
+        };
         let path = library_root.join(spec.storage);
         if library.is_native() {
             natives.push(path);
@@ -97,11 +99,24 @@ mod tests {
         let libs = vec![lib(GUAVA), lib(LWJGL), lib(INACTIVE)];
         let root = Path::new("/store");
         let (classpath, natives) = active_paths(&libs, &ctx(), root, &no_features());
-        assert_eq!(classpath, vec![PathBuf::from("/store/com/google/guava/guava/33.0.0-jre/guava-33.0.0-jre.jar")]);
-        assert_eq!(natives, vec![PathBuf::from("/store/org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-linux.jar")]);
+        assert_eq!(
+            classpath,
+            vec![PathBuf::from(
+                "/store/com/google/guava/guava/33.0.0-jre/guava-33.0.0-jre.jar"
+            )]
+        );
+        assert_eq!(
+            natives,
+            vec![PathBuf::from(
+                "/store/org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-linux.jar"
+            )]
+        );
 
         let cp = classpath_string(&classpath, Some(Path::new("/store/game.jar")));
-        assert_eq!(cp, "/store/com/google/guava/guava/33.0.0-jre/guava-33.0.0-jre.jar:/store/game.jar");
+        assert_eq!(
+            cp,
+            "/store/com/google/guava/guava/33.0.0-jre/guava-33.0.0-jre.jar:/store/game.jar"
+        );
     }
 
     #[test]

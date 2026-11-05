@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::download::LibraryDownloads;
 use crate::gradle::GradleSpecifier;
-use crate::rule::{eval_rule_list, Rule, RuleResult};
+use crate::rule::{Rule, RuleResult, eval_rule_list};
 use crate::{MOJANG_LIBRARY_BASE, RuntimeContext};
 
 /// A single resolved artifact to fetch: URL, optional expected sha1 and the
@@ -59,7 +59,9 @@ impl Library {
         // try "[os]-[arch]" first, then the bare "[os]" fallback on legacy archs
         let classifier = ctx.classifier();
         if let Some(n) = self.natives.get(&classifier).or_else(|| {
-            ctx.is_legacy_arch().then(|| self.natives.get(ctx.system.as_str())).flatten()
+            ctx.is_legacy_arch()
+                .then(|| self.natives.get(ctx.system.as_str()))
+                .flatten()
         }) {
             return Some(n.as_str());
         }
@@ -68,7 +70,11 @@ impl Library {
 
     /// Rules from `Library::isActive`: default `Disallow`, last non-deferring
     /// rule wins; natives additionally require this platform to be covered.
-    pub fn is_active(&self, ctx: &RuntimeContext, features: &std::collections::BTreeSet<String>) -> bool {
+    pub fn is_active(
+        &self,
+        ctx: &RuntimeContext,
+        features: &std::collections::BTreeSet<String>,
+    ) -> bool {
         let active = if self.rules.is_empty() {
             true
         } else {
@@ -133,7 +139,8 @@ impl Library {
                 };
                 if let Some((stem, tail)) = native.split_once("${arch}") {
                     for arch in ["32", "64"] {
-                        let Some(info) = downloads.classifiers.get(&format!("{stem}{arch}{tail}")) else {
+                        let Some(info) = downloads.classifiers.get(&format!("{stem}{arch}{tail}"))
+                        else {
                             continue;
                         };
                         out.push(ResolvedDownload {
@@ -164,10 +171,18 @@ impl Library {
         if raw_storage.contains("${arch}") {
             for arch in ["32", "64"] {
                 let url = raw_url.replace("${arch}", arch);
-                out.push(ResolvedDownload { url, sha1: None, storage: raw_storage.replace("${arch}", arch) });
+                out.push(ResolvedDownload {
+                    url,
+                    sha1: None,
+                    storage: raw_storage.replace("${arch}", arch),
+                });
             }
         } else {
-            out.push(ResolvedDownload { url: raw_url, sha1: None, storage: raw_storage });
+            out.push(ResolvedDownload {
+                url: raw_url,
+                sha1: None,
+                storage: raw_storage,
+            });
         }
         out
     }
@@ -199,9 +214,15 @@ mod tests {
         assert!(lib.is_active(&linux(), &FEATURES));
         let dl = lib.resolve_downloads(&linux());
         assert_eq!(dl.len(), 1);
-        assert_eq!(dl[0].url, "https://example.com/maven/com/google/guava/guava/33.0.0-jre/guava-33.0.0-jre-linux-x86_64.jar");
+        assert_eq!(
+            dl[0].url,
+            "https://example.com/maven/com/google/guava/guava/33.0.0-jre/guava-33.0.0-jre-linux-x86_64.jar"
+        );
         assert_eq!(dl[0].sha1, None);
-        assert_eq!(dl[0].storage, "com/google/guava/guava/33.0.0-jre/guava-33.0.0-jre-linux-x86_64.jar");
+        assert_eq!(
+            dl[0].storage,
+            "com/google/guava/guava/33.0.0-jre/guava-33.0.0-jre-linux-x86_64.jar"
+        );
     }
 
     #[test]
@@ -221,7 +242,10 @@ mod tests {
         let dl = lib.resolve_downloads(&linux());
         assert_eq!(dl.len(), 1);
         assert_eq!(dl[0].sha1.as_deref(), Some("5b5c9c..."));
-        assert_eq!(dl[0].storage, "org/lwjgl/lwjgl-glfw/3.3.3/lwjgl-glfw-3.3.3.jar");
+        assert_eq!(
+            dl[0].storage,
+            "org/lwjgl/lwjgl-glfw/3.3.3/lwjgl-glfw-3.3.3.jar"
+        );
     }
 
     #[test]
@@ -244,7 +268,10 @@ mod tests {
         assert!(lib.is_active(&win, &FEATURES));
         let dl = lib.resolve_downloads(&win);
         assert_eq!(dl[0].url, "https://example.com/w.jar");
-        assert_eq!(dl[0].storage, "org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-windows-x86_64.jar");
+        assert_eq!(
+            dl[0].storage,
+            "org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-windows-x86_64.jar"
+        );
     }
 
     #[test]
@@ -278,7 +305,10 @@ mod tests {
         );
         let dl = lib.resolve_downloads(&linux());
         assert_eq!(dl.len(), 2);
-        assert_eq!(dl[0].storage, "tv/twitch/twitch-external-platform/4.5/twitch-external-platform-4.5-natives-linux-32.jar");
+        assert_eq!(
+            dl[0].storage,
+            "tv/twitch/twitch-external-platform/4.5/twitch-external-platform-4.5-natives-linux-32.jar"
+        );
         assert_eq!(dl[1].url, "https://example.com/64.jar");
     }
 
@@ -315,7 +345,10 @@ mod tests {
         }"#,
         );
         let spec = lib.storage_spec(&linux()).unwrap();
-        assert_eq!(spec.storage, "com/example/native/1.0/native-1.0-INVALID.jar");
+        assert_eq!(
+            spec.storage,
+            "com/example/native/1.0/native-1.0-INVALID.jar"
+        );
     }
 
     #[test]

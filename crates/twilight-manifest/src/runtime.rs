@@ -46,7 +46,10 @@ pub struct RuntimeContext {
 
 impl RuntimeContext {
     pub fn new(system: impl Into<System>, java_real_arch: impl Into<String>) -> Self {
-        Self { system: system.into(), java_real_arch: java_real_arch.into() }
+        Self {
+            system: system.into(),
+            java_real_arch: java_real_arch.into(),
+        }
     }
 
     /// Detects the host context; the Java arch defaults to the Rust target arch.
@@ -107,15 +110,28 @@ mod tests {
             ("armhf", "arm32"),
             ("riscv64", "riscv64"), // unknown values pass through
         ] {
-            assert_eq!(RuntimeContext::new("linux", input).mapped_arch(), want, "{input}");
+            assert_eq!(
+                RuntimeContext::new("linux", input).mapped_arch(),
+                want,
+                "{input}"
+            );
         }
     }
 
     #[test]
     fn classifier_formatting() {
-        assert_eq!(RuntimeContext::new("windows", "amd64").classifier(), "windows-x86_64");
-        assert_eq!(RuntimeContext::new("osx", "aarch64").classifier(), "osx-arm64");
-        assert_eq!(RuntimeContext::new("linux", "riscv64").classifier(), "linux-riscv64");
+        assert_eq!(
+            RuntimeContext::new("windows", "amd64").classifier(),
+            "windows-x86_64"
+        );
+        assert_eq!(
+            RuntimeContext::new("osx", "aarch64").classifier(),
+            "osx-arm64"
+        );
+        assert_eq!(
+            RuntimeContext::new("linux", "riscv64").classifier(),
+            "linux-riscv64"
+        );
     }
 
     #[test]

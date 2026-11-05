@@ -37,15 +37,29 @@ mod tests {
         let args = offline_game_args("Steve", uuid);
         assert_eq!(
             args,
-            vec!["--username", "Steve", "--uuid", "5627dd98-e6be-3c21-b8a8-e92344183641", "--accessToken", "0", "--userType", "legacy"]
+            vec![
+                "--username",
+                "Steve",
+                "--uuid",
+                "5627dd98-e6be-3c21-b8a8-e92344183641",
+                "--accessToken",
+                "0",
+                "--userType",
+                "legacy"
+            ]
         );
     }
 
     #[test]
     fn authlib_injector_args_pair_jar_and_server() {
-        let args = authlib_injector_jvm_args("/libs/authlib-injector.jar", "https://authserver.ely.by/api/authlib-injector");
+        let args = authlib_injector_jvm_args(
+            "/libs/authlib-injector.jar",
+            "https://authserver.ely.by/api/authlib-injector",
+        );
         assert_eq!(args.len(), 2);
-        assert!(args[0].contains("-javaagent:/libs/authlib-injector.jar=https://authserver.ely.by"));
+        assert!(
+            args[0].contains("-javaagent:/libs/authlib-injector.jar=https://authserver.ely.by")
+        );
         assert_eq!(args[1], "-Dauthlibinjector.side=client");
     }
 }

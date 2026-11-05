@@ -4,7 +4,8 @@
 //! Mojang's data; sources are tried in order: Mojang live (piston-meta)
 //! -> `meta.prismlauncher.org` -> `meta.freesmlauncher.org`.
 
-pub const MOJANG_MANIFEST_V2: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
+pub const MOJANG_MANIFEST_V2: &str =
+    "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
 pub const PRISM_META_BASE: &str = "https://meta.prismlauncher.org/v1/";
 pub const FREESM_META_BASE: &str = "https://meta.freesmlauncher.org/v1/";
 /// Content-addressed asset object CDN (`MojangDownloadInfo` resource base).
@@ -24,9 +25,15 @@ pub enum SourceKind {
 
 pub fn vanilla_sources() -> Vec<SourceKind> {
     vec![
-        SourceKind::Mojang { manifest_v2: MOJANG_MANIFEST_V2.to_owned() },
-        SourceKind::Meta { base: PRISM_META_BASE.to_owned() },
-        SourceKind::Meta { base: FREESM_META_BASE.to_owned() },
+        SourceKind::Mojang {
+            manifest_v2: MOJANG_MANIFEST_V2.to_owned(),
+        },
+        SourceKind::Meta {
+            base: PRISM_META_BASE.to_owned(),
+        },
+        SourceKind::Meta {
+            base: FREESM_META_BASE.to_owned(),
+        },
     ]
 }
 
@@ -56,7 +63,10 @@ impl VanillaVersionList {
     /// `"latest"` resolves through the host-provided pointer, otherwise an exact id.
     pub fn resolve(&self, wanted: &str) -> Option<VanillaMetaVersion> {
         let found = match wanted {
-            "latest" => self.latest_release_id.as_deref().and_then(|id| self.find(id)),
+            "latest" => self
+                .latest_release_id
+                .as_deref()
+                .and_then(|id| self.find(id)),
             other => self.find(other),
         };
         found.cloned()
@@ -65,7 +75,10 @@ impl VanillaVersionList {
 
 /// Fetches the first working source into a unified list. Network failures,
 /// non-2xx statuses and malformed JSON all fail over to the next source.
-pub async fn list_vanilla_versions(client: &reqwest::Client, sources: &[SourceKind]) -> Result<VanillaVersionList, DownloadError> {
+pub async fn list_vanilla_versions(
+    client: &reqwest::Client,
+    sources: &[SourceKind],
+) -> Result<VanillaVersionList, DownloadError> {
     let mut last: Option<DownloadError> = None;
     for source in sources {
         match fetch_source(client, source).await {
@@ -73,7 +86,10 @@ pub async fn list_vanilla_versions(client: &reqwest::Client, sources: &[SourceKi
             Err(e) => last = Some(e),
         }
     }
-    Err(DownloadError::AllSourcesOut { sources: sources.len(), source: Box::new(last.unwrap_or(DownloadError::EmptyChain)) })
+    Err(DownloadError::AllSourcesOut {
+        sources: sources.len(),
+        source: Box::new(last.unwrap_or(DownloadError::EmptyChain)),
+    })
 }
 
 /// Convenience wrapper: resolves `wanted` via the failover chain.
@@ -85,7 +101,9 @@ pub async fn resolve_vanilla_version(
     list_vanilla_versions(client, sources)
         .await?
         .resolve(wanted)
-        .ok_or_else(|| DownloadError::VersionNotFound { wanted: wanted.to_owned() })
+        .ok_or_else(|| DownloadError::VersionNotFound {
+            wanted: wanted.to_owned(),
+        })
 }
 
 impl SourceKind {
@@ -97,7 +115,10 @@ impl SourceKind {
     }
 }
 
-async fn fetch_source(client: &reqwest::Client, source: &SourceKind) -> Result<VanillaVersionList, DownloadError> {
+async fn fetch_source(
+    client: &reqwest::Client,
+    source: &SourceKind,
+) -> Result<VanillaVersionList, DownloadError> {
     let json = fetch_json_failover(client, &[source.list_url()]).await?;
     match source {
         SourceKind::Mojang { .. } => {
@@ -134,14 +155,20 @@ async fn fetch_source(client: &reqwest::Client, source: &SourceKind) -> Result<V
                     details_url,
                 });
             }
-            Ok(VanillaVersionList { versions, latest_release_id })
+            Ok(VanillaVersionList {
+                versions,
+                latest_release_id,
+            })
         }
     }
 }
 
 /// Downloads bytes and returns a JSON value; every network failure, non-2xx
 /// status or malformed payload moves on to the next URL in the chain.
-pub async fn fetch_json_failover(client: &reqwest::Client, urls: &[String]) -> Result<serde_json::Value, DownloadError> {
+pub async fn fetch_json_failover(
+    client: &reqwest::Client,
+    urls: &[String],
+) -> Result<serde_json::Value, DownloadError> {
     if urls.is_empty() {
         return Err(DownloadError::EmptyChain);
     }
@@ -150,25 +177,37 @@ pub async fn fetch_json_failover(client: &reqwest::Client, urls: &[String]) -> R
         let resp = match client.get(url).send().await {
             Ok(r) => r,
             Err(e) => {
-                last = Some(DownloadError::Http { url: url.clone(), source: e });
+                last = Some(DownloadError::Http {
+                    url: url.clone(),
+                    source: e,
+                });
                 continue;
             }
         };
         if !resp.status().is_success() {
-            last = Some(DownloadError::HttpStatus { url: url.clone(), status: resp.status().as_u16() });
+            last = Some(DownloadError::HttpStatus {
+                url: url.clone(),
+                status: resp.status().as_u16(),
+            });
             continue;
         }
         let bytes = match resp.bytes().await {
             Ok(b) => b,
             Err(e) => {
-                last = Some(DownloadError::Http { url: url.clone(), source: e });
+                last = Some(DownloadError::Http {
+                    url: url.clone(),
+                    source: e,
+                });
                 continue;
             }
         };
         match serde_json::from_slice::<serde_json::Value>(&bytes) {
             // malformed payloads fail over exactly like dead hosts
             Err(e) => {
-                last = Some(DownloadError::BadJson { url: url.clone(), source: e });
+                last = Some(DownloadError::BadJson {
+                    url: url.clone(),
+                    source: e,
+                });
                 continue;
             }
             Ok(v) => return Ok(v),
@@ -250,53 +289,86 @@ mod tests {
     async fn fails_over_from_dead_mojang_to_mirror_meta() {
         // piston-meta primary answers 500; prism mirror serves the list
         let routes: HashMap<String, (u16, Vec<u8>)> = HashMap::from([
-            ("mc/game/version_manifest_v2.json".to_owned(), (500u16, b"boom".to_vec())),
-            ("prism/net.minecraft/index.json".to_owned(), (200u16, META_BODY.as_bytes().to_vec())),
+            (
+                "mc/game/version_manifest_v2.json".to_owned(),
+                (500u16, b"boom".to_vec()),
+            ),
+            (
+                "prism/net.minecraft/index.json".to_owned(),
+                (200u16, META_BODY.as_bytes().to_vec()),
+            ),
         ]);
         let addr = spawn(routes).await;
         let sources = vec![
-            SourceKind::Mojang { manifest_v2: format!("http://{addr}/mc/game/version_manifest_v2.json") },
-            SourceKind::Meta { base: format!("http://{addr}/prism/") },
+            SourceKind::Mojang {
+                manifest_v2: format!("http://{addr}/mc/game/version_manifest_v2.json"),
+            },
+            SourceKind::Meta {
+                base: format!("http://{addr}/prism/"),
+            },
         ];
         let list = list_vanilla_versions(&client(), &sources).await.unwrap();
         assert_eq!(list.versions.len(), 2);
         assert_eq!(list.latest_release_id.as_deref(), Some("1.21.4"));
         let v = list.resolve("1.21.4").unwrap();
-        assert!(v.details_url.ends_with("net.minecraft/1.21.4.json"), "{}", v.details_url);
+        assert!(
+            v.details_url.ends_with("net.minecraft/1.21.4.json"),
+            "{}",
+            v.details_url
+        );
     }
 
     #[tokio::test]
     async fn mojang_primary_resolves_latest_from_manifest_pointer() {
-        let routes: HashMap<String, (u16, Vec<u8>)> =
-            HashMap::from([("mc/game/version_manifest_v2.json".to_owned(), (200u16, MOJANG_BODY.as_bytes().to_vec()))]);
+        let routes: HashMap<String, (u16, Vec<u8>)> = HashMap::from([(
+            "mc/game/version_manifest_v2.json".to_owned(),
+            (200u16, MOJANG_BODY.as_bytes().to_vec()),
+        )]);
         let addr = spawn(routes).await;
-        let sources = vec![SourceKind::Mojang { manifest_v2: format!("http://{addr}/mc/game/version_manifest_v2.json") }];
+        let sources = vec![SourceKind::Mojang {
+            manifest_v2: format!("http://{addr}/mc/game/version_manifest_v2.json"),
+        }];
         let list = list_vanilla_versions(&client(), &sources).await.unwrap();
         let latest = list.resolve("latest").unwrap();
         assert_eq!(latest.id, "1.21.4");
         assert_eq!(latest.details_url, "https://piston/1.21.4.json");
-        assert!(list.resolve("26.3").unwrap().details_url.ends_with("26.3.json"));
+        assert!(
+            list.resolve("26.3")
+                .unwrap()
+                .details_url
+                .ends_with("26.3.json")
+        );
     }
 
     #[tokio::test]
     async fn unknown_id_and_empty_chains_error_cleanly() {
-        let routes: HashMap<String, (u16, Vec<u8>)> =
-            HashMap::from([("prism/net.minecraft/index.json".to_owned(), (200u16, META_BODY.as_bytes().to_vec()))]);
+        let routes: HashMap<String, (u16, Vec<u8>)> = HashMap::from([(
+            "prism/net.minecraft/index.json".to_owned(),
+            (200u16, META_BODY.as_bytes().to_vec()),
+        )]);
         let addr = spawn(routes).await;
         let sources = vec![
-            SourceKind::Mojang { manifest_v2: format!("http://{addr}/missing/mc.json") },
-            SourceKind::Meta { base: format!("http://{addr}/prism/") },
+            SourceKind::Mojang {
+                manifest_v2: format!("http://{addr}/missing/mc.json"),
+            },
+            SourceKind::Meta {
+                base: format!("http://{addr}/prism/"),
+            },
         ];
         let list = list_vanilla_versions(&client(), &sources).await.unwrap();
-        assert!(matches!(list.resolve("nope"), None));
+        assert!(list.resolve("nope").is_none());
         assert!(matches!(
             resolve_vanilla_version(&client(), &sources, "nope").await,
             Err(DownloadError::VersionNotFound { wanted }) if wanted == "nope"
         ));
         // every host dead -> chained error
         let all_dead = vec![
-            SourceKind::Mojang { manifest_v2: format!("http://{addr}/nothing.json") },
-            SourceKind::Meta { base: format!("http://{addr}/void/") },
+            SourceKind::Mojang {
+                manifest_v2: format!("http://{addr}/nothing.json"),
+            },
+            SourceKind::Meta {
+                base: format!("http://{addr}/void/"),
+            },
         ];
         assert!(matches!(
             list_vanilla_versions(&client(), &all_dead).await,
@@ -312,7 +384,9 @@ mod tests {
             ("c.json".to_owned(), (200u16, br#"{"ok":1}"#.to_vec())),
         ]);
         let addr = spawn(routes).await;
-        let chain = ["a.json", "b.json", "c.json"].map(|p| format!("http://{addr}/{p}")).to_vec();
+        let chain = ["a.json", "b.json", "c.json"]
+            .map(|p| format!("http://{addr}/{p}"))
+            .to_vec();
         let v = fetch_json_failover(&client(), &chain).await.unwrap();
         assert_eq!(v["ok"], 1);
     }

@@ -11,7 +11,10 @@ mod error;
 pub use error::HorizonError;
 
 use serde::{Deserialize, Serialize};
-use twilight_downloader::{AssetIndex, AssetObject, DownloadError, DownloadRequest, ParallelDownloader, MOJANG_RESOURCES_BASE};
+use twilight_downloader::{
+    AssetIndex, AssetObject, DownloadError, DownloadRequest, MOJANG_RESOURCES_BASE,
+    ParallelDownloader,
+};
 
 /// Manifest written next to the assets store.
 pub const HORIZON_MANIFEST_FILE: &str = "horizon-assets.json";
@@ -49,7 +52,11 @@ pub fn build_manifest(assets_id: &str, index: &AssetIndex) -> HorizonManifest {
         })
         .collect();
     entries.sort_by(|a, b| a.resource.cmp(&b.resource));
-    HorizonManifest { schema: "horizon-assets-v1".into(), assets_id: assets_id.into(), entries }
+    HorizonManifest {
+        schema: "horizon-assets-v1".into(),
+        assets_id: assets_id.into(),
+        entries,
+    }
 }
 
 fn object_rel_path(hash: &str) -> std::path::PathBuf {
@@ -57,7 +64,10 @@ fn object_rel_path(hash: &str) -> std::path::PathBuf {
 }
 
 fn display_path(path: &std::path::Path) -> String {
-    path.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/")
+    path.components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 /// Horizon's verified asset store root.
@@ -92,13 +102,23 @@ impl AssetStore {
     /// `MissingObject`, corrupted ones as `CorruptObject`.
     pub async fn verify_all(&self, index: &AssetIndex) -> Result<(), HorizonError> {
         for (resource, obj) in &index.objects {
-            let actual = match twilight_downloader::sha1_of_file(&self.object_path(&obj.hash)).await {
+            let actual = match twilight_downloader::sha1_of_file(&self.object_path(&obj.hash)).await
+            {
                 Ok(actual) => actual,
-                Err(DownloadError::Io { source, .. }) => return Err(HorizonError::MissingObject { resource: resource.clone(), source }),
+                Err(DownloadError::Io { source, .. }) => {
+                    return Err(HorizonError::MissingObject {
+                        resource: resource.clone(),
+                        source,
+                    });
+                }
                 Err(e) => return Err(e.into()),
             };
             if actual != obj.hash.to_lowercase() {
-                return Err(HorizonError::CorruptObject { resource: resource.clone(), expected: obj.hash.clone(), actual });
+                return Err(HorizonError::CorruptObject {
+                    resource: resource.clone(),
+                    expected: obj.hash.clone(),
+                    actual,
+                });
             }
         }
         Ok(())
@@ -108,7 +128,11 @@ impl AssetStore {
     /// `map_to_resources` and legacy `virtual` indexes). Returns how many
     /// files were written; already-present identical files are skipped
     /// by content hash.
-    pub async fn export_to_resources(&self, index: &AssetIndex, resources_root: &std::path::Path) -> Result<usize, HorizonError> {
+    pub async fn export_to_resources(
+        &self,
+        index: &AssetIndex,
+        resources_root: &std::path::Path,
+    ) -> Result<usize, HorizonError> {
         tokio::fs::create_dir_all(resources_root).await?;
         let mut written = 0usize;
         for (resource, obj) in &index.objects {
@@ -132,8 +156,15 @@ impl AssetStore {
     }
 
     /// Full install: downloads, verifies, then writes `horizon-assets.json`.
-    pub async fn install(&self, assets_id: &str, index: &AssetIndex, downloader: &ParallelDownloader) -> Result<HorizonManifest, HorizonError> {
-        downloader.download_all(&self.download_requests(index)).await?;
+    pub async fn install(
+        &self,
+        assets_id: &str,
+        index: &AssetIndex,
+        downloader: &ParallelDownloader,
+    ) -> Result<HorizonManifest, HorizonError> {
+        downloader
+            .download_all(&self.download_requests(index))
+            .await?;
         self.verify_all(index).await?;
         let manifest = build_manifest(assets_id, index);
         let json = serde_json::to_string_pretty(&manifest)?;
@@ -153,13 +184,23 @@ mod tests {
 
     fn test_index() -> AssetIndex {
         let mut objects = HashMap::new();
-        for (resource, body) in [("pack.mcmeta", OBJECT_A), ("minecraft/sounds/x.ogg", OBJECT_B)] {
+        for (resource, body) in [
+            ("pack.mcmeta", OBJECT_A),
+            ("minecraft/sounds/x.ogg", OBJECT_B),
+        ] {
             objects.insert(
                 resource.to_owned(),
-                AssetObject { hash: sha(body), size: body.len() as i64 },
+                AssetObject {
+                    hash: sha(body),
+                    size: body.len() as i64,
+                },
             );
         }
-        AssetIndex { objects, is_virtual: Some(false), maps_to_resources: Some(false) }
+        AssetIndex {
+            objects,
+            is_virtual: Some(false),
+            maps_to_resources: Some(false),
+        }
     }
 
     fn sha(body: &[u8]) -> String {
@@ -188,13 +229,17 @@ mod tests {
         let manifest = build_manifest("26.3", &index);
         assert_eq!(manifest.schema, "horizon-assets-v1");
         assert_eq!(manifest.assets_id, "26.3");
-        assert!(manifest.entries[0].resource < manifest.entries[1].resource, "sorted");
+        assert!(
+            manifest.entries[0].resource < manifest.entries[1].resource,
+            "sorted"
+        );
         // must be stable across rebuilds
         assert_eq!(build_manifest("26.3", &index), manifest);
         let e = &manifest.entries[0];
         assert!(e.store_path.starts_with("objects/") && e.store_path.ends_with(&e.hash));
 
-        let back: HorizonManifest = serde_json::from_str(&serde_json::to_string(&manifest).unwrap()).unwrap();
+        let back: HorizonManifest =
+            serde_json::from_str(&serde_json::to_string(&manifest).unwrap()).unwrap();
         assert_eq!(back, manifest);
     }
 
@@ -206,28 +251,65 @@ mod tests {
         let store = AssetStore::new(&origin);
 
         // 1) everything missing
-        assert!(matches!(store.verify_all(&index).await, Err(HorizonError::MissingObject { .. })));
+        assert!(matches!(
+            store.verify_all(&index).await,
+            Err(HorizonError::MissingObject { .. })
+        ));
 
         // populate via the download path (works offline? no: server-less local
         // population of the SAME files the real CDN would deliver)
         for (resource, obj) in &index.objects {
-            tokio::fs::create_dir_all(store.root.join(object_rel_path(&obj.hash)).parent().unwrap()).await.unwrap();
-            tokio::fs::write(store.object_path(&obj.hash), body_of(resource)).await.unwrap();
+            tokio::fs::create_dir_all(
+                store
+                    .root
+                    .join(object_rel_path(&obj.hash))
+                    .parent()
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+            tokio::fs::write(store.object_path(&obj.hash), body_of(resource))
+                .await
+                .unwrap();
         }
         store.verify_all(&index).await.unwrap();
 
         // 2) corrupt one object
         let e = &manifest_first(&index);
-        tokio::fs::write(store.object_path(&e.hash), b"corrupted").await.unwrap();
-        assert!(matches!(store.verify_all(&index).await, Err(HorizonError::CorruptObject { .. })));
-        tokio::fs::write(store.object_path(&e.hash), body_of(&e.resource)).await.unwrap();
+        tokio::fs::write(store.object_path(&e.hash), b"corrupted")
+            .await
+            .unwrap();
+        assert!(matches!(
+            store.verify_all(&index).await,
+            Err(HorizonError::CorruptObject { .. })
+        ));
+        tokio::fs::write(store.object_path(&e.hash), body_of(&e.resource))
+            .await
+            .unwrap();
 
         // 3) export to resources layout
         let resources = target.join("resources");
-        assert_eq!(store.export_to_resources(&index, &resources).await.unwrap(), 2);
-        assert_eq!(tokio::fs::read(resources.join("pack.mcmeta")).await.unwrap(), OBJECT_A);
-        assert_eq!(tokio::fs::read(resources.join("minecraft/sounds/x.ogg")).await.unwrap(), OBJECT_B);
-        assert_eq!(store.export_to_resources(&index, &resources).await.unwrap(), 0, "idempotent export");
+        assert_eq!(
+            store.export_to_resources(&index, &resources).await.unwrap(),
+            2
+        );
+        assert_eq!(
+            tokio::fs::read(resources.join("pack.mcmeta"))
+                .await
+                .unwrap(),
+            OBJECT_A
+        );
+        assert_eq!(
+            tokio::fs::read(resources.join("minecraft/sounds/x.ogg"))
+                .await
+                .unwrap(),
+            OBJECT_B
+        );
+        assert_eq!(
+            store.export_to_resources(&index, &resources).await.unwrap(),
+            0,
+            "idempotent export"
+        );
 
         let _ = tokio::fs::remove_dir_all(&origin).await;
         let _ = tokio::fs::remove_dir_all(&target).await;

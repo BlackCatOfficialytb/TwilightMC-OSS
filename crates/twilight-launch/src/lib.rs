@@ -8,8 +8,9 @@ mod error;
 mod process;
 
 pub use args::{
-    game_arguments, inject_account_vars, jvm_arguments, replace_tokens_in, GameOptions, ProfileVars, QuickPlay, Vars,
+    GameOptions, ProfileVars, QuickPlay, Vars, game_arguments, inject_account_vars, jvm_arguments,
+    replace_tokens_in,
 };
 pub use classpath::{active_paths, classpath_string, profile_classpath, separator};
 pub use error::LaunchError;
-pub use process::{build_command, run, LaunchEvent, LaunchPlan};
+pub use process::{LaunchEvent, LaunchPlan, build_command, run};

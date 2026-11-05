@@ -59,7 +59,11 @@ impl GradleSpecifier {
             group_id: parts[0].to_owned(),
             artifact_id: parts[1].to_owned(),
             version: parts[2].to_owned(),
-            classifier: if len == 4 { parts[3].to_owned() } else { String::new() },
+            classifier: if len == 4 {
+                parts[3].to_owned()
+            } else {
+                String::new()
+            },
             extension: ext,
             invalid_value: String::new(),
         };
@@ -95,7 +99,8 @@ impl GradleSpecifier {
 
     /// Full group and artifact prefix, e.g. `org.lwjgl:lwjgl`.
     pub fn artifact_prefix(&self) -> Option<String> {
-        self.valid.then(|| format!("{}:{}", self.group_id, self.artifact_id))
+        self.valid
+            .then(|| format!("{}:{}", self.group_id, self.artifact_id))
     }
 
     pub fn set_classifier(&mut self, classifier: impl Into<String>) {
@@ -175,7 +180,9 @@ mod gradle_serde {
     use super::{GradleSpecifier, Visitor};
     use serde::de::Error as DeError;
 
-    pub fn deserialize<'de, D: serde::Deserializer<'de>>(d: D) -> Result<GradleSpecifier, D::Error> {
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(
+        d: D,
+    ) -> Result<GradleSpecifier, D::Error> {
         d.deserialize_str(GradleVisitor)
     }
 
@@ -197,7 +204,9 @@ mod gradle_serde {
             if spec.is_valid() {
                 Ok(spec)
             } else {
-                Err(E::custom(crate::error::ManifestError::InvalidSpecifier(v.to_owned())))
+                Err(E::custom(crate::error::ManifestError::InvalidSpecifier(
+                    v.to_owned(),
+                )))
             }
         }
     }
@@ -227,7 +236,10 @@ mod tests {
     fn parses_full_coordinate() {
         let s = spec("org.gradle.test.classifiers:service:1.0:jdk15@jar");
         assert!(s.is_valid());
-        assert_eq!(s.serialize(), "org.gradle.test.classifiers:service:1.0:jdk15@jar");
+        assert_eq!(
+            s.serialize(),
+            "org.gradle.test.classifiers:service:1.0:jdk15@jar"
+        );
         assert_eq!(s.group_id(), "org.gradle.test.classifiers");
         assert_eq!(s.artifact_id(), "service");
         assert_eq!(s.version(), "1.0");
@@ -251,7 +263,10 @@ mod tests {
         let s = spec("it.unimi.dsi:fastutil:8.5.3");
         assert_eq!(s.file_name().as_deref(), Some("fastutil-8.5.3.jar"));
         let n = spec("org.lwjgl:lwjgl:3.3.3:natives-linux");
-        assert_eq!(n.file_name().as_deref(), Some("lwjgl-3.3.3-natives-linux.jar"));
+        assert_eq!(
+            n.file_name().as_deref(),
+            Some("lwjgl-3.3.3-natives-linux.jar")
+        );
     }
 
     #[test]
@@ -264,13 +279,13 @@ mod tests {
     #[test]
     fn invalid_specifiers_keep_raw_value() {
         for (bad, raw) in [
-            ("foo", "foo"),                      // not a coordinate
-            ("a:b:c:", "a:b:c:"),                // empty classifier
-            ("a:b:c@", "a:b:c@"),                // hungarian empty extension kills whole match
-            ("a:b:c:styles@", "a:b:c:styles@"),  // empty extension
-            (":b:c:d", ":b:c:d"),                // empty group
-            ("a:b:c:d@", "a:b:c:d@"),            // deep empty ext
-            ("a:b:c:d@x:y", "a:b:c:d@x:y"),      // ':' in extension
+            ("foo", "foo"),                     // not a coordinate
+            ("a:b:c:", "a:b:c:"),               // empty classifier
+            ("a:b:c@", "a:b:c@"),               // hungarian empty extension kills whole match
+            ("a:b:c:styles@", "a:b:c:styles@"), // empty extension
+            (":b:c:d", ":b:c:d"),               // empty group
+            ("a:b:c:d@", "a:b:c:d@"),           // deep empty ext
+            ("a:b:c:d@x:y", "a:b:c:d@x:y"),     // ':' in extension
         ] {
             let s = spec(bad);
             assert!(!s.is_valid(), "{bad:?} should be invalid");
@@ -301,6 +316,9 @@ mod tests {
     #[test]
     fn serde_rejects_broken_coordinate() {
         let err = serde_json::from_str::<GradleSpecifier>("\"not:::valid\"").unwrap_err();
-        assert!(err.to_string().contains("invalid gradle specifier"), "{err}");
+        assert!(
+            err.to_string().contains("invalid gradle specifier"),
+            "{err}"
+        );
     }
 }
