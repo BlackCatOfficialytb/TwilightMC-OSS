@@ -1,0 +1,13 @@
+[package]
+name = "twilight-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "System JVM discovery, fast version detection and manifest compatibility matching for TwilightMC"
+
+[dependencies]
+tokio = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+
+twilight-manifest = { path = "../twilight-manifest" }

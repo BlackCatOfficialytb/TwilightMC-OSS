@@ -89,6 +89,12 @@ mod tests {
         BTreeSet::new()
     }
 
+    /// Displays a path with `/` separators on every host, so assertions are
+    /// platform-portable (Windows hosts join with `\`).
+    fn slash(path: &Path) -> String {
+        path.display().to_string().replace('\\', "/")
+    }
+
     const GUAVA: &str = r#"{ "name": "com.google.guava:guava:33.0.0-jre", "url": "https://e/" }"#;
     const LWJGL: &str = r#"{ "name": "org.lwjgl:lwjgl:3.3.3", "natives": { "linux": "natives-linux" },
         "downloads": { "classifiers": { "natives-linux": { "url": "https://e/l", "sha1": "a", "size": 1 } } } }"#;
@@ -100,29 +106,29 @@ mod tests {
         let root = Path::new("/store");
         let (classpath, natives) = active_paths(&libs, &ctx(), root, &no_features());
         assert_eq!(
-            classpath,
-            vec![PathBuf::from(
-                "/store/com/google/guava/guava/33.0.0-jre/guava-33.0.0-jre.jar"
-            )]
+            classpath.iter().map(|p| slash(p)).collect::<Vec<_>>(),
+            vec!["/store/com/google/guava/guava/33.0.0-jre/guava-33.0.0-jre.jar"]
         );
         assert_eq!(
-            natives,
-            vec![PathBuf::from(
-                "/store/org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-linux.jar"
-            )]
+            natives.iter().map(|p| slash(p)).collect::<Vec<_>>(),
+            vec!["/store/org/lwjgl/lwjgl/3.3.3/lwjgl-3.3.3-natives-linux.jar"]
         );
 
         let cp = classpath_string(&classpath, Some(Path::new("/store/game.jar")));
-        assert_eq!(
-            cp,
-            "/store/com/google/guava/guava/33.0.0-jre/guava-33.0.0-jre.jar:/store/game.jar"
+        let expected = format!(
+            "/store/com/google/guava/guava/33.0.0-jre/guava-33.0.0-jre.jar{}/store/game.jar",
+            separator()
         );
+        assert_eq!(cp.replace('\\', "/"), expected);
     }
 
     #[test]
     fn classpath_deduplicates_and_skips_empty() {
         let paths = vec![PathBuf::from("/a"), PathBuf::from("/a"), PathBuf::new()];
-        assert_eq!(classpath_string(&paths, Some(Path::new("/j"))), "/a:/j");
+        assert_eq!(
+            classpath_string(&paths, Some(Path::new("/j"))),
+            format!("/a{}/j", separator())
+        );
         assert_eq!(classpath_string(&[], None), "");
     }
 

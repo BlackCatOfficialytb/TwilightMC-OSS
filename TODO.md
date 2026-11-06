@@ -11,3 +11,7 @@
 - [x] `twilight-launch`: JVM arguments template resolver (`${auth_player_name}`, etc.)
 - [x] `twilight-launch`: Classpath builder and asynchronous process spawner
 - [x] `twilight-auth`: Offline profile generator and Microsoft token structures — extended for Freesm-style offline bypass and authlib-injector custom Yggdrasil servers (`upstream/freesm/launcher/minecraft/auth/`)
+- [x] `VERSION.md`: SemVer 2.0.0 spec, astronomical release channels (Stable / Star / Bolide / Snapshot) and deprecation policy
+- [x] `twilight-runtime`: system JVM discovery (PATH + OS roots + `JAVA_HOME`/registry fallback), fast version detection (`release` file primary, `-version` probe fallback) and `select_best_java` compatibility matching
+- [x] `twilight-launch::natives`: 7-Zip CLI extraction (`7z x -y -o<dir> <jar> -xr!META-INF*` + excludes) with `Missing7z` error path and natives-dir cleaning
+- [x] `twilight-cli`: clap 4 CLI (`launch` / `java` / `versions`), isolated `ArtifactStaging` under `%TEMP%\twilightmc_staging`, end-to-end launch pipeline and `--dry-run`

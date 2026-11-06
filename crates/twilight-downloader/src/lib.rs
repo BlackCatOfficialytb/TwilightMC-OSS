@@ -15,6 +15,6 @@ pub use download::{DownloadRequest, DownloadedFile, ParallelDownloader, sha1_of_
 pub use error::DownloadError;
 pub use meta::{FREESM_META_BASE, MOJANG_MANIFEST_V2, MOJANG_RESOURCES_BASE, PRISM_META_BASE};
 pub use meta::{
-    VanillaMetaVersion, VanillaVersionList, fetch_json_failover, list_vanilla_versions,
+    SourceKind, VanillaMetaVersion, VanillaVersionList, fetch_json_failover, list_vanilla_versions,
     resolve_vanilla_version, vanilla_sources,
 };

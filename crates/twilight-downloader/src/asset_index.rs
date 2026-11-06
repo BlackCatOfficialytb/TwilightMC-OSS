@@ -74,7 +74,7 @@ mod tests {
         let index = sample_index();
         let path = index.object_path("aabbccddeeff00112233445566778899aabbccdd");
         assert_eq!(
-            path.display().to_string(),
+            path.display().to_string().replace('\\', "/"),
             "objects/aa/aabbccddeeff00112233445566778899aabbccdd"
         );
     }

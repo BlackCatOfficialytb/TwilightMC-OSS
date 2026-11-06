@@ -1,0 +1,23 @@
+[package]
+name = "twilight-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "End-to-end launcher CLI for TwilightMC"
+
+[dependencies]
+clap = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+reqwest = { workspace = true }
+
+twilight-auth = { path = "../twilight-auth" }
+twilight-downloader = { path = "../twilight-downloader" }
+twilight-horizon = { path = "../twilight-horizon" }
+twilight-launch = { path = "../twilight-launch" }
+twilight-manifest = { path = "../twilight-manifest" }
+twilight-runtime = { path = "../twilight-runtime" }
+
+[[bin]]
+name = "twilight"
+path = "src/main.rs"
