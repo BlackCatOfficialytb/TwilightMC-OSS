@@ -1,8 +1,8 @@
 name: release
 
-# Creating a release on GitHub (stable / star / bolide tags per VERSION.md)
-# triggers this workflow, which runs the quality gates and then generates
-# the platform archives and attaches them to the release.
+# Creating a release on GitHub (stable-* / beta-* / alpha-* style tags per
+# VERSION.md) triggers this workflow, which runs the quality gates and then
+# generates the platform archives and attaches them to the release.
 #
 # The rolling `snapshot` pre-release is excluded: snapshot.yml builds and
 # attaches its archives itself, so this hook would only duplicate it.
@@ -43,39 +43,39 @@ jobs:
           - id: windows-msvc
             runner: windows-latest
             target: x86_64-pc-windows-msvc
-            suffix: x86_64-pc-windows-msvc
+            suffix: windows-msvc-x86_64
             bin: twilight.exe
           - id: windows-mingw
             runner: windows-latest
             target: x86_64-pc-windows-gnu
-            suffix: x86_64-pc-windows-gnu
+            suffix: windows-mingw-w64
             bin: twilight.exe
           - id: windows-clang
             runner: windows-latest
             target: x86_64-pc-windows-msvc
-            suffix: x86_64-pc-windows-clang
+            suffix: windows-clang-x86_64
             bin: twilight.exe
             cc: clang
           - id: linux-gcc
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            suffix: x86_64-unknown-linux-gnu-gcc
+            suffix: linux-gcc-x86_64
             bin: twilight
           - id: linux-clang
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            suffix: x86_64-unknown-linux-gnu-clang
+            suffix: linux-clang-x86_64
             bin: twilight
             cc: clang
           - id: macos
             runner: macos-latest
             target: aarch64-apple-darwin
-            suffix: aarch64-apple-darwin
+            suffix: macos-aarch64
             bin: twilight
           - id: freebsd
             runner: ubuntu-latest
             target: x86_64-unknown-freebsd
-            suffix: x86_64-unknown-freebsd
+            suffix: freebsd-x86_64
             bin: twilight
             vm: freebsd
     steps:
@@ -92,6 +92,14 @@ jobs:
       - name: Cache cargo
         if: matrix.vm != 'freebsd'
         uses: Swatinem/rust-cache@v2
+
+      # one identity string shared by the artifact upload and the archive name
+      - name: Set artifact name
+        shell: bash
+        run: |
+          NAME="twilight-${{ github.event.release.tag_name }}-${{ matrix.suffix }}"
+          echo "NAME=$NAME" >> "$GITHUB_ENV"
+          echo "ARTIFACT_NAME=$NAME" >> "$GITHUB_ENV"
 
       - name: MinGW linker on PATH
         if: matrix.target == 'x86_64-pc-windows-gnu'
@@ -127,23 +135,21 @@ jobs:
         if: matrix.vm != 'freebsd'
         run: cargo build --locked --release
 
-      # Raw distribution staging: the folders are uploaded as-is so the
-      # Actions artifact stays single-zipped by upload-artifact; the final
-      # standalone archives are built only for the GitHub Release.
+      # Raw distribution staging: the four files upload flat (no folder inside
+      # the artifact); the attach job archives each target folder exactly once.
       - name: Stage distribution
         if: matrix.vm != 'freebsd'
         shell: bash
         run: |
           set -e
-          NAME="twilight-${{ github.event.release.tag_name }}-${{ matrix.suffix }}"
-          mkdir -p "dist/$NAME"
-          cp target/release/${{ matrix.bin }} README.md LICENSE VERSION.md "dist/$NAME/"
+          mkdir -p "dist/${{ env.NAME }}"
+          cp target/release/${{ matrix.bin }} README.md LICENSE VERSION.md "dist/${{ env.NAME }}/"
 
       - name: Upload staged distribution
         uses: actions/upload-artifact@v7
         with:
-          name: dist-${{ matrix.id }}
-          path: dist/
+          name: ${{ env.ARTIFACT_NAME }}
+          path: dist/${{ env.NAME }}/*
           if-no-files-found: error
 
   attach:
@@ -153,28 +159,29 @@ jobs:
     permissions:
       contents: write
     steps:
+      # each artifact lands in dist/<artifact-name>/ — no merge collisions
       - name: Download staged distributions
         uses: actions/download-artifact@v8
         with:
-          merge-multiple: true
           path: dist
 
       - name: Package single release archives
         run: |
           set -e
           mkdir -p release
-          cd dist
-          for dir in twilight-*/; do
+          for dir in dist/*/; do
             name="$(basename "$dir")"
             case "$name" in
               *windows*)
-                zip -qr "../release/$name.zip" "$name"
+                (cd "$dir" && zip -qr "${GITHUB_WORKSPACE}/release/$name.zip" .)
                 ;;
               *)
-                tar -czf "../release/$name.tar.gz" "$name"
+                (cd "$dir" && tar -czf "${GITHUB_WORKSPACE}/release/$name.tar.gz" .)
                 ;;
             esac
           done
+          cd release
+          sha256sum * > checksums.sha256
 
       - name: Attach generated archives to the release
         env:

@@ -173,9 +173,10 @@ Pushes to `main` (or manual `workflow_dispatch` runs) start the pipeline in
    Clang-compiled), Linux (GCC, Clang with `CC=clang`/`CXX=clang++`), macOS on
    Apple Silicon (`aarch64-apple-darwin`) and FreeBSD natively inside a
    [`vmactions/freebsd-vm`](https://github.com/vmactions/freebsd-vm) runner.
-   Each result is packaged as
-   `twilight-vX.Y.Z-ddmmyyyy-<commit>-<target>.zip/.tar.gz` together with
-   `README.md`, `LICENSE` and `VERSION.md`.
+    Each result is packaged as
+   `twilight-snapshot-vX.Y.Z-ddmmyyyy-<commit>-<platform-toolchain>.zip/.tar.gz`
+   together with `README.md`, `LICENSE`, `VERSION.md`, and a
+   `checksums.sha256` of all archives.
 3. **Release** — push-hosted only: the rolling `snapshot` **pre-release** is
    refreshed on GitHub Releases, titled
    `TwilightMC Snapshot vX.Y.Z-ddmmyyyy-<commit>`, each build superseding the

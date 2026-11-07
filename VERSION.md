@@ -47,6 +47,18 @@ implicit `.0`.
 `X.Y.Z` on a Star/Bolide/Snapshot build is the milestone **target** it is
 believed to ship as, and must be `>=` the highest published version.
 
+### Rolling snapshot tag
+
+Snapshot builds always publish to the single rolling git tag `snapshot` —
+never to dated or per-commit tags — and every push to `main` replaces the
+previous snapshot release (`snapshot` tag deleted and re-created against the
+built commit, with `--clobber` semantics for the assets). The rolling tag
+carries no version information itself: the **release title** spells the full
+identity (`TwilightMC Snapshot vX.Y.Z-ddmmyyyy-<commit>`) and every artifact
+or archive is named with the same full identity
+(`twilight-snapshot-vX.Y.Z-ddmmyyyy-<commit>-<platform-toolchain>`), plus a
+`checksums.sha256` alongside them.
+
 ### Ascending order for the same milestone
 
 ```
