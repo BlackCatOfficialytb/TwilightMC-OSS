@@ -229,10 +229,20 @@ mod tests {
         tokio::fs::write(good.join("bin/java"), "#!/bin/sh\necho ok\n")
             .await
             .unwrap();
+        // a scanned home only survives with a version: `release` is the
+        // primary source and keeps the fixture free of executable bits
+        tokio::fs::write(good.join("release"), "JAVA_VERSION=\"21.0.5\"\n")
+            .await
+            .unwrap();
 
         let found = scan_roots(vec![broken, good.clone()]).await;
         assert_eq!(found.len(), 1, "only the home with bin/java is probed");
-        assert_eq!(found[0].jvm_home, good, "the valid home survives the scan");
+        let expected = fs_canonicalize(&good).await.unwrap();
+        assert_eq!(
+            found[0].jvm_home, expected,
+            "the valid home survives the scan"
+        );
+        assert_eq!(found[0].version.major, 21, "release marker drives the scan");
         let _ = tokio::fs::remove_dir_all(&temp).await;
     }
 }
