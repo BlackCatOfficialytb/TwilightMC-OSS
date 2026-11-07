@@ -1,0 +1,18 @@
+[package]
+name = "twilight-modloader"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Fabric (meta.fabricmc.net v2) and Quilt (meta.quiltmc.org v3) loader metadata resolution into composite Knot launch data for TwilightMC"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+
+twilight-downloader = { path = "../twilight-downloader" }
+# part of the modding spec surface: the composite component rides on the
+# manifest crate's primitives for future launchermeta/adapters integrations
+twilight-manifest = { path = "../twilight-manifest" }

@@ -16,7 +16,12 @@ twilight-downloader = { path = "../twilight-downloader" }
 twilight-horizon = { path = "../twilight-horizon" }
 twilight-launch = { path = "../twilight-launch" }
 twilight-manifest = { path = "../twilight-manifest" }
+twilight-modloader = { path = "../twilight-modloader" }
+twilight-modrinth = { path = "../twilight-modrinth" }
 twilight-runtime = { path = "../twilight-runtime" }
+
+[dev-dependencies]
+serde_json = { workspace = true }
 
 [[bin]]
 name = "twilight"

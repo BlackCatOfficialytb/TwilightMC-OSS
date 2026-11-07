@@ -20,6 +20,7 @@ use twilight_launch::{
     game_arguments, inject_account_vars, jvm_arguments, separator,
 };
 use twilight_manifest::{RuntimeContext, VersionFile};
+use twilight_modloader::{LoaderProfile, ModLoader, resolve_loader_profile};
 use twilight_runtime::{JavaVersion, discover_java, probe_version, select_best_java};
 
 use crate::cli::{LaunchArgs, LaunchConfig};
@@ -143,20 +144,45 @@ async fn resolve_java(
     })
 }
 
+/// Validates the `--loader` token case-insensitively (`None` = vanilla only).
+fn parse_loader_token(loader: Option<&str>) -> Result<Option<ModLoader>, CliError> {
+    let Some(token) = loader else {
+        return Ok(None);
+    };
+    ModLoader::from_token(token)
+        .map(Some)
+        .ok_or_else(|| CliError::UnknownLoader {
+            given: token.to_owned(),
+        })
+}
+
 /// Network-free core: turns a resolved manifest + paths + account into the
 /// final [`LaunchPlan`]. Modern manifests own `-cp ${classpath}` (the token is
 /// resolved through vars, and the plan adds no second classpath switch);
-/// legacy manifests get the classpath from the plan itself.
+/// legacy manifests get the classpath from the plan itself. A resolved
+/// [`LoaderProfile`] overrides the main class with Knot and prepends the
+/// loader libraries to the classpath.
 pub fn assemble_command(
     java: &JavaSelection,
     ctx: &RuntimeContext,
     version: &VersionFile,
     paths: &LaunchPaths,
     account: &Account,
+    loader: Option<&LoaderProfile>,
 ) -> Result<LaunchPlan, CliError> {
     let none = BTreeSet::<String>::new();
-    let (classpath_entries, _native_jars) =
+    let (vanilla_entries, _native_jars) =
         active_paths(&version.libraries, ctx, &paths.library_root, &none);
+    // loader jars come first so the Knot launcher wins class resolution
+    let mut classpath_entries: Vec<PathBuf> = match loader {
+        Some(profile) => profile
+            .libraries
+            .iter()
+            .map(|lib| paths.library_root.join(&lib.storage))
+            .collect(),
+        None => Vec::new(),
+    };
+    classpath_entries.extend(vanilla_entries);
     let full_classpath = classpath_string(&classpath_entries, Some(&paths.main_jar));
 
     let profile = ProfileVars {
@@ -187,13 +213,21 @@ pub fn assemble_command(
         .any(|arg| arg == "-cp" || arg == "-classpath");
     let game_args = game_arguments(version, ctx, &none, &none, &vars, &GameOptions::default());
 
-    let main_class = version
-        .main_class
-        .as_deref()
-        .filter(|class| !class.trim().is_empty())
-        .ok_or_else(|| CliError::NoMainClass {
-            id: version.id.clone(),
-        })?;
+    // the Knot main class takes over whenever a loader profile was resolved;
+    // without one the manifest's own main class is mandatory
+    let main_class: String = match loader {
+        Some(profile) => profile.main_class.clone(),
+        None => {
+            let class = version
+                .main_class
+                .as_deref()
+                .filter(|class| !class.trim().is_empty())
+                .ok_or_else(|| CliError::NoMainClass {
+                    id: version.id.clone(),
+                })?;
+            class.to_owned()
+        }
+    };
 
     Ok(LaunchPlan {
         java_executable: java.executable.clone(),
@@ -203,7 +237,7 @@ pub fn assemble_command(
         } else {
             full_classpath
         },
-        main_class: main_class.to_owned(),
+        main_class,
         game_args,
         work_dir: paths.work_dir.clone(),
         env: HashMap::new(),
@@ -217,6 +251,7 @@ pub fn dry_run_report(
     ctx: &RuntimeContext,
     account: &Account,
     java: &JavaSelection,
+    loader: Option<&LoaderProfile>,
 ) -> String {
     let command = twilight_launch::build_command(plan);
     let std_command = command.as_std();
@@ -260,6 +295,15 @@ pub fn dry_run_report(
         "account: {} (offline uuid {})",
         account.username, account.uuid
     ));
+    if let Some(profile) = loader {
+        lines.push(format!(
+            "loader: {} {} ({} with {} loader libraries)",
+            profile.loader,
+            profile.loader_version,
+            profile.main_class,
+            profile.libraries.len()
+        ));
+    }
     if plan.classpath.is_empty() {
         lines.push("classpath: embedded in the manifest jvm arguments".to_owned());
     } else {
@@ -305,9 +349,36 @@ pub async fn run_launch(args: LaunchArgs) -> Result<i32, CliError> {
     let paths = resolve_paths(&cfg, &version);
     let java = resolve_java(cfg.java.clone(), &version.compatible_java_majors).await?;
 
+    // ---- loader overlay: resolve Knot launch data for `--loader`
+    let loader_token = parse_loader_token(cfg.loader.as_deref())?;
+    let loader_profile: Option<LoaderProfile> = match loader_token {
+        Some(loader) => Some(
+            resolve_loader_profile(&client, loader, &meta.id, cfg.loader_version.as_deref())
+                .await?,
+        ),
+        None => None,
+    };
+
     if cfg.dry_run {
-        let plan = assemble_command(&java, &ctx, &version, &paths, &account)?;
-        println!("{}", dry_run_report(&plan, &paths, &ctx, &account, &java));
+        let plan = assemble_command(
+            &java,
+            &ctx,
+            &version,
+            &paths,
+            &account,
+            loader_profile.as_ref(),
+        )?;
+        println!(
+            "{}",
+            dry_run_report(
+                &plan,
+                &paths,
+                &ctx,
+                &account,
+                &java,
+                loader_profile.as_ref()
+            )
+        );
         return Ok(0);
     }
 
@@ -340,6 +411,12 @@ pub async fn run_launch(args: LaunchArgs) -> Result<i32, CliError> {
         }
     }
     downloader.download_all(&requests).await?;
+    // loader libraries stage into the same shared store and lead the classpath
+    if let Some(profile) = &loader_profile {
+        downloader
+            .download_all(&profile.download_requests(&paths.library_root))
+            .await?;
+    }
 
     // ---- assets: horizon store; virtual indexes additionally export the
     //      classic `assets/virtual/<id>` layout the old game versions want
@@ -379,7 +456,14 @@ pub async fn run_launch(args: LaunchArgs) -> Result<i32, CliError> {
     twilight_launch::extract_natives(&paths.natives_dir, &native_jars, &exclude_list).await?;
 
     // ---- assemble and spawn, streaming game output to the console
-    let plan = assemble_command(&java, &ctx, &version, &paths, &account)?;
+    let plan = assemble_command(
+        &java,
+        &ctx,
+        &version,
+        &paths,
+        &account,
+        loader_profile.as_ref(),
+    )?;
     let (tx, mut rx) = mpsc::channel::<LaunchEvent>(512);
     let printer = tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
@@ -447,6 +531,8 @@ mod tests {
             shared_dir: PathBuf::from("S"),
             temp_dir: None,
             java: None,
+            loader: None,
+            loader_version: None,
             dry_run: true,
         }
     }
@@ -468,7 +554,7 @@ mod tests {
     fn assemble_for(json: &str) -> (LaunchPlan, LaunchPaths) {
         let version = twilight_manifest::parse_version_file(json).unwrap();
         let paths = resolve_paths(&cfg(), &version);
-        let plan = assemble_command(&java(), &ctx(), &version, &paths, &account()).unwrap();
+        let plan = assemble_command(&java(), &ctx(), &version, &paths, &account(), None).unwrap();
         (plan, paths)
     }
 
@@ -555,7 +641,8 @@ mod tests {
     fn manifest_without_main_class_is_rejected() {
         let version = twilight_manifest::parse_version_file(r#"{ "id": "x" }"#).unwrap();
         let paths = resolve_paths(&cfg(), &version);
-        let err = assemble_command(&java(), &ctx(), &version, &paths, &account()).unwrap_err();
+        let err =
+            assemble_command(&java(), &ctx(), &version, &paths, &account(), None).unwrap_err();
         assert!(
             matches!(err, CliError::NoMainClass { ref id } if id == "x"),
             "{err:?}"
@@ -574,7 +661,7 @@ mod tests {
     #[test]
     fn dry_run_report_lists_context_and_command() {
         let (plan, paths) = assemble_for(MODERN);
-        let report = dry_run_report(&plan, &paths, &ctx(), &account(), &java());
+        let report = dry_run_report(&plan, &paths, &ctx(), &account(), &java(), None);
         assert!(report.starts_with("twilight --dry-run"), "{report}");
         assert!(
             report.contains("offline uuid 5627dd98-e6be-3c21-b8a8-e92344183641"),
@@ -586,6 +673,101 @@ mod tests {
             "{report}"
         );
         assert!(report.contains("linux-x86_64"), "{report}");
+    }
+
+    /// Minimal fabric v2 profile exercising the Knot overlay in the plan.
+    const FABRIC_PROFILE: &str = r#"{
+        "loader": { "version": "0.16.9", "stable": true },
+        "intermediary": { "maven": "net.fabricmc:intermediary:1.21.4" },
+        "launcherMeta": {
+            "libraries": {
+                "common": [
+                    { "name": "net.fabricmc:fabric-loader:0.16.9" }
+                ],
+                "client": [],
+                "server": []
+            }
+        }
+    }"#;
+
+    fn fabric_profile() -> LoaderProfile {
+        let raw: serde_json::Value = serde_json::from_str(FABRIC_PROFILE).unwrap();
+        twilight_modloader::parse_loader_meta(ModLoader::Fabric, &raw).unwrap()
+    }
+
+    #[test]
+    fn loader_profile_overrides_main_class_and_prepends_libraries() {
+        let version = twilight_manifest::parse_version_file(MODERN).unwrap();
+        let paths = resolve_paths(&cfg(), &version);
+        let profile = fabric_profile();
+        let plan = assemble_command(
+            &java(),
+            &ctx(),
+            &version,
+            &paths,
+            &account(),
+            Some(&profile),
+        )
+        .unwrap();
+
+        assert_eq!(
+            plan.main_class, "net.fabricmc.loader.impl.launch.knot.KnotClient",
+            "Knot takes over the main class"
+        );
+        // mapping jar leads, main jar stays last
+        let cp_pos = plan
+            .jvm_args
+            .iter()
+            .position(|arg| arg == "-cp")
+            .expect("modern manifest owns the classpath switch");
+        let normalized = plan.jvm_args[cp_pos + 1].replace('\\', "/");
+        let entries: Vec<&str> = normalized.split(separator()).collect();
+        assert_eq!(
+            entries[0], "S/libraries/net/fabricmc/intermediary/1.21.4/intermediary-1.21.4.jar",
+            "the mapping jar leads the classpath: {normalized}"
+        );
+        assert_eq!(
+            entries.last().copied(),
+            Some("S/instances/26.3/minecraft/versions/26.3/26.3.jar"),
+            "the client jar stays last: {normalized}"
+        );
+    }
+
+    #[test]
+    fn dry_run_report_shows_the_loader_line() {
+        let (plan, paths) = assemble_for(MODERN);
+        let report = dry_run_report(
+            &plan,
+            &paths,
+            &ctx(),
+            &account(),
+            &java(),
+            Some(&fabric_profile()),
+        );
+        assert!(
+            report.contains(
+                "loader: fabric 0.16.9 (net.fabricmc.loader.impl.launch.knot.KnotClient with 2 loader libraries)"
+            ),
+            "{report}"
+        );
+    }
+
+    #[test]
+    fn parse_loader_token_is_case_insensitive_and_loud() {
+        assert_eq!(
+            parse_loader_token(Some("Quilt")).unwrap(),
+            Some(ModLoader::Quilt)
+        );
+        assert_eq!(
+            parse_loader_token(Some(" FABRIC ")).unwrap(),
+            Some(ModLoader::Fabric)
+        );
+        assert_eq!(parse_loader_token(None).unwrap(), None);
+        let err = parse_loader_token(Some("forge")).unwrap_err();
+        assert!(
+            matches!(err, CliError::UnknownLoader { ref given } if given == "forge"),
+            "{err:?}"
+        );
     }
 
     #[test]

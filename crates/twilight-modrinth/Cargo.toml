@@ -1,0 +1,17 @@
+[package]
+name = "twilight-modrinth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Modrinth .mrpack engine for TwilightMC: index schema, client-env staging, overrides extraction and a pure-Rust ZIP/DEFLATE reader"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+# per the modding spec the reqwest client rides along for follow-up v2 API
+# surface (the engine itself stages through twilight-downloader)
+reqwest = { workspace = true }
+
+twilight-downloader = { path = "../twilight-downloader" }

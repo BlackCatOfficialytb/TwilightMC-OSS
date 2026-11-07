@@ -15,3 +15,6 @@
 - [x] `twilight-runtime`: system JVM discovery (PATH + OS roots + `JAVA_HOME`/registry fallback), fast version detection (`release` file primary, `-version` probe fallback) and `select_best_java` compatibility matching
 - [x] `twilight-launch::natives`: 7-Zip CLI extraction (`7z x -y -o<dir> <jar> -xr!META-INF*` + excludes) with `Missing7z` error path and natives-dir cleaning
 - [x] `twilight-cli`: clap 4 CLI (`launch` / `java` / `versions`), isolated `ArtifactStaging` under `%TEMP%\twilightmc_staging`, end-to-end launch pipeline and `--dry-run`
+- [x] `twilight-modloader`: Quilt (meta v3) and Fabric (meta v2) profile resolution into composite Knot launch data (`--loader` / `--loader-version` CLI overlay, mapping jar + loader library staging, case-insensitive tokens)
+- [x] `twilight-modrinth`: `.mrpack` engine — strict `modrinth.index.json` (format 1) parsing, client-env filtering, zip-slip-safe overrides extraction via a pure-Rust ZIP/DEFLATE (CRC-32 verified) reader, loopback-tested installer
+- [x] `twilight-cli`: `modpack install <PATH_OR_URL>` subcommand with dry-run plan printing, loader detection from index dependencies (ambiguous packs rejected) and `<shared>/instances/<slug>` instance layout, verified by loopback staging tests
