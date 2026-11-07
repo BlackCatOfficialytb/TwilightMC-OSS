@@ -118,8 +118,8 @@ jobs:
             set -e
             NAME="twilight-${{ github.event.release.tag_name }}-${{ matrix.suffix }}"
             cargo build --locked --release
-            mkdir -p "dist/twilight-$NAME"
-            cp target/release/${{ matrix.bin }} README.md LICENSE VERSION.md "dist/twilight-$NAME/"
+            mkdir -p "dist/$NAME"
+            cp target/release/${{ matrix.bin }} README.md LICENSE VERSION.md "dist/$NAME/"
             # keep the copy-back small: the binary already lives in dist/
             rm -rf target
 
@@ -136,8 +136,8 @@ jobs:
         run: |
           set -e
           NAME="twilight-${{ github.event.release.tag_name }}-${{ matrix.suffix }}"
-          mkdir -p "dist/twilight-$NAME"
-          cp target/release/${{ matrix.bin }} README.md LICENSE VERSION.md "dist/twilight-$NAME/"
+          mkdir -p "dist/$NAME"
+          cp target/release/${{ matrix.bin }} README.md LICENSE VERSION.md "dist/$NAME/"
 
       - name: Upload staged distribution
         uses: actions/upload-artifact@v7
