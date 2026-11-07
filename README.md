@@ -169,9 +169,9 @@ Pushes to `main` (or manual `workflow_dispatch` runs) start the pipeline in
 1. **Verify** — `cargo fmt --all -- --check`, `cargo clippy --workspace
    --all-targets -- -D warnings`, `cargo test --workspace`, then compute the
    snapshot identity (workspace version + UTC date + short commit).
-2. **Build** — five-platform matrix: Windows (MSVC), Linux (GCC), Linux
-   (Clang, `CC=clang`/`CXX=clang++`), macOS on Apple Silicon
-   (`aarch64-apple-darwin`) and FreeBSD natively inside a
+2. **Build** — seven-target matrix: Windows (MSVC, MinGW-GNU, and
+   Clang-compiled), Linux (GCC, Clang with `CC=clang`/`CXX=clang++`), macOS on
+   Apple Silicon (`aarch64-apple-darwin`) and FreeBSD natively inside a
    [`vmactions/freebsd-vm`](https://github.com/vmactions/freebsd-vm) runner.
    Each result is packaged as
    `twilight-vX.Y.Z-ddmmyyyy-<commit>-<target>.zip/.tar.gz` together with

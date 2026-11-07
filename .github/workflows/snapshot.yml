@@ -46,6 +46,17 @@ jobs:
             target: x86_64-pc-windows-msvc
             suffix: x86_64-pc-windows-msvc
             bin: twilight.exe
+          - id: windows-mingw
+            runner: windows-latest
+            target: x86_64-pc-windows-gnu
+            suffix: x86_64-pc-windows-gnu
+            bin: twilight.exe
+          - id: windows-clang
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            suffix: x86_64-pc-windows-clang
+            bin: twilight.exe
+            cc: clang
           - id: linux-gcc
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
@@ -81,19 +92,23 @@ jobs:
         if: matrix.vm != 'freebsd'
         uses: Swatinem/rust-cache@v2
 
+      - name: MinGW linker on PATH
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        shell: bash
+        run: echo "C:\\msys64\\mingw64\\bin" >> "$GITHUB_PATH"
+
       - name: Build with Clang/LLVM
         if: matrix.cc == 'clang'
         run: |
           echo "CC=clang" >> "$GITHUB_ENV"
           echo "CXX=clang++" >> "$GITHUB_ENV"
 
-      # The FreeBSD build runs natively inside the VM; dist/ is rsynced back
-      # when the VM step finishes, so the host-side upload below sees it.
-      - name: Build and package in FreeBSD VM
+      # The FreeBSD build runs natively inside the VM; only the raw staging
+      # folder is copied back — its single archive is built by the release job.
+      - name: Build and stage in FreeBSD VM
         if: matrix.vm == 'freebsd'
         uses: vmactions/freebsd-vm@v1
         with:
-          usesh: true
           sync: rsync
           copyback: true
           prepare: |
@@ -104,7 +119,6 @@ jobs:
             cargo build --locked --release
             mkdir -p "dist/twilight-$NAME"
             cp target/release/${{ matrix.bin }} README.md LICENSE VERSION.md "dist/twilight-$NAME/"
-            tar -czf "dist/$NAME.tar.gz" -C dist "twilight-$NAME"
             # keep the copy-back small: the binary already lives in dist/
             rm -rf target
 
@@ -112,7 +126,10 @@ jobs:
         if: matrix.vm != 'freebsd'
         run: cargo build --locked --release
 
-      - name: Package
+      # Raw distribution staging: the folders are uploaded as-is so the
+      # Actions artifact stays single-zipped by upload-artifact; the final
+      # standalone archives are built only for the GitHub Release.
+      - name: Stage distribution
         if: matrix.vm != 'freebsd'
         shell: bash
         run: |
@@ -120,22 +137,14 @@ jobs:
           NAME="twilight-v${{ needs.verify.outputs.version }}-${{ needs.verify.outputs.date }}-${{ needs.verify.outputs.commit }}-${{ matrix.suffix }}"
           mkdir -p "dist/twilight-$NAME"
           cp target/release/${{ matrix.bin }} README.md LICENSE VERSION.md "dist/twilight-$NAME/"
-          case "${{ matrix.suffix }}" in
-            *msvc*) tar -a -cf "dist/$NAME.zip" -C dist "twilight-$NAME" ;;
-            *)      tar -czf "dist/$NAME.tar.gz" -C dist "twilight-$NAME" ;;
-          esac
 
-      - name: Upload snapshot archive
+      - name: Upload staged distribution
         uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.id }}
-          path: |
-            dist/*.tar.gz
-            dist/*.zip
+          path: dist/
           if-no-files-found: error
 
-  # Only a push to main refreshes the rolling snapshot tag; a manual dispatch
-  # runs verify + build artifacts only and never touches a release.
   release:
     needs: [verify, build]
     if: github.event_name == 'push'
@@ -143,11 +152,28 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download archives
+      - name: Download staged distributions
         uses: actions/download-artifact@v8
         with:
           merge-multiple: true
           path: dist
+
+      - name: Package single release archives
+        run: |
+          set -e
+          mkdir -p release
+          cd dist
+          for dir in twilight-*/; do
+            name="$(basename "$dir")"
+            case "$name" in
+              *windows*)
+                zip -qr "../release/$name.zip" "$name"
+                ;;
+              *)
+                tar -czf "../release/$name.tar.gz" "$name"
+                ;;
+            esac
+          done
 
       - name: Update rolling snapshot pre-release
         env:
@@ -160,7 +186,7 @@ jobs:
           set -e
           # rolling tag: the previous snapshot is superseded, never patched (VERSION.md §2)
           gh release delete snapshot --yes 2>/dev/null || true
-          gh release create snapshot dist/* \
+          gh release create snapshot release/* \
             --target "$GITHUB_SHA" \
             --title "TwilightMC Snapshot v${VERSION}-${DATE}-${COMMIT}" \
             --prerelease \
