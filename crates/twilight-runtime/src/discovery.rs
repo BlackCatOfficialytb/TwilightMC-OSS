@@ -226,13 +226,13 @@ mod tests {
         tokio::fs::create_dir_all(&broken).await.unwrap();
         let good = temp.join("good-home");
         tokio::fs::create_dir_all(good.join("bin")).await.unwrap();
-        tokio::fs::write(good.join("bin/java"), format!("#!/bin/sh\necho ok\n"))
+        tokio::fs::write(good.join("bin/java"), "#!/bin/sh\necho ok\n")
             .await
             .unwrap();
 
-        let found = scan_roots(vec![broken, good]).await;
+        let found = scan_roots(vec![broken, good.clone()]).await;
         assert_eq!(found.len(), 1, "only the home with bin/java is probed");
-        assert_eq!(found[0].jvm_home, good);
+        assert_eq!(found[0].jvm_home, good, "the valid home survives the scan");
         let _ = tokio::fs::remove_dir_all(&temp).await;
     }
 }
