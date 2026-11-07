@@ -1,0 +1,156 @@
+name: release
+
+# Creating a release on GitHub (stable / star / bolide tags per VERSION.md)
+# triggers this workflow, which runs the quality gates and then generates
+# the platform archives and attaches them to the release.
+#
+# The rolling `snapshot` pre-release is excluded: snapshot.yml builds and
+# attaches its archives itself, so this hook would only duplicate it.
+
+on:
+  release:
+    types: [created]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.tag_name }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    if: github.event.release.tag_name != 'snapshot'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  build:
+    if: github.event.release.tag_name != 'snapshot'
+    needs: verify
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: windows-msvc
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            suffix: x86_64-pc-windows-msvc
+            bin: twilight.exe
+          - id: linux-gcc
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            suffix: x86_64-unknown-linux-gnu-gcc
+            bin: twilight
+          - id: linux-clang
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            suffix: x86_64-unknown-linux-gnu-clang
+            bin: twilight
+            cc: clang
+          - id: macos
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            suffix: aarch64-apple-darwin
+            bin: twilight
+          - id: freebsd
+            runner: ubuntu-latest
+            target: x86_64-unknown-freebsd
+            suffix: x86_64-unknown-freebsd
+            bin: twilight
+            vm: freebsd
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up Rust
+        if: matrix.vm != 'freebsd'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        if: matrix.vm != 'freebsd'
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build with Clang/LLVM
+        if: matrix.cc == 'clang'
+        run: |
+          echo "CC=clang" >> "$GITHUB_ENV"
+          echo "CXX=clang++" >> "$GITHUB_ENV"
+
+      # The FreeBSD build runs natively inside the VM; dist/ is rsynced back
+      # when the VM step finishes, so the host-side upload below sees it.
+      - name: Build and package in FreeBSD VM
+        if: matrix.vm == 'freebsd'
+        uses: vmactions/freebsd-vm@v1
+        with:
+          usesh: true
+          sync: rsync
+          copyback: true
+          prepare: |
+            pkg install -y rust
+          run: |
+            set -e
+            NAME="twilight-${{ github.event.release.tag_name }}-${{ matrix.suffix }}"
+            cargo build --locked --release
+            mkdir -p "dist/twilight-$NAME"
+            cp target/release/${{ matrix.bin }} README.md LICENSE VERSION.md "dist/twilight-$NAME/"
+            tar -czf "dist/$NAME.tar.gz" -C dist "twilight-$NAME"
+            # keep the copy-back small: the binary already lives in dist/
+            rm -rf target
+
+      - name: Build
+        if: matrix.vm != 'freebsd'
+        run: cargo build --locked --release
+
+      - name: Package
+        if: matrix.vm != 'freebsd'
+        shell: bash
+        run: |
+          set -e
+          NAME="twilight-${{ github.event.release.tag_name }}-${{ matrix.suffix }}"
+          mkdir -p "dist/twilight-$NAME"
+          cp target/release/${{ matrix.bin }} README.md LICENSE VERSION.md "dist/twilight-$NAME/"
+          case "${{ matrix.suffix }}" in
+            *msvc*) tar -a -cf "dist/$NAME.zip" -C dist "twilight-$NAME" ;;
+            *)      tar -czf "dist/$NAME.tar.gz" -C dist "twilight-$NAME" ;;
+          esac
+
+      - name: Upload archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.id }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+          if-no-files-found: error
+
+  attach:
+    if: github.event.release.tag_name != 'snapshot'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download archives
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist
+
+      - name: Attach generated archives to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist/* --clobber
