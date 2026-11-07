@@ -1,5 +1,11 @@
 # TwilightMC
 
+[![snapshot](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/actions/workflows/snapshot.yml/badge.svg)](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/actions/workflows/snapshot.yml)
+[![release](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/actions/workflows/release.yml/badge.svg)](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/actions/workflows/release.yml)
+[![Total Downloads](https://img.shields.io/github/downloads/BlackCatOfficialytb/TwilightMC-OSS/total?label=Downloads&logo=github&style=flat-square)](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/releases)
+[![Language: Rust 2024](https://img.shields.io/badge/Rust-2024%20Edition-black?logo=rust&logoColor=white&style=flat-square)](https://www.rust-lang.org/)
+[![Discord](https://img.shields.io/badge/Discord-Join%20Chat-5865F2?logo=discord&logoColor=white&style=flat-square)](https://dsc.gg/blackcatofficial)
+
 **TwilightMC** is a clean-room, Rust-bred Minecraft launcher: a Prism Launcher–style
 core rebuilt from scratch in pure Rust — Mojang manifest pipelines, metadata
 failover mirrors, parallel SHA-1-verified downloads, JVM discovery and offline
