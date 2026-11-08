@@ -28,6 +28,11 @@ jobs:
           ref: ${{ github.event.release.tag_name }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # this gate compiles the whole workspace, Tauri UI crate included
+      - name: Install Linux UI dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
@@ -125,7 +130,7 @@ jobs:
           run: |
             set -e
             NAME="twilight-${{ github.event.release.tag_name }}-${{ matrix.suffix }}"
-            cargo build --locked --release
+            cargo build --locked --release --bin twilight
             mkdir -p "dist/$NAME"
             cp target/release/${{ matrix.bin }} README.md LICENSE VERSION.md "dist/$NAME/"
             # keep the copy-back small: the binary already lives in dist/
@@ -133,7 +138,7 @@ jobs:
 
       - name: Build
         if: matrix.vm != 'freebsd'
-        run: cargo build --locked --release
+        run: cargo build --locked --release --bin twilight
 
       # Raw distribution staging: the four files upload flat (no folder inside
       # the artifact); the attach job archives each target folder exactly once.

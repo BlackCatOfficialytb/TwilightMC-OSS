@@ -132,7 +132,7 @@ the artifact root (point it at a Prism data dir to reuse its stores).
 
 ## Workspace architecture
 
-Nine focused crates, each network-free at its core and covered by its own
+Ten focused crates, each network-free at its core and covered by its own
 tests (loopback HTTP servers included):
 
 | Crate | Responsibility |
@@ -146,6 +146,7 @@ tests (loopback HTTP servers included):
 | `twilight-modloader` | Fabric (meta v2) / Quilt (meta v3) profile resolution into composite Knot launch data. |
 | `twilight-modrinth` | `.mrpack` engine: strict index parsing, env filtering, pure-Rust ZIP/DEFLATE reader (CRC-32 verified), zip-slip-safe overrides extraction, installer. |
 | `twilight-cli` | clap 4 command surface, isolated `ArtifactStaging` under `<temp>/twilightmc_staging`, and the end-to-end `launch` / `modpack install` pipelines. |
+| `twilight-ui` | Tauri v2 desktop launcher interface (Svelte 5 + Tailwind v4 frontend) bridging the backend crates over IPC. |
 
 ## Testing
 

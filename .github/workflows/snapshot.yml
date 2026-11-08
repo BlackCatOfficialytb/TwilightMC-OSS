@@ -24,6 +24,11 @@ jobs:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      # this gate compiles the whole workspace, Tauri UI crate included
+      - name: Install Linux UI dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
       - id: vars
         # snapshot identity per VERSION.md: workspace version + ddmmyyyy UTC + short sha
         run: |
@@ -124,7 +129,7 @@ jobs:
           run: |
             set -e
             NAME="twilight-snapshot-v${{ needs.verify.outputs.version }}-${{ needs.verify.outputs.date }}-${{ needs.verify.outputs.commit }}-${{ matrix.suffix }}"
-            cargo build --locked --release
+            cargo build --locked --release --bin twilight
             mkdir -p "dist/$NAME"
             cp target/release/${{ matrix.bin }} README.md LICENSE VERSION.md "dist/$NAME/"
             # keep the copy-back small: the binary already lives in dist/
@@ -132,7 +137,7 @@ jobs:
 
       - name: Build
         if: matrix.vm != 'freebsd'
-        run: cargo build --locked --release
+        run: cargo build --locked --release --bin twilight
 
       # Raw distribution staging: the four files upload flat (no folder inside
       # the artifact); the release job archives each target folder exactly once.

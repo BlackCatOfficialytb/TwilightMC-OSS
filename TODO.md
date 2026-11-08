@@ -20,3 +20,13 @@
 - [x] `twilight-cli`: `modpack install <PATH_OR_URL>` subcommand with dry-run plan printing, loader detection from index dependencies (ambiguous packs rejected) and `<shared>/instances/<slug>` instance layout, verified by loopback staging tests
 - [x] CI/CD: `.github/workflows/snapshot.yml` — fmt/clippy/test gates then a seven-target snapshot build matrix (Windows MSVC/MinGW/Clang, Linux GCC/Clang, macOS aarch64, FreeBSD native VM) with prism-style product-taxonomy artifact names (`twilight-snapshot-vX.Y.Z-ddmmyyyy-<commit>-<platform-toolchain>`), a push-only rolling `snapshot` pre-release (single rolling tag, `--cleanup-tag` replacement) carrying `checksums.sha256`
 - [x] CI/CD: `.github/workflows/release.yml` — a created GitHub release triggers the same gates + five-way matrix and attaches `twilight-<tag>-<target>` archives to the release; the `snapshot` tag is excluded since snapshot.yml already supplies its files
+
+## Milestone 1 — Bolide Alpha desktop UI (alpha-v0.1.0 → alpha-v0.2.0)
+
+- [x] Task 1 `alpha-v0.1.0`: Tauri v2 foundation — `crates/twilight-ui` desktop app (Svelte 5 + Tailwind v4, plain JS) with a dark Prism-style shell: header (`TwilightMC Bolide vX.Y.Z` via the `get_version` IPC command), left nav (Instances / Accounts / Settings / Logs) and dark main container
+- [ ] Task 2 `alpha-v0.1.1`: auth IPC bridge — `get_accounts` / `add_offline_account` / `remove_account` / `set_active_account` with a topbar account badge + modal
+- [ ] Task 3 `alpha-v0.1.2`: Java runtime discovery IPC bridge with a settings runtime preview (parsed versions)
+- [ ] Task 4 `alpha-v0.1.3`: version metadata failover IPC (Piston → Prism → Freesm) with a searchable version picker
+- [ ] Task 5 `alpha-v0.1.4`: launch pipeline bridge with real-time `launch-log` streaming, exit/crash handling and a console drawer
+- [ ] Task 6 `alpha-v0.1.5`: storage path configuration (shared library dir, `%TEMP%\twilightmc_staging`) and staging cleanup
+- [ ] Task 7 `alpha-v0.2.0`: full UI/UX audit, workspace version bump to 0.2.0, milestone completion

@@ -1,0 +1,12 @@
+[package]
+name = "twilight-ui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Desktop launcher interface for TwilightMC"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+tauri = { workspace = true }
