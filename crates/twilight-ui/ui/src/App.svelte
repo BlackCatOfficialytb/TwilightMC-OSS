@@ -15,10 +15,10 @@
   ];
 
   const sections = {
-    instances: ['Instances', 'Pick a version to install — instance management builds on this browser.'],
-    accounts: ['Accounts', 'Manage profiles from the badge in the top bar.'],
+    instances: ['Instances', 'Pick a version to launch — instance management builds on this browser.'],
+    accounts: ['Accounts', 'Profiles live in the account manager; launch uses the active profile.'],
     settings: ['Settings', 'Java discovery and storage configuration (shared library, staging cleanup).'],
-    logs: ['Logs', 'Live game output streams into the console drawer (Console button in the top bar).'],
+    logs: ['Logs', 'Live game output; the Console button in the top bar toggles the bottom drawer.'],
   };
 
   // ---- auth state ----
@@ -361,6 +361,24 @@
         </section>
       {/if}
 
+      {#if active === 'accounts'}
+        <section class="mt-6">
+          <button
+            class="rounded bg-indigo-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-indigo-500"
+            onclick={() => (modalOpen = true)}
+          >
+            Open account manager
+          </button>
+          {#if activeAccount}
+            <p class="mt-3 text-[12px] text-neutral-500">
+              Launching as <span class="text-neutral-300">{activeAccount.username}</span>.
+            </p>
+          {:else}
+            <p class="mt-3 text-[12px] text-neutral-500">No active profile — launches fall back to the default name.</p>
+          {/if}
+        </section>
+      {/if}
+
       {#if active === 'settings'}
         <section class="mt-6 max-w-2xl">
           <div class="flex items-center justify-between">
@@ -443,6 +461,30 @@
           {#if storageMsg}
             <p class="mt-2 text-[12px] text-neutral-400">{storageMsg}</p>
           {/if}
+        </section>
+      {/if}
+      {#if active === 'logs'}
+        <section class="mt-6 flex max-w-3xl flex-col">
+          <div class="flex items-center justify-between">
+            <h3 class="text-[13px] font-semibold uppercase tracking-wide text-neutral-400">Game output</h3>
+            <button
+              class="rounded bg-white/5 px-3 py-1.5 text-[12px] font-medium text-neutral-200 hover:bg-white/10"
+              onclick={() => (consoleLines = [])}
+            >
+              Clear
+            </button>
+          </div>
+          <div class="mt-3 h-80 overflow-y-auto rounded border border-white/10 bg-black/20 px-3 py-2 font-mono text-[11px] leading-5">
+            {#each consoleLines as entry, i (i)}
+              <div class="whitespace-pre-wrap break-all {entry.stream === 'stderr' ? 'text-red-400/90' : 'text-neutral-300'}">
+                {entry.line}
+              </div>
+            {:else}
+              <div class="font-sans text-[12px] text-neutral-600">
+                No game output yet — launch a version from the Instances page.
+              </div>
+            {/each}
+          </div>
         </section>
       {/if}
     </main>
