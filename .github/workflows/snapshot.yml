@@ -3,6 +3,12 @@ name: snapshot
 on:
   push:
     branches: [main]
+    # doc-only pushes never rebuild: markdown, licenses and git metadata
+    # don't affect the compiled codebase (policy docs still live in git)
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE*'
+      - '.gitignore'
   workflow_dispatch:
 
 permissions:
