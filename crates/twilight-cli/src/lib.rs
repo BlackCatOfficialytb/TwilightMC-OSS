@@ -16,6 +16,7 @@ pub mod versions;
 
 pub use cli::{Cli, Command, LaunchArgs, LaunchConfig, ModpackAction, ModpackArgs};
 pub use error::CliError;
+pub use launch::run_launch_with;
 pub use staging::ArtifactStaging;
 
 /// Dispatches a parsed subcommand, returning the process exit code.

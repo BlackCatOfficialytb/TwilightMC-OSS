@@ -39,12 +39,20 @@ impl ParallelDownloader {
 
     /// Downloads all files, up to `concurrency` in flight; fails fast on the
     /// first error (in-flight downloads are cancelled when the future drops).
+    ///
+    /// The futures are collected before streaming: a `.map(|req| ...)` closure
+    /// here would produce a higher-ranked `fn(&T) -> impl Future` signature
+    /// that trips rustc's "FnOnce not general enough" solver limit when the
+    /// future is awaited through Tauri's `#[tauri::command]` wrapper.
     pub async fn download_all(
         &self,
         reqs: &[DownloadRequest],
     ) -> Result<Vec<DownloadedFile>, DownloadError> {
-        stream::iter(reqs.iter())
-            .map(|req| self.download_one(req))
+        let mut futs = Vec::with_capacity(reqs.len());
+        for req in reqs {
+            futs.push(self.download_one(req));
+        }
+        stream::iter(futs)
             .buffer_unordered(self.concurrency)
             .try_collect()
             .await

@@ -4084,7 +4084,9 @@ dependencies = [
  "tauri-build",
  "tokio",
  "twilight-auth",
+ "twilight-cli",
  "twilight-downloader",
+ "twilight-launch",
  "twilight-runtime",
 ]
 

@@ -18,7 +18,7 @@
     instances: ['Instances', 'Pick a version to install — instance management builds on this browser.'],
     accounts: ['Accounts', 'Manage profiles from the badge in the top bar.'],
     settings: ['Settings', 'Java discovery and storage paths land over the remaining alpha tasks.'],
-    logs: ['Logs', 'Live game output streaming arrives with the launch pipeline bridge.'],
+    logs: ['Logs', 'Live game output streams into the console drawer (Console button in the top bar).'],
   };
 
   // ---- auth state ----
@@ -83,6 +83,39 @@
     });
   }
 
+  // ---- console drawer state ----
+  let consoleLines = $state([]);
+  let drawerOpen = $state(false);
+  let gameRunning = $state(false);
+  let consoleEl = $state(null);
+
+  // Keep the newest line in view while the game streams output.
+  $effect(() => {
+    consoleLines.length;
+    if (consoleEl) consoleEl.scrollTop = consoleEl.scrollHeight;
+  });
+
+  function logLine(entry) {
+    consoleLines.push(entry);
+    if (consoleLines.length > 5000) consoleLines.splice(0, consoleLines.length - 5000);
+  }
+
+  async function launchVersion(id) {
+    if (gameRunning) return;
+    gameRunning = true;
+    status = `Running ${id}…`;
+    drawerOpen = true;
+    logLine({ stream: 'stdout', line: `launching ${id}…` });
+    try {
+      const code = await api('launch_game', { versionId: id });
+      logLine({ stream: 'stdout', line: `launcher reports exit code ${code}` });
+    } catch (e) {
+      logLine({ stream: 'stderr', line: String(e) });
+    } finally {
+      gameRunning = false;
+      status = 'Ready';
+    }
+  }
   async function refreshAccounts() {
     try {
       accounts = await api('get_accounts');
@@ -128,8 +161,12 @@
   }
 
   onMount(() => {
+    const unlisteners = [];
     const onKey = (e) => {
-      if (e.key === 'Escape') modalOpen = false;
+      if (e.key === 'Escape') {
+        if (modalOpen) modalOpen = false;
+        else if (drawerOpen) drawerOpen = false;
+      }
     };
     window.addEventListener('keydown', onKey);
     (async () => {
@@ -138,9 +175,16 @@
       } catch {
         version = 'dev';
       }
+      try {
+        unlisteners.push(
+          await window.__TAURI__.event.listen('launch-log', (e) => logLine(e.payload))
+        );
+      } catch {
+        // plain web build: no event pane
+      }
       await refreshAccounts();
     })();
-    return () => window.removeEventListener('keydown', onKey);
+    return () => unlisteners.forEach((off) => off());
   });
 </script>
 
@@ -152,6 +196,12 @@
     </div>
     <div class="flex items-center gap-3">
       <span class="text-xs text-neutral-500">{status}</span>
+      <button
+        class="rounded px-2 py-1 text-xs {drawerOpen ? 'text-indigo-300' : 'text-neutral-400 hover:text-neutral-200'}"
+        onclick={() => (drawerOpen = !drawerOpen)}
+      >
+        Console
+      </button>
       <button
         class="flex items-center gap-2 rounded px-2 py-1 {activeAccount
           ? 'text-neutral-200 hover:bg-white/5'
@@ -223,6 +273,13 @@
             <ul class="mt-2 max-h-96 divide-y divide-white/5 overflow-y-auto rounded border border-white/10 bg-black/20">
               {#each filteredVersions() as v (v.id)}
                 <li class="flex items-center gap-3 px-3 py-2">
+                  <button
+                    class="shrink-0 rounded bg-indigo-600/70 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-indigo-500 disabled:opacity-30"
+                    disabled={gameRunning}
+                    onclick={() => launchVersion(v.id)}
+                  >
+                    Launch
+                  </button>
                   <span class="min-w-0 flex-1 truncate text-[13px] text-neutral-200">
                     {v.id}
                     {#if v.is_latest_release}
@@ -292,6 +349,29 @@
       {/if}
     </main>
   </div>
+
+  {#if drawerOpen}
+    <section class="flex h-56 shrink-0 flex-col border-t border-black/50 bg-[#141517]">
+      <div class="flex items-center justify-between border-b border-white/5 px-3 py-1.5">
+        <span class="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+          Game console{gameRunning ? ' · running' : ''}
+        </span>
+        <div class="flex gap-3">
+          <button class="text-[11px] text-neutral-500 hover:text-neutral-300" onclick={() => (consoleLines = [])}>Clear</button>
+          <button class="text-[11px] text-neutral-500 hover:text-neutral-300" onclick={() => (drawerOpen = false)}>Hide</button>
+        </div>
+      </div>
+      <div bind:this={consoleEl} class="min-h-0 flex-1 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-5">
+        {#each consoleLines as entry, i (i)}
+          <div class="whitespace-pre-wrap break-all {entry.stream === 'stderr' ? 'text-red-400/90' : 'text-neutral-300'}">
+            {entry.line}
+          </div>
+        {:else}
+          <div class="text-neutral-600">Game output appears here once you launch.</div>
+        {/each}
+      </div>
+    </section>
+  {/if}
 
   {#if modalOpen}
     <!-- backdrop click closes; panel click does not -->

@@ -109,6 +109,17 @@ async fn get_active(accounts: &Path, settings: &Path) -> Option<Account> {
     store.find(&active_id).cloned()
 }
 
+/// Username for launching: active account when set, else the CLI default.
+pub async fn active_username(app: &AppHandle) -> String {
+    let Ok(dir) = app_dir(app).await else {
+        return "Player".to_owned();
+    };
+    get_active(&dir.join("accounts.json"), &dir.join("settings.json"))
+        .await
+        .map(|a| a.username)
+        .unwrap_or_else(|| "Player".to_owned())
+}
+
 // ---- tauri commands ----
 
 #[tauri::command]

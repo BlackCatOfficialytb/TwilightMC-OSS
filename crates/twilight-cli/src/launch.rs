@@ -323,7 +323,15 @@ pub fn dry_run_report(
 /// downloads, horizon assets, natives extraction, spawn. `--dry-run` stops
 /// after the (network-read-only) plan assembly, prints and exits 0.
 pub async fn run_launch(args: LaunchArgs) -> Result<i32, CliError> {
-    let cfg = args.to_config()?;
+    run_launch_with(args.to_config()?, None).await
+}
+
+/// Launches from a fully resolved [`LaunchConfig`], forwarding every game
+/// output line into `sink` when provided (the desktop UI's console drawer).
+pub async fn run_launch_with(
+    cfg: LaunchConfig,
+    sink: Option<mpsc::Sender<LaunchEvent>>,
+) -> Result<i32, CliError> {
     let account = Account::offline(cfg.username.clone());
     let client = reqwest::Client::new();
 
@@ -468,8 +476,18 @@ pub async fn run_launch(args: LaunchArgs) -> Result<i32, CliError> {
     let printer = tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
             match event {
-                LaunchEvent::Stdout(line) => println!("{line}"),
-                LaunchEvent::Stderr(line) => eprintln!("{line}"),
+                LaunchEvent::Stdout(line) => {
+                    println!("{line}");
+                    if let Some(sink) = &sink {
+                        let _ = sink.send(LaunchEvent::Stdout(line)).await;
+                    }
+                }
+                LaunchEvent::Stderr(line) => {
+                    eprintln!("{line}");
+                    if let Some(sink) = &sink {
+                        let _ = sink.send(LaunchEvent::Stderr(line)).await;
+                    }
+                }
             }
         }
     });
