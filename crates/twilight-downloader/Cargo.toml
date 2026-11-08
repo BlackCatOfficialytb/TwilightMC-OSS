@@ -2,7 +2,7 @@
 name = "twilight-downloader"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "Apache-2.0"
 description = "Async failover metadata fetching (piston-meta + meta.prismlauncher.org + meta.freesmlauncher.org), asset index parsing and parallel SHA-1 verified downloads for TwilightMC"
 
 [dependencies]

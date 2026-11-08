@@ -2,7 +2,7 @@
 name = "twilight-horizon"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "Apache-2.0"
 description = "Clean-room Horizon native-engine asset pipeline: verified vanilla asset stores and Horizon manifests, nothing Mojang-copyrighted is bundled"
 
 [dependencies]
