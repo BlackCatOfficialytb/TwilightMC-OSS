@@ -116,6 +116,23 @@ validators — so precedence is defined here:
 
 ## 6. Current version
 
-- Latest Stable: `v0.1.0` (workspace `version = "0.1.0"`).
-- Snapshot line: `v0.1.0-ddmmyyyy-<commit>`, built as rolling works land on
+- Latest Stable: `v0.2.0` (workspace `version = "0.2.0"`).
+- Snapshot line: `v0.2.0-ddmmyyyy-<commit>`, built as rolling works land on
   `main`.
+
+## 7. Supported build targets
+
+Every published build is compiled for the officially tier-supported targets
+below (identical matrices in `snapshot.yml` and `release.yml`):
+
+| Target                        | Platform                                          |
+|-------------------------------|---------------------------------------------------|
+| `x86_64-pc-windows-msvc`      | Windows 64-bit (MSVC; also the Clang-compiled build) |
+| `x86_64-pc-windows-gnu`       | Windows 64-bit (MinGW-GNU)                        |
+| `x86_64-unknown-linux-gnu`    | Linux 64-bit (GCC; also the Clang-compiled build) |
+| `aarch64-unknown-linux-gnu`   | **Linux ARM64** — Raspberry Pi 4/5, Radxa Rock 5, Orange Pi and other SBCs, cross-compiled with `gcc-aarch64-linux-gnu` |
+| `aarch64-apple-darwin`        | macOS on Apple Silicon                            |
+| `x86_64-unknown-freebsd`      | FreeBSD 64-bit (native VM build)                  |
+
+A target earns official support only when its build job is green in the CI
+matrix; ad-hoc local builds of other targets are best-effort and untested.

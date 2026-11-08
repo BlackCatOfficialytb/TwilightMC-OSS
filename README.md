@@ -176,14 +176,16 @@ Pushes to `main` (or manual `workflow_dispatch` runs) start the pipeline in
 1. **Verify** — `cargo fmt --all -- --check`, `cargo clippy --workspace
    --all-targets -- -D warnings`, `cargo test --workspace`, then compute the
    snapshot identity (workspace version + UTC date + short commit).
-2. **Build** — seven-target matrix: Windows (MSVC, MinGW-GNU, and
-   Clang-compiled), Linux (GCC, Clang with `CC=clang`/`CXX=clang++`), macOS on
+2. **Build** — eight-target matrix: Windows (MSVC, MinGW-GNU, and
+   Clang-compiled), Linux (GCC, Clang with `CC=clang`/`CXX=clang++`, and
+   ARM64 cross-compiled for SBCs such as the Raspberry Pi 5, Radxa Rock 5,
+   Orange Pi and Asahi Linux on `aarch64-unknown-linux-gnu`), macOS on
    Apple Silicon (`aarch64-apple-darwin`) and FreeBSD natively inside a
    [`vmactions/freebsd-vm`](https://github.com/vmactions/freebsd-vm) runner.
     Each result is packaged as
    `twilight-snapshot-vX.Y.Z-ddmmyyyy-<commit>-<platform-toolchain>.zip/.tar.gz`
-   together with `README.md`, `LICENSE`, `VERSION.md`, and a
-   `checksums.sha256` of all archives.
+   together with `README.md`, the license texts (`LICENSE.md`, `LICENSE_AGPL`,
+   `LICENSE_APACHE`), `VERSION.md`, and a `checksums.sha256` of all archives.
 3. **Release** — push-hosted only: the rolling `snapshot` **pre-release** is
    refreshed on GitHub Releases, titled
    `TwilightMC Snapshot vX.Y.Z-ddmmyyyy-<commit>`, each build superseding the
@@ -193,12 +195,13 @@ Pushes to `main` (or manual `workflow_dispatch` runs) start the pipeline in
 Tagging a release on GitHub (`vX.Y.Z`; star / bolide channels keep their
 suffix) instead fires
 [`.github/workflows/release.yml`](.github/workflows/release.yml): the same
-gates run, then the same five-platform matrix generates
+gates run, then the same eight-target matrix generates
 `twilight-<tag>-<target>.zip/.tar.gz` archives and attaches them to the
 release — except the `snapshot` tag, whose files snapshot.yml supplies itself.
 
 ## License
 
-TwilightMC is licensed under the **GNU Affero General Public License
-v3.0-only** — see [LICENSE](LICENSE). By contributing you accept the CLA terms
+TwilightMC uses a multi-tier model: the core utility crates are **Apache-2.0**,
+the application crates are **AGPL-3.0-or-later** — see
+[LICENSE.md](LICENSE.md). By contributing you accept the CLA terms
 in [CONTRIBUTING.md](CONTRIBUTING.md).

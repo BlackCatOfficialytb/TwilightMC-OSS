@@ -73,6 +73,11 @@ jobs:
             suffix: linux-clang-x86_64
             bin: twilight
             cc: clang
+          - id: linux-arm64
+            runner: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            suffix: linux-aarch64
+            bin: twilight
           - id: macos
             runner: macos-latest
             target: aarch64-apple-darwin
@@ -116,6 +121,16 @@ jobs:
           echo "CC=clang" >> "$GITHUB_ENV"
           echo "CXX=clang++" >> "$GITHUB_ENV"
 
+      # ARM64 SBCs (Raspberry Pi 5, Radxa Rock 5, Orange Pi, Asahi): cross-compile
+      # on the x86_64 runner; the rust target itself is installed by the
+      # toolchain action via `targets: ${{ matrix.target }}`.
+      - name: ARM64 cross linker
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
       # The FreeBSD build runs natively inside the VM; only the raw staging
       # folder is copied back — its single archive is built by the release job.
       - name: Build and stage in FreeBSD VM
@@ -131,7 +146,7 @@ jobs:
             NAME="twilight-snapshot-v${{ needs.verify.outputs.version }}-${{ needs.verify.outputs.date }}-${{ needs.verify.outputs.commit }}-${{ matrix.suffix }}"
             cargo build --locked --release --bin twilight
             mkdir -p "dist/$NAME"
-            cp target/release/${{ matrix.bin }} README.md LICENSE VERSION.md "dist/$NAME/"
+            cp target/release/${{ matrix.bin }} README.md LICENSE.md LICENSE_AGPL LICENSE_APACHE VERSION.md "dist/$NAME/"
             # keep the copy-back small: the binary already lives in dist/
             rm -rf target
 
@@ -147,7 +162,7 @@ jobs:
         run: |
           set -e
           mkdir -p "dist/${{ env.NAME }}"
-          cp target/release/${{ matrix.bin }} README.md LICENSE VERSION.md "dist/${{ env.NAME }}/"
+          cp target/release/${{ matrix.bin }} README.md LICENSE.md LICENSE_AGPL LICENSE_APACHE VERSION.md "dist/${{ env.NAME }}/"
 
       - name: Upload staged distribution
         uses: actions/upload-artifact@v7
