@@ -29,8 +29,28 @@
   let accountError = $state('');
   let newUsername = $state('');
 
+  // ---- java discovery state ----
+  let runtimes = $state([]);
+  let scanning = $state(false);
+  let javaError = $state('');
+
   async function api(cmd, args) {
     return window.__TAURI__.core.invoke(cmd, args);
+  }
+
+  async function scanJava() {
+    scanning = true;
+    javaError = '';
+    try {
+      runtimes = await api('list_java');
+    } catch (e) {
+      javaError = String(e);
+    } finally {
+      scanning = false;
+    }
+    if (runtimes.length === 0 && !javaError) {
+      javaError = 'No Java installations found — install a JDK or set JAVA_HOME.';
+    }
   }
 
   async function refreshAccounts() {
@@ -133,6 +153,45 @@
     <main class="min-w-0 flex-1 overflow-y-auto p-6">
       <h2 class="text-lg font-semibold text-neutral-100">{sections[active][0]}</h2>
       <p class="mt-1 text-neutral-500">{sections[active][1]}</p>
+
+      {#if active === 'settings'}
+        <section class="mt-6 max-w-2xl">
+          <div class="flex items-center justify-between">
+            <h3 class="text-[13px] font-semibold uppercase tracking-wide text-neutral-400">Java runtimes</h3>
+            <button
+              class="rounded bg-indigo-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-indigo-500 disabled:opacity-40"
+              disabled={scanning}
+              onclick={scanJava}
+            >
+              {scanning ? 'Scanning…' : runtimes.length ? 'Rescan' : 'Scan system'}
+            </button>
+          </div>
+
+          {#if scanning}
+            <p class="mt-3 text-[12px] text-neutral-500">Probing system roots, PATH and registry…</p>
+          {:else if runtimes.length}
+            <ul class="mt-3 divide-y divide-white/5 rounded border border-white/10 bg-black/20">
+              {#each runtimes as r (r.executable)}
+                <li class="flex items-center gap-3 px-3 py-2">
+                  <span class="flex h-6 w-9 shrink-0 items-center justify-center rounded bg-indigo-500/20 text-[11px] font-bold text-indigo-300">
+                    {r.major}
+                  </span>
+                  <div class="min-w-0 flex-1">
+                    <div class="text-[13px] font-medium text-neutral-200">Java {r.version}</div>
+                    <div class="truncate text-[11px] text-neutral-500">{r.home}</div>
+                  </div>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+          {#if javaError && !scanning}
+            <p class="mt-3 text-[12px] text-amber-400">{javaError}</p>
+          {/if}
+          {#if !runtimes.length && !javaError && !scanning}
+            <p class="mt-3 text-[12px] text-neutral-500">Press <em>Scan system</em> to detect installed JDKs.</p>
+          {/if}
+        </section>
+      {/if}
     </main>
   </div>
 

@@ -84,6 +84,20 @@ pub fn jvm_home_from_executable(executable: &Path) -> Option<PathBuf> {
         .map(Into::<PathBuf>::into)
 }
 
+/// Converts a verbatim path (`\\?\...`) back to a plain path. Windows
+/// `canonicalize` returns the extended-length form, which resolves on disk but
+/// renders as an invalid-looking UNC path in pickers and config files.
+fn demote_verbatim(path: &Path) -> PathBuf {
+    let text = path.as_os_str().to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) => PathBuf::from(rest),
+        None => path.to_path_buf(),
+    }
+}
+
 /// Interrogates every candidate JVM home: reads `<home>/release` first, and
 /// falls back to an async `<java> -version` probe when the marker file is missing.
 /// Duplicate JVM homes are probed once.
@@ -91,7 +105,10 @@ pub async fn scan_roots(homes: Vec<PathBuf>) -> Vec<JavaInstallation> {
     let mut seen = BTreeSet::new();
     let mut installations = Vec::new();
     for home in homes {
-        let canonical = fs_canonicalize(&home).await.unwrap_or(home.clone());
+        let canonical = fs_canonicalize(&home)
+            .await
+            .map(|p| demote_verbatim(&p))
+            .unwrap_or(home.clone());
         if !seen.insert(canonical.display().to_string()) {
             continue;
         }
@@ -195,6 +212,23 @@ mod tests {
         assert_eq!(
             jvm_home_from_executable(&exe).as_deref(),
             Some(home.as_path())
+        );
+    }
+
+    #[test]
+    fn demote_verbatim_strips_extended_length_and_unc_prefixes() {
+        assert_eq!(
+            demote_verbatim(&PathBuf::from(r"\\?\C:\Program Files\Java\jdk-21")),
+            PathBuf::from(r"C:\Program Files\Java\jdk-21")
+        );
+        assert_eq!(
+            demote_verbatim(&PathBuf::from(r"\\?\UNC\server\share\jdk")),
+            PathBuf::from(r"\\server\share\jdk")
+        );
+        assert_eq!(
+            demote_verbatim(&PathBuf::from(r"C:\plain\jdk")),
+            PathBuf::from(r"C:\plain\jdk"),
+            "non-canonicalized input passes through untouched"
         );
     }
 
