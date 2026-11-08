@@ -16,18 +16,81 @@
 
   const sections = {
     instances: ['Instances', 'Instance install and management arrive in an upcoming alpha build.'],
-    accounts: ['Accounts', 'Offline and Microsoft profile management arrive in alpha-v0.1.1.'],
+    accounts: ['Accounts', 'Manage profiles from the badge in the top bar.'],
     settings: ['Settings', 'Java discovery, metadata and storage paths land over alpha-v0.1.2–0.1.5.'],
     logs: ['Logs', 'Live game output streaming arrives with the launch pipeline bridge.'],
   };
 
-  onMount(async () => {
+  // ---- auth state ----
+
+  let accounts = $state([]);
+  let activeAccount = $state(null);
+  let modalOpen = $state(false);
+  let accountError = $state('');
+  let newUsername = $state('');
+
+  async function api(cmd, args) {
+    return window.__TAURI__.core.invoke(cmd, args);
+  }
+
+  async function refreshAccounts() {
     try {
-      version = await window.__TAURI__.core.invoke('get_version');
+      accounts = await api('get_accounts');
+      activeAccount = await api('get_active_account');
     } catch {
-      // Opened as a plain web build — the embedded version is unknown.
-      version = 'dev';
+      // plain web build: no backend pane
     }
+  }
+
+  async function addAccount() {
+    accountError = '';
+    try {
+      await api('add_offline_account', { username: newUsername });
+      newUsername = '';
+      await refreshAccounts();
+    } catch (e) {
+      accountError = String(e);
+    }
+  }
+
+  async function setActive(id) {
+    accountError = '';
+    try {
+      await api('set_active_account', { id });
+      await refreshAccounts();
+    } catch (e) {
+      accountError = String(e);
+    }
+  }
+
+  async function removeAccount(id) {
+    accountError = '';
+    try {
+      await api('remove_account', { id });
+      await refreshAccounts();
+    } catch (e) {
+      accountError = String(e);
+    }
+  }
+
+  function typeLabel(account) {
+    return { offline: 'Offline', microsoft: 'Microsoft' }[account.account_type.type] ?? 'Yggdrasil';
+  }
+
+  onMount(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') modalOpen = false;
+    };
+    window.addEventListener('keydown', onKey);
+    (async () => {
+      try {
+        version = await api('get_version');
+      } catch {
+        version = 'dev';
+      }
+      await refreshAccounts();
+    })();
+    return () => window.removeEventListener('keydown', onKey);
   });
 </script>
 
@@ -37,7 +100,20 @@
       <h1 class="text-[15px] font-semibold tracking-wide text-neutral-100">TwilightMC</h1>
       <span class="rounded bg-indigo-500/15 px-2 py-0.5 text-xs font-medium text-indigo-300">Bolide v{version}</span>
     </div>
-    <span class="text-xs text-neutral-500">{status}</span>
+    <div class="flex items-center gap-3">
+      <span class="text-xs text-neutral-500">{status}</span>
+      <button
+        class="flex items-center gap-2 rounded px-2 py-1 {activeAccount
+          ? 'text-neutral-200 hover:bg-white/5'
+          : 'text-neutral-500 hover:bg-white/5 hover:text-neutral-300'}"
+        onclick={() => (modalOpen = true)}
+      >
+        <span class="flex h-5 w-5 items-center justify-center rounded bg-indigo-500/20 text-[10px] font-bold text-indigo-300">
+          {#if activeAccount}{activeAccount.username[0]?.toUpperCase()}{:else}?{/if}
+        </span>
+        <span class="text-xs">{activeAccount ? activeAccount.username : 'Add account'}</span>
+      </button>
+    </div>
   </header>
 
   <div class="flex min-h-0 flex-1">
@@ -59,4 +135,83 @@
       <p class="mt-1 text-neutral-500">{sections[active][1]}</p>
     </main>
   </div>
+
+  {#if modalOpen}
+    <!-- backdrop click closes; panel click does not -->
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onclick={(e) => {
+        if (e.target === e.currentTarget) modalOpen = false;
+      }}
+    >
+      <div class="w-[440px] rounded-lg border border-black/60 bg-[#242529] shadow-2xl">
+        <div class="flex items-center justify-between border-b border-black/40 px-4 py-3">
+          <h3 class="text-sm font-semibold text-neutral-100">Accounts</h3>
+          <button class="text-neutral-500 hover:text-neutral-200" onclick={() => (modalOpen = false)}>✕</button>
+        </div>
+
+        <div class="max-h-72 overflow-y-auto">
+          {#each accounts as account (account.id)}
+            <div
+              class="flex items-center gap-3 border-b border-white/5 px-4 py-2.5 {activeAccount?.id === account.id
+                ? 'bg-indigo-500/10'
+                : ''}"
+            >
+              <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-indigo-500/20 text-sm font-bold text-indigo-300">
+                {account.username[0]?.toUpperCase()}
+              </span>
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                  <span class="truncate text-[13px] font-medium text-neutral-100">{account.username}</span>
+                  <span class="rounded bg-white/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-neutral-400">
+                    {typeLabel(account)}
+                  </span>
+                  {#if activeAccount?.id === account.id}
+                    <span class="text-[10px] font-semibold tracking-wide text-indigo-400">ACTIVE</span>
+                  {/if}
+                </div>
+                <div class="truncate text-[11px] text-neutral-500">{account.uuid}</div>
+              </div>
+              <div class="flex shrink-0 gap-1">
+                {#if activeAccount?.id !== account.id}
+                  <button
+                    class="rounded px-2 py-1 text-[11px] text-neutral-400 hover:bg-white/5 hover:text-neutral-200"
+                    onclick={() => setActive(account.id)}>Set active</button
+                  >
+                {/if}
+                <button
+                  class="rounded px-2 py-1 text-[11px] text-neutral-400 hover:bg-red-500/10 hover:text-red-400"
+                  onclick={() => removeAccount(account.id)}>Remove</button
+                >
+              </div>
+            </div>
+          {:else}
+            <p class="px-4 py-3 text-[12px] text-neutral-500">No accounts yet — add an offline profile below.</p>
+          {/each}
+        </div>
+
+        <form
+          class="flex items-center gap-2 border-t border-black/40 p-3"
+          onsubmit={(e) => {
+            e.preventDefault();
+            addAccount();
+          }}
+        >
+          <input
+            class="h-8 flex-1 rounded border border-white/10 bg-black/30 px-2.5 text-[13px] text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-indigo-500"
+            placeholder="Offline username (3-16 letters, digits, _)"
+            bind:value={newUsername}
+          />
+          <button
+            type="submit"
+            class="rounded bg-indigo-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-indigo-500 disabled:opacity-40"
+            disabled={!newUsername}>Add</button
+          >
+        </form>
+        {#if accountError}
+          <p class="border-t border-black/40 px-4 py-2 text-[12px] text-red-400">{accountError}</p>
+        {/if}
+      </div>
+    </div>
+  {/if}
 </div>

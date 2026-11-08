@@ -24,7 +24,7 @@
 ## Milestone 1 — Bolide Alpha desktop UI (alpha-v0.1.0 → alpha-v0.2.0)
 
 - [x] Task 1 `alpha-v0.1.0`: Tauri v2 foundation — `crates/twilight-ui` desktop app (Svelte 5 + Tailwind v4, plain JS) with a dark Prism-style shell: header (`TwilightMC Bolide vX.Y.Z` via the `get_version` IPC command), left nav (Instances / Accounts / Settings / Logs) and dark main container
-- [ ] Task 2 `alpha-v0.1.1`: auth IPC bridge — `get_accounts` / `add_offline_account` / `remove_account` / `set_active_account` with a topbar account badge + modal
+- [x] Task 2 `alpha-v0.1.1`: auth IPC bridge — `get_accounts` / `add_offline_account` / `remove_account` / `set_active_account` / `get_active_account` wired to `twilight-auth::AccountStore` (`accounts.json` + `settings.json` under app data dir), topbar account badge, account management modal with add-offline form, active remove clears the badge pointer
 - [ ] Task 3 `alpha-v0.1.2`: Java runtime discovery IPC bridge with a settings runtime preview (parsed versions)
 - [ ] Task 4 `alpha-v0.1.3`: version metadata failover IPC (Piston → Prism → Freesm) with a searchable version picker
 - [ ] Task 5 `alpha-v0.1.4`: launch pipeline bridge with real-time `launch-log` streaming, exit/crash handling and a console drawer
