@@ -1,1 +1,27 @@
 @import 'tailwindcss';
+
+/* Twilight design tokens — dual themes via data-theme on <html>. */
+:root,
+[data-theme='dark'] {
+  --tw-canvas: #0f172a;
+  --tw-surface: #1e293b;
+  --tw-subtle: #0b0f19;
+  --tw-border: #334155;
+  --tw-text: #f8fafc;
+  --tw-muted: #94a3b8;
+  --tw-accent: #818cf8;
+  --tw-accent-hover: #6366f1;
+  --tw-star: #f59e0b;
+}
+
+[data-theme='light'] {
+  --tw-canvas: #f1f5f9;
+  --tw-surface: #ffffff;
+  --tw-subtle: #f8fafc;
+  --tw-border: #e2e8f0;
+  --tw-text: #0f172a;
+  --tw-muted: #64748b;
+  --tw-accent: #6366f1;
+  --tw-accent-hover: #4f46e5;
+  --tw-star: #d97706;
+}

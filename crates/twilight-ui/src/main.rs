@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod accounts;
+mod instances;
 mod java;
 mod launch;
 mod storage;
@@ -25,7 +26,9 @@ fn main() {
             accounts::get_active_account,
             java::list_java,
             versions::list_versions,
-            launch::launch_game,
+            launch::launch_instance,
+            instances::get_instances,
+            instances::create_instance,
             storage::get_storage,
             storage::set_shared_dir,
             storage::clean_staging

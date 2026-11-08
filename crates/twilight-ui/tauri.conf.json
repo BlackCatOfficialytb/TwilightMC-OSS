@@ -12,8 +12,8 @@
         "title": "TwilightMC",
         "width": 1100,
         "height": 720,
-        "minWidth": 860,
-        "minHeight": 560,
+        "minWidth": 900,
+        "minHeight": 600,
         "theme": "Dark",
         "resizable": true
       }
