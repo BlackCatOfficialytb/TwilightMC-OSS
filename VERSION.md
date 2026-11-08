@@ -10,11 +10,14 @@ TwilightMC <release channel> vX.Y.Z
 TwilightMC Snapshot vX.Y.Z-ddmmyyyy-<commit>
 ```
 
-- **X — major version.** Breaking changes (renamed/removed subcommands,
+The `vX.Y.Z` semantics below drive every numbered channel — **Stable, Star
+and Bolide**; a Snapshot reuses the same triple as its milestone target (§2):
+
+- **X — major upgrade.** Breaking changes (renamed/removed subcommands,
   changed flag semantics, unreadable on-disk formats) increment X.
-- **Y — minor version.** Backwards-compatible features increment Y.
-- **Z — updates.** Bug fixes and identical-behaviour repairs increment Z.
-  The updates component may be omitted: `v1.2` is shorthand for `v1.2.0`.
+- **Y — minor update.** Backwards-compatible features increment Y.
+- **Z — subupdate.** Bug fixes and identical-behaviour repairs increment Z.
+  The subupdate component may be omitted: `v1.2` is shorthand for `v1.2.0`.
   Presentation strings may use `vX.Y`, while official release tags
   canonically spell out the full `vX.Y.Z` so comparisons stay unambiguous.
 - **`<commit>`** in snapshots — short git hash of the built revision
@@ -82,14 +85,14 @@ validators — so precedence is defined here:
 
 ## 4. Bump rules
 
-- **Z (updates)** — bug fixes and identical-behaviour repairs. No new CLI
+- **Z (subupdate)** — bug fixes and identical-behaviour repairs. No new CLI
   flags, no new public crate functions beyond trivial additions.
-- **Y (minor)** — backwards-compatible features: new subcommand, new flag,
-  new public crate API, staging-layout *extensions* that older versions
-  tolerate.
-- **X (major)** — breaking change: renamed or removed subcommand, changed
-  flag semantics, changed staging/shared-directory layout in a way an older
-  version cannot read, MSRV bump.
+- **Y (minor update)** — backwards-compatible features: new subcommand, new
+  flag, new public crate API, staging-layout *extensions* that older
+  versions tolerate.
+- **X (major upgrade)** — breaking change: renamed or removed subcommand,
+  changed flag semantics, changed staging/shared-directory layout in a way
+  an older version cannot read, MSRV bump.
 - **0.x caveat** — before `1.0.0`, minor bumps may carry breaking CLI
   changes, but they must be flagged `⚠ BREAKING` in the changelog and follow
   the notice period in §5.
