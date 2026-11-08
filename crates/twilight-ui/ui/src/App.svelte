@@ -17,7 +17,7 @@
   const sections = {
     instances: ['Instances', 'Pick a version to install — instance management builds on this browser.'],
     accounts: ['Accounts', 'Manage profiles from the badge in the top bar.'],
-    settings: ['Settings', 'Java discovery and storage paths land over the remaining alpha tasks.'],
+    settings: ['Settings', 'Java discovery and storage configuration (shared library, staging cleanup).'],
     logs: ['Logs', 'Live game output streams into the console drawer (Console button in the top bar).'],
   };
 
@@ -98,6 +98,57 @@
   function logLine(entry) {
     consoleLines.push(entry);
     if (consoleLines.length > 5000) consoleLines.splice(0, consoleLines.length - 5000);
+  }
+
+  // ---- storage settings state ----
+  let storage = $state(null);
+  let sharedInput = $state('');
+  let storageBusy = $state(false);
+  let storageMsg = $state('');
+
+  async function loadStorage() {
+    storageBusy = true;
+    try {
+      storage = await api('get_storage');
+      sharedInput = storage.is_default_shared ? '' : storage.shared_dir;
+    } catch (e) {
+      storageMsg = String(e);
+    } finally {
+      storageBusy = false;
+    }
+  }
+
+  async function saveShared() {
+    storageBusy = true;
+    storageMsg = '';
+    try {
+      await api('set_shared_dir', { path: sharedInput.trim() || null });
+      storage = await api('get_storage');
+      sharedInput = storage.is_default_shared ? '' : storage.shared_dir;
+      storageMsg = 'Storage updated.';
+    } catch (e) {
+      storageMsg = String(e);
+    } finally {
+      storageBusy = false;
+    }
+  }
+
+  async function resetShared() {
+    sharedInput = '';
+    await saveShared();
+  }
+
+  async function cleanStaging() {
+    storageBusy = true;
+    storageMsg = '';
+    try {
+      await api('clean_staging');
+      storageMsg = 'Staging cleaned.';
+    } catch (e) {
+      storageMsg = String(e);
+    } finally {
+      storageBusy = false;
+    }
   }
 
   async function launchVersion(id) {
@@ -183,6 +234,7 @@
         // plain web build: no event pane
       }
       await refreshAccounts();
+      await loadStorage();
     })();
     return () => unlisteners.forEach((off) => off());
   });
@@ -344,6 +396,52 @@
           {/if}
           {#if !runtimes.length && !javaError && !scanning}
             <p class="mt-3 text-[12px] text-neutral-500">Press <em>Scan system</em> to detect installed JDKs.</p>
+          {/if}
+
+          <div class="mt-8 flex items-center justify-between">
+            <h3 class="text-[13px] font-semibold uppercase tracking-wide text-neutral-400">Storage</h3>
+            <button
+              class="rounded bg-white/5 px-3 py-1.5 text-[12px] font-medium text-neutral-200 hover:bg-white/10 disabled:opacity-40"
+              disabled={storageBusy || gameRunning}
+              onclick={cleanStaging}
+            >
+              Clean staging
+            </button>
+          </div>
+
+          {#if storage}
+            <div class="mt-3 rounded border border-white/10 bg-black/20 p-3">
+              <div class="text-[11px] text-neutral-500">
+                Shared library {storage.is_default_shared ? '(default)' : '(custom)'}
+              </div>
+              <div class="mt-2 flex gap-2">
+                <input
+                  class="h-8 flex-1 rounded border border-white/10 bg-black/30 px-2.5 text-[12px] text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-indigo-500"
+                  placeholder={storage.shared_dir}
+                  bind:value={sharedInput}
+                />
+                <button
+                  class="rounded bg-indigo-600 px-3 text-[12px] font-medium text-white hover:bg-indigo-500 disabled:opacity-40"
+                  disabled={storageBusy}
+                  onclick={saveShared}
+                >
+                  Save
+                </button>
+                {#if !storage.is_default_shared}
+                  <button
+                    class="rounded bg-white/5 px-3 text-[12px] text-neutral-300 hover:bg-white/10 disabled:opacity-40"
+                    disabled={storageBusy}
+                    onclick={resetShared}
+                  >
+                    Reset
+                  </button>
+                {/if}
+              </div>
+              <div class="mt-2 truncate text-[11px] text-neutral-600">Staging: {storage.staging_root}</div>
+            </div>
+          {/if}
+          {#if storageMsg}
+            <p class="mt-2 text-[12px] text-neutral-400">{storageMsg}</p>
           {/if}
         </section>
       {/if}

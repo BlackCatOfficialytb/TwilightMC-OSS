@@ -4,6 +4,7 @@
 mod accounts;
 mod java;
 mod launch;
+mod storage;
 mod versions;
 
 // Single source of truth for the header badge; falls out of the workspace
@@ -24,7 +25,10 @@ fn main() {
             accounts::get_active_account,
             java::list_java,
             versions::list_versions,
-            launch::launch_game
+            launch::launch_game,
+            storage::get_storage,
+            storage::set_shared_dir,
+            storage::clean_staging
         ])
         .run(tauri::generate_context!())
         .expect("error while running TwilightMC UI");

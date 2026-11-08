@@ -4,7 +4,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 use twilight_cli::{LaunchConfig, run_launch_with};
 use twilight_launch::LaunchEvent;
@@ -38,11 +38,7 @@ pub async fn launch_game(app: AppHandle, version_id: String) -> Result<i32, Stri
 }
 
 async fn run(app: &AppHandle, version_id: String) -> Result<i32, String> {
-    let shared_dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("shared");
+    let shared_dir = crate::storage::shared_root(app).await?;
     let username = active_username(app).await;
 
     // Pump pipeline events into the webview console drawer.

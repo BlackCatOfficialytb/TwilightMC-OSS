@@ -8,9 +8,11 @@ use tauri::{AppHandle, Manager};
 use twilight_auth::{Account, AccountStore};
 
 #[derive(Default, Serialize, Deserialize)]
-struct Settings {
+pub(crate) struct Settings {
     #[serde(default)]
-    active_account: Option<String>,
+    pub(crate) active_account: Option<String>,
+    #[serde(default)]
+    pub(crate) shared_dir: Option<String>,
 }
 
 async fn app_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -25,11 +27,11 @@ async fn accounts_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_dir(app).await?.join("accounts.json"))
 }
 
-async fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) async fn settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_dir(app).await?.join("settings.json"))
 }
 
-async fn load_settings(path: &Path) -> Settings {
+pub(crate) async fn load_settings(path: &Path) -> Settings {
     if let Ok(data) = tokio::fs::read_to_string(path).await
         && let Ok(settings) = serde_json::from_str::<Settings>(&data)
     {
@@ -38,7 +40,7 @@ async fn load_settings(path: &Path) -> Settings {
     Settings::default()
 }
 
-async fn save_settings(path: &Path, settings: &Settings) -> Result<(), String> {
+pub(crate) async fn save_settings(path: &Path, settings: &Settings) -> Result<(), String> {
     let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
     tokio::fs::write(path, json)
         .await
