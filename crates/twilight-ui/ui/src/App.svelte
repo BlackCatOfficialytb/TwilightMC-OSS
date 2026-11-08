@@ -15,9 +15,9 @@
   ];
 
   const sections = {
-    instances: ['Instances', 'Instance install and management arrive in an upcoming alpha build.'],
+    instances: ['Instances', 'Pick a version to install — instance management builds on this browser.'],
     accounts: ['Accounts', 'Manage profiles from the badge in the top bar.'],
-    settings: ['Settings', 'Java discovery, metadata and storage paths land over alpha-v0.1.2–0.1.5.'],
+    settings: ['Settings', 'Java discovery and storage paths land over the remaining alpha tasks.'],
     logs: ['Logs', 'Live game output streaming arrives with the launch pipeline bridge.'],
   };
 
@@ -33,6 +33,13 @@
   let runtimes = $state([]);
   let scanning = $state(false);
   let javaError = $state('');
+
+  // ---- vanilla version picker state ----
+  let catalog = $state(null);
+  let fetchingVersions = $state(false);
+  let versionsError = $state('');
+  let versionQuery = $state('');
+  let typeFilter = $state('all');
 
   async function api(cmd, args) {
     return window.__TAURI__.core.invoke(cmd, args);
@@ -51,6 +58,29 @@
     if (runtimes.length === 0 && !javaError) {
       javaError = 'No Java installations found — install a JDK or set JAVA_HOME.';
     }
+  }
+
+  async function fetchVersions() {
+    fetchingVersions = true;
+    versionsError = '';
+    try {
+      catalog = await api('list_versions');
+    } catch (e) {
+      versionsError = String(e);
+    } finally {
+      fetchingVersions = false;
+    }
+  }
+
+  function filteredVersions() {
+    if (!catalog) return [];
+    const q = versionQuery.trim().toLowerCase();
+    return catalog.versions.filter((v) => {
+      const typeOk =
+        typeFilter === 'all' ||
+        (typeFilter === 'releases' ? v.version_type === 'release' : v.version_type !== 'release');
+      return typeOk && (!q || v.id.toLowerCase().includes(q));
+    });
   }
 
   async function refreshAccounts() {
@@ -153,6 +183,74 @@
     <main class="min-w-0 flex-1 overflow-y-auto p-6">
       <h2 class="text-lg font-semibold text-neutral-100">{sections[active][0]}</h2>
       <p class="mt-1 text-neutral-500">{sections[active][1]}</p>
+
+      {#if active === 'instances'}
+        <section class="mt-6 max-w-2xl">
+          <div class="flex items-center justify-between">
+            <h3 class="text-[13px] font-semibold uppercase tracking-wide text-neutral-400">Version browser</h3>
+            <button
+              class="rounded bg-indigo-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-indigo-500 disabled:opacity-40"
+              disabled={fetchingVersions}
+              onclick={fetchVersions}
+            >
+              {fetchingVersions ? 'Fetching…' : catalog ? 'Refresh' : 'Load version list'}
+            </button>
+          </div>
+
+          {#if fetchingVersions}
+            <p class="mt-3 text-[12px] text-neutral-500">Trying piston-meta, then Prism and Freesm mirrors…</p>
+          {:else if catalog}
+            <div class="mt-3 flex items-center gap-2">
+              <input
+                class="h-8 flex-1 rounded border border-white/10 bg-black/30 px-2.5 text-[13px] text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-indigo-500"
+                placeholder="Search {catalog.total} versions…"
+                bind:value={versionQuery}
+              />
+              <div class="flex gap-1">
+                {#each [['all', 'All'], ['releases', 'Releases'], ['snapshots', 'Snapshots']] as [id, label] (id)}
+                  <button
+                    class="rounded px-2 py-1 text-[11px] {typeFilter === id
+                      ? 'bg-indigo-600 font-medium text-white'
+                      : 'text-neutral-400 hover:bg-white/5 hover:text-neutral-200'}"
+                    onclick={() => (typeFilter = id)}
+                  >
+                    {label}
+                  </button>
+                {/each}
+              </div>
+            </div>
+
+            <ul class="mt-2 max-h-96 divide-y divide-white/5 overflow-y-auto rounded border border-white/10 bg-black/20">
+              {#each filteredVersions() as v (v.id)}
+                <li class="flex items-center gap-3 px-3 py-2">
+                  <span class="min-w-0 flex-1 truncate text-[13px] text-neutral-200">
+                    {v.id}
+                    {#if v.is_latest_release}
+                      <span class="ml-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-emerald-400">LATEST</span>
+                    {/if}
+                  </span>
+                  <span class="w-20 shrink-0 text-right text-[10px] uppercase tracking-wide {v.version_type === 'release' ? 'text-neutral-400' : 'text-amber-400/80'}">
+                    {v.version_type}
+                  </span>
+                  {#if v.release_time}
+                    <span class="w-24 shrink-0 text-right text-[11px] text-neutral-600">{v.release_time.slice(0, 10)}</span>
+                  {/if}
+                </li>
+              {:else}
+                <li class="px-3 py-3 text-[12px] text-neutral-500">No versions match this filter.</li>
+              {/each}
+            </ul>
+            {#if catalog.latest_release_id}
+              <p class="mt-2 text-[11px] text-neutral-600">
+                Source has {catalog.total} versions; latest release {catalog.latest_release_id}.
+              </p>
+            {/if}
+          {/if}
+          {#if versionsError && !fetchingVersions}
+            <p class="mt-3 text-[12px] text-amber-400">{versionsError}</p>
+          {/if}
+        </section>
+      {/if}
 
       {#if active === 'settings'}
         <section class="mt-6 max-w-2xl">

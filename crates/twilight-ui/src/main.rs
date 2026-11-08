@@ -3,6 +3,7 @@
 
 mod accounts;
 mod java;
+mod versions;
 
 // Single source of truth for the header badge; falls out of the workspace
 // version and auto-bumps with the milestone train.
@@ -20,7 +21,8 @@ fn main() {
             accounts::remove_account,
             accounts::set_active_account,
             accounts::get_active_account,
-            java::list_java
+            java::list_java,
+            versions::list_versions
         ])
         .run(tauri::generate_context!())
         .expect("error while running TwilightMC UI");

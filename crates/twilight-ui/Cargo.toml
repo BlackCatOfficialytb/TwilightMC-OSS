@@ -16,3 +16,5 @@ tokio = { workspace = true }
 
 twilight-auth = { path = "../twilight-auth" }
 twilight-runtime = { path = "../twilight-runtime" }
+twilight-downloader = { path = "../twilight-downloader" }
+reqwest = { workspace = true }
