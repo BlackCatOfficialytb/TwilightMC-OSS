@@ -521,7 +521,10 @@
     >
       <img src="/logo.png" alt="TwilightMC" draggable="false" class="h-7 w-7 shrink-0" />
       {#if sidebarExpanded}
-        <span class="truncate text-[13px] font-semibold">TwilightMC</span>
+        <span class="flex min-w-0 items-center gap-1.5">
+          <span class="truncate text-[13px] font-semibold">TwilightMC</span>
+          <span class="shrink-0 rounded bg-(--accent-star)/15 px-1 py-0.5 text-[10px] font-medium text-(--accent-star)">pre-release UI</span>
+        </span>
       {/if}
     </div>
 
@@ -606,6 +609,7 @@
     <header class="flex h-11 shrink-0 items-center justify-between border-b border-(--border) bg-(--bg-subtle) px-4">
       <div class="flex items-center gap-2.5">
         <span class="rounded bg-(--accent)/15 px-2 py-0.5 text-xs font-medium text-(--accent)">TwilightMC v{version}</span>
+        <span class="rounded bg-(--accent-star)/15 px-1.5 py-0.5 text-[10px] font-medium text-(--accent-star)">pre-release UI</span>
       </div>
       <span class="text-xs text-(--text-muted)">{status}</span>
     </header>

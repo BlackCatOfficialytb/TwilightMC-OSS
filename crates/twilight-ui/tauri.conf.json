@@ -9,7 +9,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "TwilightMC",
+        "title": "TwilightMC (pre-release UI)",
         "width": 1100,
         "height": 720,
         "minWidth": 900,
