@@ -82,7 +82,7 @@ async fn run(app: &AppHandle, instance_id: &str) -> Result<i32, String> {
         .await
         .ok_or_else(|| format!("unknown instance {instance_id}"))?;
     let username = active_username(app).await;
-    // Settings: explicit java override and the -Xms/-Xmx memory allocation.
+    // settings: explicit java override and the -Xms/-Xmx memory allocation
     let settings = load_settings(&settings_path(app).await?).await;
     let mut jvm_args = Vec::new();
     if settings.max_memory_mb > 0 {
@@ -143,7 +143,7 @@ async fn run(app: &AppHandle, instance_id: &str) -> Result<i32, String> {
             .filter(|p| !p.trim().is_empty())
             .map(PathBuf::from),
         loader: meta.loader,
-        loader_version: None,
+        loader_version: meta.loader_version,
         jvm_args,
         dry_run: false,
     };

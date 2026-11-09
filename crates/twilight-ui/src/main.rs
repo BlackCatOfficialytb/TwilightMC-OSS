@@ -61,6 +61,7 @@ fn main() {
             instances::delete_instance,
             instances::list_mods,
             instances::toggle_mod,
+            instances::import_mod,
             modpack::install_modpack,
             prefs::get_java_prefs,
             prefs::set_java_prefs,

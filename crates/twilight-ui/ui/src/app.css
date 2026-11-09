@@ -3,14 +3,14 @@
 /* Twilight design tokens — dual themes via data-theme on <html>. */
 :root,
 [data-theme='dark'] {
-  --tw-canvas: #0f172a;
-  --tw-surface: #1e293b;
-  --tw-subtle: #0b0f19;
-  --tw-border: #334155;
-  --tw-text: #f8fafc;
-  --tw-muted: #94a3b8;
-  --tw-accent: #818cf8;
-  --tw-accent-hover: #6366f1;
+  --tw-canvas: #0b0f19;
+  --tw-surface: #111827;
+  --tw-subtle: #1f2937;
+  --tw-border: #374151;
+  --tw-text: #f9fafb;
+  --tw-muted: #9ca3af;
+  --tw-accent: #6366f1;
+  --tw-accent-hover: #818cf8;
   --tw-star: #f59e0b;
 }
 
@@ -20,8 +20,8 @@
   --tw-subtle: #f8fafc;
   --tw-border: #e2e8f0;
   --tw-text: #0f172a;
-  --tw-muted: #64748b;
-  --tw-accent: #6366f1;
-  --tw-accent-hover: #4f46e5;
+  --tw-muted: #6b7280;
+  --tw-accent: #4f46e5;
+  --tw-accent-hover: #6366f1;
   --tw-star: #d97706;
 }

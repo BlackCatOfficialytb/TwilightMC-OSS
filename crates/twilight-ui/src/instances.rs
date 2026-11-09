@@ -19,6 +19,9 @@ pub struct InstanceMeta {
     /// `"fabric"` / `"quilt"`; absent/empty means Vanilla.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub loader: Option<String>,
+    /// Pinned loader version; empty resolves the latest stable release.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loader_version: Option<String>,
     /// Unix seconds of the last play; 0 = never.
     #[serde(default)]
     pub last_played: u64,
@@ -102,6 +105,7 @@ async fn get_instances_in(root: &Path) -> Result<Vec<InstanceRow>, String> {
                 .unwrap_or_default(),
             name: String::new(),
             loader: None,
+            loader_version: None,
             last_played: 0,
         });
         let id = path
@@ -137,6 +141,7 @@ async fn create_instance_in(
     name: &str,
     version: &str,
     loader: Option<String>,
+    loader_version: Option<String>,
 ) -> Result<InstanceRow, String> {
     let id = slugify(name);
     if id.is_empty() {
@@ -155,6 +160,9 @@ async fn create_instance_in(
                 loader: loader
                     .map(|l| l.trim().to_ascii_lowercase())
                     .filter(|l| !l.is_empty() && l != "vanilla"),
+                loader_version: loader_version
+                    .map(|v| v.trim().to_owned())
+                    .filter(|v| !v.is_empty()),
                 last_played: 0,
             };
             write_meta(&dir, &meta).await?;
@@ -246,6 +254,39 @@ async fn toggle_mod_in(dir: &Path, base: &str, enable: bool) -> Result<(), Strin
     tokio::fs::rename(from, to).await.map_err(|e| e.to_string())
 }
 
+/// Copies an external `.jar` into the instance mods dir (enabled).
+#[tauri::command]
+pub async fn import_mod(
+    app: AppHandle,
+    instance_id: String,
+    jar_path: String,
+) -> Result<(), String> {
+    validate_instance_id(&instance_id)?;
+    let src = PathBuf::from(&jar_path);
+    if !src.is_file() {
+        return Err(format!("file not found: {jar_path}"));
+    }
+    let Some(file_name) = src.file_name().map(|n| n.to_string_lossy().to_string()) else {
+        return Err("invalid mod file name".into());
+    };
+    if !file_name.to_ascii_lowercase().ends_with(".jar") {
+        return Err("mod files must be .jar archives".into());
+    }
+    let dest = mods_dir(&instances_root(&app).await?, &instance_id)
+        .await?
+        .join(file_name);
+    if dest.exists() {
+        return Err(format!(
+            "mod {} already exists",
+            src.file_name().unwrap().to_string_lossy()
+        ));
+    }
+    tokio::fs::copy(&src, &dest)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Instance ids are directory leaf names; reject anything that could escape.
 fn validate_instance_id(id: &str) -> Result<(), String> {
     if id.is_empty()
@@ -275,9 +316,10 @@ pub async fn create_instance(
     name: String,
     version: String,
     loader: Option<String>,
+    loader_version: Option<String>,
 ) -> Result<InstanceRow, String> {
     let root = instances_root(&app).await?;
-    create_instance_in(&root, &name, &version, loader).await
+    create_instance_in(&root, &name, &version, loader, loader_version).await
 }
 
 /// Best-effort last-played stamp, called from the launch path.
@@ -350,7 +392,7 @@ mod tests {
     async fn create_get_launch_round_trip() {
         let root = temp_root();
 
-        let row = create_instance_in(&root, "Sky Factory", "1.21.4", Some("FABRIC".into()))
+        let row = create_instance_in(&root, "Sky Factory", "1.21.4", Some("FABRIC".into()), None)
             .await
             .unwrap();
         assert_eq!(row.id, "sky-factory");
@@ -359,7 +401,7 @@ mod tests {
         assert!(root.join("sky-factory/minecraft").is_dir());
 
         // idempotent: second create returns the same instance
-        let again = create_instance_in(&root, "Sky Factory", "9.9.9", Some("quilt".into()))
+        let again = create_instance_in(&root, "Sky Factory", "9.9.9", Some("quilt".into()), None)
             .await
             .unwrap();
         assert_eq!(again.version, "1.21.4");
@@ -377,9 +419,21 @@ mod tests {
     #[tokio::test]
     async fn mods_toggle_and_delete_guards() {
         let root = temp_root();
-        create_instance_in(&root, "Modded", "1.21.4", None)
+        create_instance_in(&root, "Modded", "1.21.4", None, None)
             .await
             .unwrap();
+        // pinned loader version survives the round trip through twilight.json
+        create_instance_in(
+            &root,
+            "Pinned Fabric",
+            "1.21.4",
+            Some("fabric".into()),
+            Some("0.16.9".into()),
+        )
+        .await
+        .unwrap();
+        let pinned = read_meta(&root.join("pinned-fabric")).await.unwrap();
+        assert_eq!(pinned.loader_version.as_deref(), Some("0.16.9"));
 
         let mods = mods_dir(&root, "Modded").await.unwrap();
         std::fs::write(mods.join("sodium.jar"), b"x").unwrap();

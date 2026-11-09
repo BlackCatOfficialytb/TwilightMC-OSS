@@ -29,4 +29,20 @@
 - [x] Task 4 `alpha-v0.1.3`: version metadata failover IPC (`list_versions` over `twilight-downloader`'s piston → Prism → Freesm chain, `VersionRow`/`VersionCatalog` DTOs with latest-release flag) and a searchable version picker (query, All/Releases/Snapshots chips, latest badge) in the Instances section
 - [x] Task 5 `alpha-v0.1.4`: launch pipeline bridge (`launch_game` over `twilight-cli`'s exported `run_launch_with`, `launch-log` events per stdout/stderr line, one-game-per-run guard, exit-code report) and a console drawer (Console toggle, auto-scroll, Clear/Hide); higher-ranked `download_all` closure fixed in `twilight-downloader` for the Tauri command wrapper
 - [x] Task 6 `alpha-v0.1.5`: storage path configuration — `get_storage` / `set_shared_dir` / `clean_staging` IPC, custom shared library dir persisted in `settings.json` (launches honor it, default `app_data_dir/shared`), staging root shown (`%TEMP%\twilightmc_staging`) with a Clean-staging button in the Settings page
-- [x] Task 7 `alpha-v0.2.0`: full UI/UX audit (nav dead-ends fixed — Accounts opens the account manager, Logs renders live game output inline) and workspace version bump to 0.2.0 — milestone complete
+- [x] Task 7 `alpha-v0.2.0`: full UI/UX audit (nav dead-ends fixed - Accounts opens the account manager, Logs renders live game output inline) and workspace version bump to 0.2.0 - milestone complete
+
+## Milestone 2 - Prism-style launcher UI (v0.2.0 → next minor)
+
+- [x] `feat(ipc)`: backend hooks - `LaunchEvent::Started(pid)` child-pid event, `kill_instance` (Windows tree-kill via `taskkill /T /F`), `LaunchConfig.jvm_args` (`-Xms`/`-Xmx`), persisted java/memory/theme prefs (`get_java_prefs`/`set_java_prefs`/`get_theme_config`/`set_theme_config` in `settings.json`), `list_mods`/`toggle_mod` (`.disabled` rename), `delete_instance` (+ id traversal guards), `install_modpack` bridge to `twilight-cli::modpack`, `discover_java_installations`/`fetch_vanilla_versions` command renames, `open_path` (explorer/open/xdg-open)
+- [x] Theme engine polished to the final Twilight Dark (Gray/Indigo) + Twilight Light (Dawn) palettes; theme choice persists locally and to `settings.json`
+- [ ] Collapsible sidebar (`w-16` ⇄ `w-60`, hover chevron, account card at the bottom opening the manager)
+- [ ] Action toolbar (Add Instance / Folders / Settings / theme toggle) + instance context menu (Play, Edit Instance, Open Folder, View Logs, Delete)
+- [ ] New Instance Wizard: version picker tab, loader tab (Vanilla/Fabric/Quilt), `.mrpack` dropzone tab
+- [ ] Edit Instance modal: Version Components / Mods (.jar toggles), Screenshots, Logs tabs
+- [ ] Settings modal: java dropdown (detected JREs), memory sliders (`-Xms`/`-Xmx`), storage paths + staging cleanup
+- [ ] Console drawer: Copy-to-clipboard and Kill-process controls next to Clear
+
+## Theme queue (milestone-polish backlog)
+
+- [ ] Catppuccin Latte flavor (light palette pass over `app.css` tokens)
+- [ ] Catppuccin Macchiato flavor (dark palette pass over `app.css` tokens)
