@@ -12,7 +12,7 @@
   );
 
   $effect(() => {
-    document.documentElement.dataset.theme = theme;
+    document.documentElement.classList.toggle('dark', theme === 'dark');
     localStorage.setItem('twilight-theme', theme);
     window.__TAURI__?.core.invoke('set_theme_config', { theme }).catch(() => {});
   });
@@ -25,13 +25,13 @@
 
   const nav = [
     { id: 'instances', label: 'Instances', icon: '▦' },
-    { id: 'worlds', label: 'Worlds & Servers', icon: '⌗' },
+    { id: 'worlds', label: 'Servers & P2P', icon: '⌗' },
     { id: 'downloads', label: 'Downloads', icon: '⤓' },
   ];
 
   const sections = {
     instances: ['Instances', 'Your library — open the wizard or drop a pack.'],
-    worlds: ['Worlds & Servers', 'World and server management lands in a later milestone.'],
+    worlds: ['Servers & P2P', 'Server and P2P management lands in a later milestone.'],
     downloads: ['Downloads', 'Direct downloads land in a later milestone.'],
   };
 
@@ -204,9 +204,10 @@
 
   // Minecraft log levels (`[time] [thread/LEVEL]:`) beat the raw stream.
   function lineClass(entry) {
-    if (entry.stream === 'stderr' || entry.line.includes('/ERROR]')) return 'text-red-400';
-    if (entry.line.includes('/WARN]')) return 'text-(--tw-star)';
-    return 'text-(--tw-text)';
+    if (entry.stream === 'stderr' || entry.line.includes('/ERROR]')) return 'text-rose-400';
+    if (entry.line.includes('/WARN]')) return 'text-(--accent-star)';
+    if (entry.line.includes('/INFO]')) return 'text-(--accent)/80';
+    return 'text-(--text-main)';
   }
 
   async function copyLogs() {
@@ -237,6 +238,18 @@
   let instances = $state([]);
   let instancesError = $state('');
   let menuFor = $state(null);
+  let instanceQuery = $state('');
+
+  function visibleInstances() {
+    const q = instanceQuery.trim().toLowerCase();
+    if (!q) return instances;
+    return instances.filter(
+      (i) =>
+        i.name.toLowerCase().includes(q) ||
+        i.version.toLowerCase().includes(q) ||
+        i.id.toLowerCase().includes(q),
+    );
+  }
 
   async function loadInstances() {
     try {
@@ -495,15 +508,15 @@
   });
 </script>
 
-<div class="flex h-full bg-(--tw-canvas) text-sm text-(--tw-text)">
+<div class="flex h-full bg-(--bg-canvas) text-sm text-(--text-main)">
   <!-- ==================== SIDEBAR ==================== -->
   <nav
-    class="group/nav relative flex w-16 shrink-0 flex-col border-r border-(--tw-border) bg-(--tw-subtle) p-2 transition-[width] duration-150 {sidebarExpanded
+    class="group/nav relative flex w-16 shrink-0 flex-col border-r border-(--border) bg-(--bg-subtle) p-2 transition-[width] duration-150 {sidebarExpanded
       ? 'w-60'
       : 'w-16'}"
   >
     <div
-      class="flex h-10 items-center gap-2 border-b border-(--tw-border) px-1"
+      class="flex h-10 items-center gap-2 border-b border-(--border) px-1"
       ondblclick={() => (sidebarExpanded = !sidebarExpanded)}
     >
       <img src="/logo.png" alt="TwilightMC" draggable="false" class="h-7 w-7 shrink-0" />
@@ -517,8 +530,8 @@
         <button
           class="flex h-9 items-center gap-2.5 rounded px-2.5 text-left {sidebarExpanded ? '' : 'justify-center'} {active
           === item.id
-            ? 'bg-(--tw-accent) font-medium text-white'
-            : 'text-(--tw-muted) hover:bg-(--tw-subtle) hover:text-(--tw-text)'}"
+            ? 'bg-(--accent) font-medium text-(--on-accent)'
+            : 'text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)'}"
           title={item.label}
           onclick={() => (active = item.id)}
         >
@@ -530,7 +543,7 @@
       {/each}
 
       <button
-        class="flex h-9 items-center gap-2.5 rounded px-2.5 text-left {sidebarExpanded ? '' : 'justify-center'} text-(--tw-muted) hover:bg-(--tw-subtle) hover:text-(--tw-text)"
+        class="flex h-9 items-center gap-2.5 rounded px-2.5 text-left {sidebarExpanded ? '' : 'justify-center'} text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
         title="Add Instance"
         onclick={openWizard}
       >
@@ -541,7 +554,7 @@
       </button>
 
       <button
-        class="mt-3 border-t border-(--tw-border) flex h-9 items-center gap-2.5 rounded px-2.5 text-left {sidebarExpanded ? '' : 'justify-center'} text-(--tw-muted) hover:bg-(--tw-subtle) hover:text-(--tw-text)"
+        class="mt-3 border-t border-(--border) flex h-9 items-center gap-2.5 rounded px-2.5 text-left {sidebarExpanded ? '' : 'justify-center'} text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
         title="Settings"
         onclick={() => {
           settingsOpen = true;
@@ -558,28 +571,28 @@
 
     <!-- account card -->
     <button
-      class="mt-2 flex items-center gap-2 rounded border border-(--tw-border) bg-(--tw-surface) p-2 {sidebarExpanded
+      class="mt-2 flex items-center gap-2 rounded border border-(--border) bg-(--bg-surface) p-2 {sidebarExpanded
         ? ''
         : 'justify-center'}"
       title={activeAccount ? activeAccount.username : 'Add account'}
       onclick={() => (modalOpen = true)}
     >
-      <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-(--tw-accent)/20 text-[11px] font-bold text-(--tw-accent)">
+      <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-(--accent)/20 text-[11px] font-bold text-(--accent)">
         {#if activeAccount}{activeAccount.username[0]?.toUpperCase()}{:else}?{/if}
       </span>
       {#if sidebarExpanded}
         <span class="min-w-0 flex-1 text-left">
           <span class="block truncate text-[12px] font-medium">{activeAccount ? activeAccount.username : 'Add account'}</span>
-          <span class="block text-[10px] text-(--tw-muted)">
+          <span class="block text-[10px] text-(--text-muted)">
             {activeAccount ? typeLabel(activeAccount) : 'Offline'}
           </span>
         </span>
       {/if}
     </button>
 
-    <!-- expand/collapse chevron: appears on hover in compact mode -->
+    <!-- collapse (expanded) / expand-on-hover (compact) trigger at the logo edge -->
     <button
-      class="absolute top-12 -right-3 z-20 flex h-6 w-6 items-center justify-center rounded-full border border-(--tw-border) bg-(--tw-surface) text-[9px] text-(--tw-muted) transition-opacity duration-100 hover:text-(--tw-text) {sidebarExpanded
+      class="absolute top-1.5 -right-3 z-20 flex h-6 w-6 items-center justify-center rounded-full border border-(--border) bg-(--bg-surface) text-[9px] text-(--text-muted) transition-opacity duration-100 hover:text-(--text-main) {sidebarExpanded
         ? ''
         : 'opacity-0 group-hover/nav:opacity-100'}"
       onclick={() => (sidebarExpanded = !sidebarExpanded)}
@@ -590,19 +603,11 @@
 
   <!-- ==================== RIGHT COLUMN ==================== -->
   <div class="flex min-w-0 flex-1 flex-col">
-    <header class="flex h-11 shrink-0 items-center justify-between border-b border-(--tw-border) bg-(--tw-subtle) px-4">
+    <header class="flex h-11 shrink-0 items-center justify-between border-b border-(--border) bg-(--bg-subtle) px-4">
       <div class="flex items-center gap-2.5">
-        <span class="rounded bg-(--tw-accent)/15 px-2 py-0.5 text-xs font-medium text-(--tw-accent)">Bolide v{version}</span>
+        <span class="rounded bg-(--accent)/15 px-2 py-0.5 text-xs font-medium text-(--accent)">TwilightMC v{version}</span>
       </div>
-      <div class="flex items-center gap-3">
-        <span class="text-xs text-(--tw-muted)">{status}</span>
-        <button
-          class="rounded px-2 py-1 text-xs {drawerOpen ? 'text-(--tw-accent)' : 'text-(--tw-muted) hover:text-(--tw-text)'}"
-          onclick={() => (drawerOpen = !drawerOpen)}
-        >
-          Console
-        </button>
-      </div>
+      <span class="text-xs text-(--text-muted)">{status}</span>
     </header>
 
     <main class="min-w-0 flex-1 overflow-y-auto p-6">
@@ -610,21 +615,21 @@
         <!-- action toolbar -->
         <div class="mb-4 flex items-center gap-2">
           <button
-            class="rounded bg-(--tw-accent) px-3 py-1.5 text-[12px] font-medium text-white hover:bg-(--tw-accent-hover)"
+            class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
             onclick={openWizard}
           >
             ＋ Add Instance
           </button>
           <button
-            class="rounded px-2.5 py-1.5 text-[12px] text-(--tw-muted) hover:bg-(--tw-subtle) hover:text-(--tw-text) disabled:opacity-40"
+            class="rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
             disabled={!storage}
             title={storage ? storage.shared_dir : ''}
             onclick={openSharedFolder}
           >
-            📂 Folders
+            📂 Instance Folder
           </button>
           <button
-            class="rounded px-2.5 py-1.5 text-[12px] text-(--tw-muted) hover:bg-(--tw-subtle) hover:text-(--tw-text)"
+            class="rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
             onclick={() => {
               settingsOpen = true;
               loadPrefs();
@@ -633,9 +638,14 @@
           >
             ⚙ Settings
           </button>
+          <input
+            class="h-8 w-64 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+            placeholder="Filter instances…"
+            bind:value={instanceQuery}
+          />
           <span class="flex-1"></span>
           <button
-            class="rounded px-2 py-1 text-sm text-(--tw-muted) hover:bg-(--tw-subtle) hover:text-(--tw-text)"
+            class="rounded px-2 py-1 text-sm text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
             title={theme === 'dark' ? 'Twilight Light' : 'Twilight Dark'}
             onclick={toggleTheme}
           >
@@ -645,55 +655,60 @@
 
         <!-- instance grid -->
         <div class="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-3">
-          {#each instances as inst (inst.id)}
-            <div class="relative flex flex-col gap-2 rounded border border-(--tw-border) bg-(--tw-surface) p-3">
+          {#each visibleInstances() as inst (inst.id)}
+            <div
+              class="group/inst relative flex flex-col gap-2 rounded border border-(--border) bg-(--bg-surface) p-3 hover:border-(--accent)"
+              ondblclick={() => launchInstance(inst.id)}
+            >
               <div class="flex items-center gap-2.5">
-                <span class="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-(--tw-accent)/15 text-base">⛏</span>
+                <span class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded bg-(--accent)/15">
+                  <img src="/logo.png" alt="" draggable="false" class="h-6 w-6" />
+                </span>
                 <div class="min-w-0 flex-1">
                   <div class="truncate text-[13px] font-medium">{inst.name}</div>
                   <div class="mt-0.5 flex items-center gap-1">
-                    <span class="rounded bg-(--tw-accent)/15 px-1.5 py-0.5 text-[10px] font-medium text-(--tw-accent)">{inst.version}</span>
-                    <span class="rounded bg-(--tw-subtle) px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-(--tw-muted)">{inst.loader}</span>
+                    <span class="rounded bg-(--accent)/15 px-1.5 py-0.5 text-[10px] font-medium text-(--accent)">{inst.version}</span>
+                    <span class="rounded bg-(--bg-subtle) px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-(--text-muted)">{inst.loader}</span>
                   </div>
                 </div>
                 <button
-                  class="shrink-0 rounded px-1.5 text-(--tw-muted) hover:bg-(--tw-subtle) hover:text-(--tw-text)"
+                  class="shrink-0 rounded px-1.5 text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
                   title="Menu"
                   onclick={() => (menuFor = menuFor === inst.id ? null : inst.id)}
                 >
                   ⋯
                 </button>
               </div>
-              <div class="flex items-center justify-between">
-                <span class="text-[11px] text-(--tw-muted)">
-                  {inst.last_played ? new Date(inst.last_played * 1000).toLocaleDateString() : 'Never played'}
-                </span>
-                <button
-                  class="ondblclick={() => launchInstance(inst.id)} rounded bg-(--tw-accent) px-3 py-1 text-[12px] font-medium text-white hover:bg-(--tw-accent-hover) disabled:opacity-40"
-                  disabled={gameRunning}
-                  title="Play (double-click the card also launches)"
-                  onclick={() => launchInstance(inst.id)}
-                >
+              <span class="text-[11px] text-(--text-muted)">
+                {inst.last_played ? new Date(inst.last_played * 1000).toLocaleDateString() : 'Never played'}
+              </span>
+
+              <!-- hover play overlay: appears on card hover, click launches -->
+              <div
+                class="absolute inset-0 z-10 flex cursor-pointer items-center justify-center rounded bg-(--bg-canvas)/80 opacity-0 transition-opacity duration-150 group-hover/inst:opacity-100"
+                onclick={() => launchInstance(inst.id)}
+              >
+                <span class="pointer-events-none rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) {gameRunning ? 'opacity-40' : ''}">
                   ▶ Play
-                </button>
+                </span>
               </div>
 
               {#if menuFor === inst.id}
                 <div class="fixed inset-0 z-20" onclick={() => (menuFor = null)}></div>
-                <div class="absolute top-9 right-2 z-30 w-44 rounded border border-(--tw-border) bg-(--tw-surface) py-1 shadow-xl">
-                  <button class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--tw-subtle) disabled:opacity-40" disabled={gameRunning} onclick={() => (menuFor = null, launchInstance(inst.id))}>
+                <div class="absolute top-9 right-2 z-30 w-44 rounded border border-(--border) bg-(--bg-surface) py-1 shadow-xl">
+                  <button class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--bg-subtle) disabled:opacity-40" disabled={gameRunning} onclick={() => (menuFor = null, launchInstance(inst.id))}>
                     ▶ Play
                   </button>
-                  <button class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--tw-subtle)" onclick={() => (menuFor = null, openEdit(inst))}>
+                  <button class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--bg-subtle)" onclick={() => (menuFor = null, openEdit(inst))}>
                     ✎ Edit Instance
                   </button>
-                  <button class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--tw-subtle)" onclick={() => (menuFor = null, openInstanceFolder(inst.id))}>
+                  <button class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--bg-subtle)" onclick={() => (menuFor = null, openInstanceFolder(inst.id))}>
                     📂 Open Folder
                   </button>
-                  <button class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--tw-subtle)" onclick={() => (menuFor = null, drawerOpen = true)}>
+                  <button class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--bg-subtle)" onclick={() => (menuFor = null, drawerOpen = true)}>
                     ▤ View Logs
                   </button>
-                  <div class="my-1 border-t border-(--tw-border)"></div>
+                  <div class="my-1 border-t border-(--border)"></div>
                   <button class="block w-full px-3 py-1.5 text-left text-[12px] text-red-400 hover:bg-red-500/10" onclick={() => (menuFor = null, deleteInstance(inst.id))}>
                     ✕ Delete
                   </button>
@@ -701,41 +716,96 @@
               {/if}
             </div>
           {:else}
-            <div class="col-span-full rounded border border-(--tw-border) bg-(--tw-surface) p-6 text-center text-(--tw-muted)">
-              {instancesError ? instancesError : 'No instances yet — open the wizard or install a modpack.'}
+            <div class="col-span-full rounded border border-(--border) bg-(--bg-surface) p-6 text-center text-[12px] text-(--text-muted)">
+              {#if instancesError}
+                {instancesError}
+              {:else if instanceQuery.trim()}
+                No instances match "{instanceQuery.trim()}".
+              {:else}
+                No instances yet — open the wizard or install a modpack.
+              {/if}
             </div>
           {/each}
         </div>
       {:else}
         <h2 class="text-lg font-semibold">{sections[active][0]}</h2>
-        <p class="mt-1 text-(--tw-muted)">{sections[active][1]}</p>
+        <p class="mt-1 text-(--text-muted)">{sections[active][1]}</p>
       {/if}
     </main>
 
-    {#if drawerOpen}
-      <section class="flex h-56 shrink-0 flex-col border-t border-(--tw-border) bg-(--tw-subtle)">
-        <div class="flex items-center justify-between border-b border-(--tw-border) px-3 py-1.5">
-          <span class="text-[11px] font-semibold uppercase tracking-wide text-(--tw-muted)">
-            Game console{gameRunning ? ' · running' : ''}
-          </span>
-          <div class="flex gap-3">
-            <button class="text-[11px] text-(--tw-muted) hover:text-(--tw-text)" onclick={clearLogs}>Clear</button>
-            <button class="text-[11px] text-(--tw-muted) hover:text-(--tw-text)" onclick={copyLogs}>Copy</button>
-            <button class="text-[11px] text-red-400 hover:text-red-300 disabled:opacity-40" disabled={!gameRunning} onclick={killGame}>Kill</button>
-            <button class="text-[11px] text-(--tw-muted) hover:text-(--tw-text)" onclick={() => (drawerOpen = false)}>Hide</button>
+    <!-- always-present collapsible console drawer: h-10 bar ⇄ h-48 terminal -->
+    <section
+      class="flex shrink-0 flex-col overflow-hidden border-t border-(--border) bg-(--bg-subtle) transition-[height] duration-150 {drawerOpen
+        ? 'h-48'
+        : 'h-10'}"
+    >
+      <div class="flex h-10 shrink-0 items-center justify-between gap-2 px-3">
+        <button
+          class="flex min-w-0 flex-1 items-center gap-2 text-left text-[11px] font-semibold uppercase tracking-wide text-(--text-muted) hover:text-(--text-main)"
+          title={drawerOpen ? 'Collapse console' : 'Expand console'}
+          onclick={() => (drawerOpen = !drawerOpen)}
+        >
+          <span
+            class="h-2 w-2 shrink-0 rounded-full {gameRunning ? 'animate-pulse bg-green-500' : 'bg-(--border)'}"
+          ></span>
+          <span class="truncate">Console Drawer (Real-time logs)</span>
+          {#if gameRunning}
+            <span class="shrink-0 text-[10px] font-medium normal-case tracking-normal text-green-500">running</span>
+          {/if}
+        </button>
+        <div class="flex shrink-0 items-center gap-3 text-[11px]">
+          <button
+            class="text-(--text-muted) hover:text-(--text-main) disabled:opacity-40"
+            disabled={!consoleLines.length}
+            onclick={(e) => {
+              e.stopPropagation();
+              clearLogs();
+            }}
+          >
+            Clear
+          </button>
+          <button
+            class="text-(--text-muted) hover:text-(--text-main) disabled:opacity-40"
+            disabled={!consoleLines.length}
+            onclick={(e) => {
+              e.stopPropagation();
+              copyLogs();
+            }}
+          >
+            Copy
+          </button>
+          <button
+            class="text-rose-400 hover:text-rose-300 disabled:opacity-40"
+            disabled={!gameRunning}
+            title="Kill the game process"
+            onclick={(e) => {
+              e.stopPropagation();
+              killGame();
+            }}
+          >
+            Kill
+          </button>
+          {#if drawerOpen}
+            <button
+              class="text-(--text-muted) hover:text-(--text-main)"
+              title="Collapse"
+              onclick={() => (drawerOpen = false)}
+            >
+              Hide
+            </button>
+          {/if}
+        </div>
+      </div>
+      <div bind:this={consoleEl} class="min-h-0 flex-1 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-5">
+        {#each consoleLines as entry, i (i)}
+          <div class="whitespace-pre-wrap break-all {lineClass(entry)}">
+            {entry.line}
           </div>
-        </div>
-        <div bind:this={consoleEl} class="min-h-0 flex-1 overflow-y-auto px-3 py-2 font-mono text-[11px] leading-5">
-          {#each consoleLines as entry, i (i)}
-            <div class="whitespace-pre-wrap break-all {lineClass(entry)}">
-              {entry.line}
-            </div>
-          {:else}
-            <div class="text-(--tw-muted)">Game output appears here once you launch.</div>
-          {/each}
-        </div>
-      </section>
-    {/if}
+        {:else}
+          <div class="text-(--text-muted)">Game output appears here once you launch.</div>
+        {/each}
+      </div>
+    </section>
   </div>
 
   {#if modalOpen}
@@ -746,72 +816,72 @@
         if (e.target === e.currentTarget) modalOpen = false;
       }}
     >
-      <div class="w-[440px] rounded-lg border border-(--tw-border) bg-(--tw-surface) shadow-2xl">
-        <div class="flex items-center justify-between border-b border-(--tw-border) px-4 py-3">
+      <div class="w-[440px] rounded-lg border border-(--border) bg-(--bg-surface) shadow-2xl">
+        <div class="flex items-center justify-between border-b border-(--border) px-4 py-3">
           <h3 class="text-sm font-semibold">Accounts</h3>
-          <button class="text-(--tw-muted) hover:text-(--tw-text)" onclick={() => (modalOpen = false)}>✕</button>
+          <button class="text-(--text-muted) hover:text-(--text-main)" onclick={() => (modalOpen = false)}>✕</button>
         </div>
 
         <div class="max-h-72 overflow-y-auto">
           {#each accounts as account (account.id)}
             <div
-              class="flex items-center gap-3 border-b border-(--tw-border) px-4 py-2.5 {activeAccount?.id === account.id
-                ? 'bg-(--tw-accent)/10'
+              class="flex items-center gap-3 border-b border-(--border) px-4 py-2.5 {activeAccount?.id === account.id
+                ? 'bg-(--accent)/10'
                 : ''}"
             >
-              <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-(--tw-accent)/20 text-sm font-bold text-(--tw-accent)">
+              <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-(--accent)/20 text-sm font-bold text-(--accent)">
                 {account.username[0]?.toUpperCase()}
               </span>
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-2">
                   <span class="truncate text-[13px] font-medium">{account.username}</span>
-                  <span class="rounded bg-(--tw-subtle) px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-(--tw-muted)">
+                  <span class="rounded bg-(--bg-subtle) px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-(--text-muted)">
                     {typeLabel(account)}
                   </span>
                   {#if activeAccount?.id === account.id}
-                    <span class="text-[10px] font-semibold tracking-wide text-(--tw-accent)">ACTIVE</span>
+                    <span class="text-[10px] font-semibold tracking-wide text-(--accent)">ACTIVE</span>
                   {/if}
                 </div>
-                <div class="truncate text-[11px] text-(--tw-muted)">{account.uuid}</div>
+                <div class="truncate text-[11px] text-(--text-muted)">{account.uuid}</div>
               </div>
               <div class="flex shrink-0 gap-1">
                 {#if activeAccount?.id !== account.id}
                   <button
-                    class="rounded px-2 py-1 text-[11px] text-(--tw-muted) hover:bg-(--tw-subtle) hover:text-(--tw-text)"
+                    class="rounded px-2 py-1 text-[11px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
                     onclick={() => setActive(account.id)}>Set active</button
                   >
                 {/if}
                 <button
-                  class="rounded px-2 py-1 text-[11px] text-(--tw-muted) hover:bg-red-500/10 hover:text-red-400"
+                  class="rounded px-2 py-1 text-[11px] text-(--text-muted) hover:bg-red-500/10 hover:text-red-400"
                   onclick={() => removeAccount(account.id)}>Remove</button
                 >
               </div>
             </div>
           {:else}
-            <p class="px-4 py-3 text-[12px] text-(--tw-muted)">No accounts yet — add an offline profile below.</p>
+            <p class="px-4 py-3 text-[12px] text-(--text-muted)">No accounts yet — add an offline profile below.</p>
           {/each}
         </div>
 
         <form
-          class="flex items-center gap-2 border-t border-(--tw-border) p-3"
+          class="flex items-center gap-2 border-t border-(--border) p-3"
           onsubmit={(e) => {
             e.preventDefault();
             addAccount();
           }}
         >
           <input
-            class="h-8 flex-1 rounded border border-(--tw-border) bg-(--tw-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--tw-muted) focus:border-(--tw-accent)"
+            class="h-8 flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
             placeholder="Offline username (3-16 letters, digits, _)"
             bind:value={newUsername}
           />
           <button
             type="submit"
-            class="rounded bg-(--tw-accent) px-3 py-1.5 text-[12px] font-medium text-white hover:bg-(--tw-accent-hover) disabled:opacity-40"
+            class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
             disabled={!newUsername}>Add</button
           >
         </form>
         {#if accountError}
-          <p class="border-t border-(--tw-border) px-4 py-2 text-[12px] text-red-400">{accountError}</p>
+          <p class="border-t border-(--border) px-4 py-2 text-[12px] text-red-400">{accountError}</p>
         {/if}
       </div>
     </div>
@@ -825,22 +895,22 @@
         if (e.target === e.currentTarget) wizardOpen = false;
       }}
     >
-      <div class="flex h-[480px] w-[560px] flex-col rounded-lg border border-(--tw-border) bg-(--tw-surface) shadow-2xl">
-        <div class="flex items-center justify-between border-b border-(--tw-border) px-4 py-3">
+      <div class="flex h-[480px] w-[560px] flex-col rounded-lg border border-(--border) bg-(--bg-surface) shadow-2xl">
+        <div class="flex items-center justify-between border-b border-(--border) px-4 py-3">
           <h3 class="text-sm font-semibold">New Instance</h3>
-          <button class="text-(--tw-muted) hover:text-(--tw-text)" onclick={() => (wizardOpen = false)}>✕</button>
+          <button class="text-(--text-muted) hover:text-(--text-main)" onclick={() => (wizardOpen = false)}>✕</button>
         </div>
-        <div class="flex items-center gap-1 border-b border-(--tw-border) px-3 py-2 text-[11px]">
-          <span class="px-2 py-1 text-(--tw-muted) {wizardTab === 1 ? 'bg-(--tw-subtle) rounded text-(--tw-text) font-medium' : ''}">1 · Version</span>
-          <span class="px-2 py-1 text-(--tw-muted) {wizardTab === 2 ? 'bg-(--tw-subtle) rounded text-(--tw-text) font-medium' : ''}">2 · Loader</span>
-          <span class="px-2 py-1 text-(--tw-muted) {wizardTab === 3 ? 'bg-(--tw-subtle) rounded text-(--tw-text) font-medium' : ''}">3 · Modpack</span>
+        <div class="flex items-center gap-1 border-b border-(--border) px-3 py-2 text-[11px]">
+          <span class="px-2 py-1 text-(--text-muted) {wizardTab === 1 ? 'bg-(--bg-subtle) rounded text-(--text-main) font-medium' : ''}">1 · Version</span>
+          <span class="px-2 py-1 text-(--text-muted) {wizardTab === 2 ? 'bg-(--bg-subtle) rounded text-(--text-main) font-medium' : ''}">2 · Loader</span>
+          <span class="px-2 py-1 text-(--text-muted) {wizardTab === 3 ? 'bg-(--bg-subtle) rounded text-(--text-main) font-medium' : ''}">3 · Modpack</span>
         </div>
 
         {#if wizardTab === 1}
           <div class="min-h-0 flex-1 overflow-y-auto p-4">
             <div class="flex items-center justify-between">
               <button
-                class="rounded bg-(--tw-accent) px-3 py-1.5 text-[12px] font-medium text-white hover:bg-(--tw-accent-hover) disabled:opacity-40"
+                class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
                 disabled={fetchingVersions}
                 onclick={fetchVersions}
               >
@@ -850,8 +920,8 @@
                 {#each [['all', 'All'], ['releases', 'Releases'], ['snapshots', 'Snapshots']] as [id, label] (id)}
                   <button
                     class="rounded px-2 py-1 text-[11px] {typeFilter === id
-                      ? 'bg-(--tw-accent) font-medium text-white'
-                      : 'text-(--tw-muted) hover:bg-(--tw-subtle) hover:text-(--tw-text)'}"
+                      ? 'bg-(--accent) font-medium text-(--on-accent)'
+                      : 'text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)'}"
                     onclick={() => (typeFilter = id)}
                   >
                     {label}
@@ -860,14 +930,14 @@
               </div>
             </div>
             <input
-              class="mt-3 h-8 w-full rounded border border-(--tw-border) bg-(--tw-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--tw-muted) focus:border-(--tw-accent)"
+              class="mt-3 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
               placeholder={catalog ? `Search ${catalog.total} versions…` : 'Load the version list first'}
               bind:value={versionQuery}
               disabled={!catalog}
             />
-            <ul class="mt-3 h-full max-h-[280px] divide-y divide-(--tw-border) overflow-y-auto rounded border border-(--tw-border) bg-(--tw-subtle)">
+            <ul class="mt-3 h-full max-h-[280px] divide-y divide-(--border) overflow-y-auto rounded border border-(--border) bg-(--bg-subtle)">
               {#each filteredVersions() as v (v.id)}
-                <li class="flex items-center gap-3 px-3 py-2 {wizardVersion === v.id ? 'bg-(--tw-accent)/10' : ''}">
+                <li class="flex items-center gap-3 px-3 py-2 {wizardVersion === v.id ? 'bg-(--accent)/10' : ''}">
                   <button
                     class="h-8 min-w-0 flex-1 cursor-pointer text-left"
                     onclick={() => {
@@ -877,13 +947,13 @@
                   >
                     <span class="text-[13px]">{v.id}</span>
                     {#if v.is_latest_release}
-                      <span class="ml-1 rounded bg-(--tw-star)/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-(--tw-star)">LATEST</span>
+                      <span class="ml-1 rounded bg-(--accent-star)/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-(--accent-star)">LATEST</span>
                     {/if}
-                    <span class="ml-2 text-[10px] uppercase tracking-wide {v.version_type === 'release' ? 'text-(--tw-muted)' : 'text-(--tw-star)/80'}">{v.version_type}</span>
+                    <span class="ml-2 text-[10px] uppercase tracking-wide {v.version_type === 'release' ? 'text-(--text-muted)' : 'text-(--accent-star)/80'}">{v.version_type}</span>
                   </button>
                 </li>
               {:else}
-                <li class="px-3 py-3 text-[12px] text-(--tw-muted)">
+                <li class="px-3 py-3 text-[12px] text-(--text-muted)">
                   {catalog ? 'No versions match this filter.' : versionsError ?? 'Choose a source…'}
                 </li>
               {/each}
@@ -891,18 +961,18 @@
           </div>
         {:else if wizardTab === 2}
           <div class="flex-1 overflow-y-auto p-4">
-            <label class="block text-[12px] font-medium text-(--tw-muted)">Instance name</label>
+            <label class="block text-[12px] font-medium text-(--text-muted)">Instance name</label>
             <input
-              class="mt-1 h-8 w-full rounded border border-(--tw-border) bg-(--tw-subtle) px-2.5 text-[13px] outline-none focus:border-(--tw-accent)"
+              class="mt-1 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none focus:border-(--accent)"
               bind:value={wizardName}
               placeholder={wizardVersion || '1.21.4'}
             />
             <div class="mt-3 flex gap-2">
               {#each [['', 'Vanilla'], ['fabric', 'Fabric'], ['quilt', 'Quilt']] as [id, label] (id)}
                 <button
-                  class="flex-1 rounded border border-(--tw-border) px-3 py-2 text-[13px] {wizardLoader === id
-                    ? 'border-(--tw-accent) bg-(--tw-accent)/10 font-medium text-(--tw-accent)'
-                    : 'text-(--tw-muted) hover:border-(--tw-accent) hover:text-(--tw-text)'}"
+                  class="flex-1 rounded border border-(--border) px-3 py-2 text-[13px] {wizardLoader === id
+                    ? 'border-(--accent) bg-(--accent)/10 font-medium text-(--accent)'
+                    : 'text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)'}"
                   onclick={() => (wizardLoader = id)}
                 >
                   {label}
@@ -910,9 +980,9 @@
               {/each}
             </div>
             {#if wizardLoader}
-              <label class="mt-3 block text-[12px] font-medium text-(--tw-muted)">{wizardLoader} version (empty = latest stable)</label>
+              <label class="mt-3 block text-[12px] font-medium text-(--text-muted)">{wizardLoader} version (empty = latest stable)</label>
               <input
-                class="mt-1 h-8 w-full rounded border border-(--tw-border) bg-(--tw-subtle) px-2.5 text-[13px] outline-none focus:border-(--tw-accent)"
+                class="mt-1 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none focus:border-(--accent)"
                 bind:value={wizardLoaderVersion}
                 placeholder="latest"
               />
@@ -921,7 +991,7 @@
         {:else}
           <div class="flex-1 overflow-y-auto p-4">
             <div
-              class="flex h-40 flex-col items-center justify-center rounded border border-dashed border-(--tw-border) text-center text-(--tw-muted) hover:border-(--tw-accent)"
+              class="flex h-40 flex-col items-center justify-center rounded border border-dashed border-(--border) text-center text-(--text-muted) hover:border-(--accent)"
               ondragover={(e) => e.preventDefault()}
               ondrop={(e) => {
                 e.preventDefault();
@@ -930,43 +1000,43 @@
               }}
             >
               <span class="text-xl">⤓</span>
-              <span class="mt-2 text-[12px]">Drop an <span class="text-(--tw-text)">.mrpack</span> here</span>
+              <span class="mt-2 text-[12px]">Drop an <span class="text-(--text-main)">.mrpack</span> here</span>
               <span class="text-[11px]">or paste its path / URL below</span>
             </div>
             <input
-              class="mt-3 h-8 w-full rounded border border-(--tw-border) bg-(--tw-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--tw-muted) focus:border-(--tw-accent)"
+              class="mt-3 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
               placeholder="C:\downloads\pack.mrpack  |  https://modrinth.com/…"
               bind:value={modpackTarget}
             />
-            <p class="mt-2 text-[11px] text-(--tw-muted)">Modrinth packs stage their own instance (name from the pack slug).</p>
+            <p class="mt-2 text-[11px] text-(--text-muted)">Modrinth packs stage their own instance (name from the pack slug).</p>
           </div>
         {/if}
 
-        <div class="flex items-center justify-between border-t border-(--tw-border) px-4 py-3">
+        <div class="flex items-center justify-between border-t border-(--border) px-4 py-3">
           {#if wizardTab === 1}
-            <span class="text-[12px] text-(--tw-muted)">{wizardVersion ? `Selected ${wizardVersion}` : 'Pick a version to continue'}</span>
+            <span class="text-[12px] text-(--text-muted)">{wizardVersion ? `Selected ${wizardVersion}` : 'Pick a version to continue'}</span>
             <button
-              class="rounded bg-(--tw-accent) px-3 py-1.5 text-[12px] font-medium text-white hover:bg-(--tw-accent-hover) disabled:opacity-40"
+              class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
               disabled={!wizardVersion}
               onclick={() => (wizardTab = 2)}
             >
               Next
             </button>
           {:else if wizardTab === 2}
-            <button class="rounded px-3 py-1.5 text-[12px] text-(--tw-muted) hover:text-(--tw-text)" onclick={() => (wizardTab = 1)}>Back</button>
+            <button class="rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:text-(--text-main)" onclick={() => (wizardTab = 1)}>Back</button>
             <div class="flex gap-2">
-              <button class="rounded px-3 py-1.5 text-[12px] text-(--tw-muted) hover:text-(--tw-text)" onclick={() => (wizardTab = 3)}>Modpack instead</button>
+              <button class="rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:text-(--text-main)" onclick={() => (wizardTab = 3)}>Modpack instead</button>
               <button
-                class="rounded bg-(--tw-accent) px-3 py-1.5 text-[12px] font-medium text-white hover:bg-(--tw-accent-hover)"
+                class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
                 onclick={createFromWizard}
               >
                 Create Instance
               </button>
             </div>
           {:else}
-            <button class="rounded px-3 py-1.5 text-[12px] text-(--tw-muted) hover:text-(--tw-text)" onclick={() => (wizardTab = 2)}>Back</button>
+            <button class="rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:text-(--text-main)" onclick={() => (wizardTab = 2)}>Back</button>
             <button
-              class="rounded bg-(--tw-accent) px-3 py-1.5 text-[12px] font-medium text-white hover:bg-(--tw-accent-hover) disabled:opacity-40"
+              class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
               disabled={modpackBusy || !modpackTarget.trim()}
               onclick={installFromWizard}
             >
@@ -975,7 +1045,7 @@
           {/if}
         </div>
         {#if wizardError}
-          <p class="border-t border-(--tw-border) px-4 py-2 text-[12px] text-red-400">{wizardError}</p>
+          <p class="border-t border-(--border) px-4 py-2 text-[12px] text-red-400">{wizardError}</p>
         {/if}
       </div>
     </div>
@@ -989,16 +1059,16 @@
         if (e.target === e.currentTarget) editFor = null;
       }}
     >
-      <div class="flex h-[480px] w-[640px] overflow-hidden rounded-lg border border-(--tw-border) bg-(--tw-surface) shadow-2xl">
-        <div class="flex w-44 shrink-0 flex-col gap-0.5 border-r border-(--tw-border) bg-(--tw-subtle) p-2">
+      <div class="flex h-[480px] w-[640px] overflow-hidden rounded-lg border border-(--border) bg-(--bg-surface) shadow-2xl">
+        <div class="flex w-44 shrink-0 flex-col gap-0.5 border-r border-(--border) bg-(--bg-subtle) p-2">
           <h3 class="mt-1 px-2 text-[13px] font-semibold">{editFor.name}</h3>
-          <p class="px-2 text-[11px] text-(--tw-muted)">{editFor.version} · {editFor.loader}</p>
-          <div class="mt-3 border-t border-(--tw-border)"></div>
+          <p class="px-2 text-[11px] text-(--text-muted)">{editFor.version} · {editFor.loader}</p>
+          <div class="mt-3 border-t border-(--border)"></div>
           {#each ['components', 'mods', 'screenshots', 'logs'] as tab (tab)}
             <button
               class="rounded px-2 py-1.5 text-left text-[12px] {editTab === tab
-                ? 'bg-(--tw-accent)/15 font-medium text-(--tw-accent)'
-                : 'text-(--tw-muted) hover:text-(--tw-text)'}"
+                ? 'bg-(--accent)/15 font-medium text-(--accent)'
+                : 'text-(--text-muted) hover:text-(--text-main)'}"
               onclick={() => (editTab = tab)}
             >
               {tab === 'components'
@@ -1008,72 +1078,72 @@
                   : tab[0].toUpperCase() + tab.slice(1)}
             </button>
           {/each}
-          <button class="mt-auto rounded px-2 py-1.5 text-left text-[12px] text-(--tw-muted) hover:text-(--tw-text)" onclick={() => (editFor = null)}>
+          <button class="mt-auto rounded px-2 py-1.5 text-left text-[12px] text-(--text-muted) hover:text-(--text-main)" onclick={() => (editFor = null)}>
             Close
           </button>
         </div>
 
         <div class="min-w-0 flex-1 overflow-y-auto p-4">
           {#if editTab === 'components'}
-            <div class="rounded border border-(--tw-border) bg-(--tw-subtle) p-3 text-[12px]">
+            <div class="rounded border border-(--border) bg-(--bg-subtle) p-3 text-[12px]">
               <div class="font-medium">Minecraft {editFor.version}</div>
-              <div class="mt-1 text-(--tw-muted)">Loader: {editFor.loader}</div>
-              <div class="mt-1 text-(--tw-muted)">
+              <div class="mt-1 text-(--text-muted)">Loader: {editFor.loader}</div>
+              <div class="mt-1 text-(--text-muted)">
                 Last played: {editFor.last_played ? new Date(editFor.last_played * 1000).toLocaleDateString() : 'never'}
               </div>
-              <p class="mt-3 text-[11px] text-(--tw-muted)">Version component switching (up/downgrade with progression) lands in a later milestone.</p>
+              <p class="mt-3 text-[11px] text-(--text-muted)">Version component switching (up/downgrade with progression) lands in a later milestone.</p>
             </div>
           {:else if editTab === 'mods'}
             <div class="flex items-center justify-between">
-              <span class="text-[11px] font-semibold uppercase tracking-wide text-(--tw-muted)">Mods ({mods.length})</span>
-              <button class="text-[11px] text-(--tw-muted) hover:text-(--tw-text)" onclick={refreshMods}>Refresh</button>
+              <span class="text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Mods ({mods.length})</span>
+              <button class="text-[11px] text-(--text-muted) hover:text-(--text-main)" onclick={refreshMods}>Refresh</button>
             </div>
             <div class="mt-2 flex items-center gap-2">
               <input
-                class="h-8 flex-1 rounded border border-(--tw-border) bg-(--tw-subtle) px-2.5 text-[12px] outline-none placeholder:text-(--tw-muted) focus:border-(--tw-accent)"
+                class="h-8 flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
                 placeholder="Path to a .jar file…"
                 bind:value={importPath}
               />
               <button
-                class="rounded bg-(--tw-accent) px-3 py-1 text-[12px] font-medium text-white hover:bg-(--tw-accent-hover) disabled:opacity-40"
+                class="rounded bg-(--accent) px-3 py-1 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
                 disabled={modsBusy || !importPath.trim()}
                 onclick={importMod}
               >
                 Add Mod
               </button>
             </div>
-            <ul class="mt-3 max-h-72 divide-y divide-(--tw-border) overflow-y-auto rounded border border-(--tw-border) bg-(--tw-subtle)">
+            <ul class="mt-3 max-h-72 divide-y divide-(--border) overflow-y-auto rounded border border-(--border) bg-(--bg-subtle)">
                 {#each mods as mod (mod.base)}
                   <li class="flex items-center gap-3 px-3 py-2">
                     <button
-                      class="flex h-5 w-9 shrink-0 items-center rounded-full border border-(--tw-border) px-0.5 {mod.enabled
-                        ? 'justify-end bg-(--tw-accent)'
-                        : 'justify-start bg-(--tw-canvas)'}"
+                      class="flex h-5 w-9 shrink-0 items-center rounded-full border border-(--border) px-0.5 {mod.enabled
+                        ? 'justify-end bg-(--accent)'
+                        : 'justify-start bg-(--bg-canvas)'}"
                       title={mod.enabled ? 'Disable' : 'Enable'}
                       onclick={() => toggleMod(mod.base, !mod.enabled)}
                     >
-                      <span class="h-3.5 w-3.5 rounded-full bg-(--tw-surface)"></span>
+                      <span class="h-3.5 w-3.5 rounded-full bg-(--bg-surface)"></span>
                     </button>
                     <span class="min-w-0 flex-1 truncate text-[13px]" class:opacity-50={!mod.enabled}>{mod.base}</span>
-                    <span class="text-[10px] uppercase tracking-wide {mod.enabled ? 'text-(--tw-muted)' : 'text-(--tw-star)'}">
+                    <span class="text-[10px] uppercase tracking-wide {mod.enabled ? 'text-(--text-muted)' : 'text-(--accent-star)'}">
                       {mod.enabled ? 'enabled' : 'disabled'}
                     </span>
                   </li>
                 {:else}
-                  <li class="px-3 py-3 text-[12px] text-(--tw-muted)">No mods — drop .jar files into the instance mods dir or paste a path above.</li>
+                  <li class="px-3 py-3 text-[12px] text-(--text-muted)">No mods — drop .jar files into the instance mods dir or paste a path above.</li>
                 {/each}
               </ul>
               {#if modsMsg}
               <p class="mt-2 text-[12px] text-red-400">{modsMsg}</p>
             {/if}
           {:else if editTab === 'screenshots'}
-            <div class="rounded border border-(--tw-border) bg-(--tw-subtle) p-4 text-[12px] text-(--tw-muted)">
-              Screenshot browser (thumbnail grid over <span class="text-(--tw-text)">minecraft/screenshots</span>) lands in a later milestone.
+            <div class="rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px] text-(--text-muted)">
+              Screenshot browser (thumbnail grid over <span class="text-(--text-main)">minecraft/screenshots</span>) lands in a later milestone.
             </div>
           {:else}
-            <div class="flex h-full max-h-80 flex-col rounded border border-(--tw-border) bg-(--tw-subtle) p-4 text-[12px] text-(--tw-muted)">
+            <div class="flex h-full max-h-80 flex-col rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px] text-(--text-muted)">
               <p>Live game output renders in the console drawer with level coloring.</p>
-              <button class="mt-3 w-fit rounded bg-(--tw-accent) px-3 py-1.5 text-[12px] font-medium text-white hover:bg-(--tw-accent-hover)" onclick={() => (drawerOpen = true)}>
+              <button class="mt-3 w-fit rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)" onclick={() => (drawerOpen = true)}>
                 Open console
               </button>
             </div>
@@ -1091,16 +1161,16 @@
         if (e.target === e.currentTarget) settingsOpen = false;
       }}
     >
-      <div class="flex max-h-[560px] w-[520px] flex-col overflow-hidden rounded-lg border border-(--tw-border) bg-(--tw-surface) shadow-2xl">
-        <div class="flex items-center justify-between border-b border-(--tw-border) px-4 py-3">
+      <div class="flex max-h-[560px] w-[520px] flex-col overflow-hidden rounded-lg border border-(--border) bg-(--bg-surface) shadow-2xl">
+        <div class="flex items-center justify-between border-b border-(--border) px-4 py-3">
           <h3 class="text-sm font-semibold">Settings</h3>
-          <button class="text-(--tw-muted) hover:text-(--tw-text)" onclick={() => (settingsOpen = false)}>✕</button>
+          <button class="text-(--text-muted) hover:text-(--text-main)" onclick={() => (settingsOpen = false)}>✕</button>
         </div>
 
         <div class="min-h-0 flex-1 overflow-y-auto p-4">
-          <h4 class="text-[11px] font-semibold uppercase tracking-wide text-(--tw-muted)">Java</h4>
+          <h4 class="text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Java</h4>
           <select
-            class="mt-2 h-8 w-full rounded border border-(--tw-border) bg-(--tw-subtle) px-2 text-[13px] outline-none focus:border-(--tw-accent)"
+            class="mt-2 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2 text-[13px] outline-none focus:border-(--accent)"
             bind:value={javaPath}
           >
             <option value="">Auto-discovery (recommended)</option>
@@ -1109,52 +1179,52 @@
             {/each}
           </select>
           {#if !runtimes.length}
-            <p class="mt-2 text-[11px] text-(--tw-muted)">{scanning ? 'Probing system roots…' : 'No runtimes detected.'}</p>
+            <p class="mt-2 text-[11px] text-(--text-muted)">{scanning ? 'Probing system roots…' : 'No runtimes detected.'}</p>
           {/if}
-          <button class="mt-2 text-[11px] text-(--tw-muted) hover:text-(--tw-text)" onclick={scanJava}>Rescan JREs</button>
+          <button class="mt-2 text-[11px] text-(--text-muted) hover:text-(--text-main)" onclick={scanJava}>Rescan JREs</button>
 
-          <h4 class="mt-5 text-[11px] font-semibold uppercase tracking-wide text-(--tw-muted)">Memory</h4>
+          <h4 class="mt-5 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Memory</h4>
           <div class="mt-2 flex items-center gap-2">
-            <span class="w-14 text-[12px] text-(--tw-muted)">-Xms</span>
-            <input type="range" min="0" max="16384" step="256" bind:value={minMem} class="flex-1 accent-[var(--tw-accent)]" />
-            <input type="number" min="0" max="65536" step="256" bind:value={minMem} class="h-7 w-20 rounded border border-(--tw-border) bg-(--tw-subtle) px-2 text-right text-[12px] outline-none focus:border-(--tw-accent)" />
-            <span class="text-[11px] text-(--tw-muted)">MiB</span>
+            <span class="w-14 text-[12px] text-(--text-muted)">-Xms</span>
+            <input type="range" min="0" max="16384" step="256" bind:value={minMem} class="flex-1 accent-[var(--accent)]" />
+            <input type="number" min="0" max="65536" step="256" bind:value={minMem} class="h-7 w-20 rounded border border-(--border) bg-(--bg-subtle) px-2 text-right text-[12px] outline-none focus:border-(--accent)" />
+            <span class="text-[11px] text-(--text-muted)">MiB</span>
           </div>
           <div class="mt-1 flex items-center gap-2">
-            <span class="w-14 text-[12px] text-(--tw-muted)">-Xmx</span>
-            <input type="range" min="0" max="16384" step="256" bind:value={maxMem} class="flex-1 accent-[var(--tw-accent)]" />
-            <input type="number" min="0" max="65536" step="256" bind:value={maxMem} class="h-7 w-20 rounded border border-(--tw-border) bg-(--tw-subtle) px-2 text-right text-[12px] outline-none focus:border-(--tw-accent)" />
-            <span class="text-[11px] text-(--tw-muted)">MiB</span>
+            <span class="w-14 text-[12px] text-(--text-muted)">-Xmx</span>
+            <input type="range" min="0" max="16384" step="256" bind:value={maxMem} class="flex-1 accent-[var(--accent)]" />
+            <input type="number" min="0" max="65536" step="256" bind:value={maxMem} class="h-7 w-20 rounded border border-(--border) bg-(--bg-subtle) px-2 text-right text-[12px] outline-none focus:border-(--accent)" />
+            <span class="text-[11px] text-(--text-muted)">MiB</span>
           </div>
-          <p class="mt-1 text-[11px] text-(--tw-muted)">0 = launcher default. Recommended: 2048–4096.</p>
+          <p class="mt-1 text-[11px] text-(--text-muted)">0 = launcher default. Recommended: 2048–4096.</p>
 
-          <h4 class="mt-5 text-[11px] font-semibold uppercase tracking-wide text-(--tw-muted)">Storage</h4>
+          <h4 class="mt-5 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Storage</h4>
           {#if storage}
-            <div class="mt-2 rounded border border-(--tw-border) bg-(--tw-subtle) p-3">
-              <div class="text-[11px] text-(--tw-muted)">Shared library {storage.is_default_shared ? '(default)' : '(custom)'}</div>
+            <div class="mt-2 rounded border border-(--border) bg-(--bg-subtle) p-3">
+              <div class="text-[11px] text-(--text-muted)">Shared library {storage.is_default_shared ? '(default)' : '(custom)'}</div>
               <div class="mt-2 flex gap-2">
                 <input
-                  class="h-8 flex-1 rounded border border-(--tw-border) bg-(--tw-canvas) px-2.5 text-[12px] outline-none placeholder:text-(--tw-muted) focus:border-(--tw-accent)"
+                  class="h-8 flex-1 rounded border border-(--border) bg-(--bg-canvas) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
                   placeholder={storage.shared_dir}
                   bind:value={sharedInput}
                 />
                 <button
-                  class="rounded bg-(--tw-accent) px-3 text-[12px] font-medium text-white hover:bg-(--tw-accent-hover) disabled:opacity-40"
+                  class="rounded bg-(--accent) px-3 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
                   disabled={storageBusy}
                   onclick={saveShared}>Save</button
                 >
                 {#if !storage.is_default_shared}
                   <button
-                    class="rounded px-3 text-[12px] text-(--tw-muted) hover:bg-(--tw-subtle) hover:text-(--tw-text) disabled:opacity-40"
+                    class="rounded px-3 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
                     disabled={storageBusy}
                     onclick={resetShared}>Reset</button
                   >
                 {/if}
               </div>
               <div class="mt-3 flex items-center justify-between gap-2">
-                <span class="min-w-0 flex-1 truncate text-[11px] text-(--tw-muted)">Staging: {storage.staging_root}</span>
+                <span class="min-w-0 flex-1 truncate text-[11px] text-(--text-muted)">Staging: {storage.staging_root}</span>
                 <button
-                  class="shrink-0 rounded px-3 py-1 text-[11px] text-(--tw-muted) hover:bg-(--tw-subtle) hover:text-(--tw-text) disabled:opacity-40"
+                  class="shrink-0 rounded px-3 py-1 text-[11px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
                   disabled={storageBusy || gameRunning}
                   onclick={cleanStaging}
                 >
@@ -1164,13 +1234,13 @@
             </div>
           {/if}
           {#if javaMsg || storageMsg}
-            <p class="mt-3 text-[12px] {javaMsg ? 'text-(--tw-accent)' : 'text-(--tw-muted)'}">{javaMsg || storageMsg}</p>
+            <p class="mt-3 text-[12px] {javaMsg ? 'text-(--accent)' : 'text-(--text-muted)'}">{javaMsg || storageMsg}</p>
           {/if}
         </div>
 
-        <div class="flex items-center justify-end gap-2 border-t border-(--tw-border) px-4 py-3">
-          <button class="rounded px-3 py-1.5 text-[12px] text-(--tw-muted) hover:text-(--tw-text)" onclick={() => (settingsOpen = false)}>Close</button>
-          <button class="rounded bg-(--tw-accent) px-3 py-1.5 text-[12px] font-medium text-white hover:bg-(--tw-accent-hover)" onclick={savePrefs}>Save Java</button>
+        <div class="flex items-center justify-end gap-2 border-t border-(--border) px-4 py-3">
+          <button class="rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:text-(--text-main)" onclick={() => (settingsOpen = false)}>Close</button>
+          <button class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)" onclick={savePrefs}>Save Java</button>
         </div>
       </div>
     </div>

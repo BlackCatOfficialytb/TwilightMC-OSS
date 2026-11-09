@@ -1,27 +1,29 @@
 @import 'tailwindcss';
 
-/* Twilight design tokens — dual themes via data-theme on <html>. */
+/* Cosmic Cyan design tokens — dual themes via class on <html> (.dark / .light). */
 :root,
-[data-theme='dark'] {
-  --tw-canvas: #0b0f19;
-  --tw-surface: #111827;
-  --tw-subtle: #1f2937;
-  --tw-border: #374151;
-  --tw-text: #f9fafb;
-  --tw-muted: #9ca3af;
-  --tw-accent: #6366f1;
-  --tw-accent-hover: #818cf8;
-  --tw-star: #f59e0b;
+.dark {
+  --bg-canvas: #0b0f19;
+  --bg-surface: #111827;
+  --bg-subtle: #182234;
+  --border: #2d3a4f;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --accent: #06b6d4;
+  --accent-hover: #22d3ee;
+  --accent-star: #f59e0b;
+  /* cyan-500 is too luminous for white text; dark ink wins on cyan in both modes */
+  --on-accent: #0f172a;
 }
 
-[data-theme='light'] {
-  --tw-canvas: #f1f5f9;
-  --tw-surface: #ffffff;
-  --tw-subtle: #f8fafc;
-  --tw-border: #e2e8f0;
-  --tw-text: #0f172a;
-  --tw-muted: #6b7280;
-  --tw-accent: #4f46e5;
-  --tw-accent-hover: #6366f1;
-  --tw-star: #d97706;
+.light {
+  --bg-canvas: #f1f5f9;
+  --bg-surface: #ffffff;
+  --bg-subtle: #f8fafc;
+  --border: #e2e8f0;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --accent: #0891b2;
+  --accent-hover: #0e7490;
+  --accent-star: #d97706;
 }

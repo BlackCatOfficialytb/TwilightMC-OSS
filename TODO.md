@@ -34,13 +34,13 @@
 ## Milestone 2 - Prism-style launcher UI (v0.2.0 → next minor)
 
 - [x] `feat(ipc)`: backend hooks - `LaunchEvent::Started(pid)` child-pid event, `kill_instance` (Windows tree-kill via `taskkill /T /F`), `LaunchConfig.jvm_args` (`-Xms`/`-Xmx`), persisted java/memory/theme prefs (`get_java_prefs`/`set_java_prefs`/`get_theme_config`/`set_theme_config` in `settings.json`), `list_mods`/`toggle_mod` (`.disabled` rename), `delete_instance` (+ id traversal guards), `install_modpack` bridge to `twilight-cli::modpack`, `discover_java_installations`/`fetch_vanilla_versions` command renames, `open_path` (explorer/open/xdg-open)
-- [x] Theme engine polished to the final Twilight Dark (Gray/Indigo) + Twilight Light (Dawn) palettes; theme choice persists locally and to `settings.json`
-- [ ] Collapsible sidebar (`w-16` ⇄ `w-60`, hover chevron, account card at the bottom opening the manager)
-- [ ] Action toolbar (Add Instance / Folders / Settings / theme toggle) + instance context menu (Play, Edit Instance, Open Folder, View Logs, Delete)
-- [ ] New Instance Wizard: version picker tab, loader tab (Vanilla/Fabric/Quilt), `.mrpack` dropzone tab
-- [ ] Edit Instance modal: Version Components / Mods (.jar toggles), Screenshots, Logs tabs
-- [ ] Settings modal: java dropdown (detected JREs), memory sliders (`-Xms`/`-Xmx`), storage paths + staging cleanup
-- [ ] Console drawer: Copy-to-clipboard and Kill-process controls next to Clear
+- [x] Theme engine polished to the Cosmic Cyan palettes (Twilight Dark `#06B6D4` accent / Twilight Light Dawn `#0891B2`), no Indigo anywhere; theme choice persists locally and to `settings.json`
+- [x] Collapsible sidebar (`w-16` ⇄ `w-60`, hover chevron, account card at the bottom opening the manager)
+- [x] Action toolbar (Add Instance / Folders / Settings / theme toggle / real-time instance search) + instance context menu (Play, Edit Instance, Open Folder, View Logs, Delete)
+- [x] New Instance Wizard: version picker tab, loader tab (Vanilla/Fabric/Quilt, pinned loader version persisted), `.mrpack` dropzone tab
+- [x] Edit Instance modal: Version Components / Mods (.jar toggles + path import), Screenshots, Logs tabs
+- [x] Settings modal: java dropdown (detected JREs), memory sliders (`-Xms`/`-Xmx`), storage paths + staging cleanup
+- [x] Console drawer: always-visible collapsible bar (`h-10` ⇄ `h-48`), level coloring (INFO cyan / WARN amber / ERROR rose), Copy-to-clipboard and Kill-process controls
 
 ## Theme queue (milestone-polish backlog)
 
