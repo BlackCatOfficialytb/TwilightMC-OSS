@@ -1,3 +1,4 @@
 /target
+/dist
 *.tmp/
 crates/twilight-ui/ui/node_modules/
