@@ -506,7 +506,7 @@
       class="flex h-10 items-center gap-2 border-b border-(--tw-border) px-1"
       ondblclick={() => (sidebarExpanded = !sidebarExpanded)}
     >
-      <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-(--tw-accent) text-white">⛏</span>
+      <img src="/logo.png" alt="TwilightMC" draggable="false" class="h-7 w-7 shrink-0" />
       {#if sidebarExpanded}
         <span class="truncate text-[13px] font-semibold">TwilightMC</span>
       {/if}
