@@ -49,7 +49,7 @@ fn to_catalog(list: twilight_downloader::VanillaVersionList) -> VersionCatalog {
 /// Fetches the version list through the full failover chain; the raw list is
 /// large Mojang payload data, so the whole catalog travels once per request.
 #[tauri::command]
-pub async fn list_versions() -> Result<VersionCatalog, String> {
+pub async fn fetch_vanilla_versions() -> Result<VersionCatalog, String> {
     let client = reqwest::Client::new();
     let list = list_vanilla_versions(&client, &vanilla_sources())
         .await

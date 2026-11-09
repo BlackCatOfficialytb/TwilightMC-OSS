@@ -1,7 +1,8 @@
 // IPC bridge to the launch pipeline. Game output streams into the webview as
 // `launch-log` events; the command resolves when the game process exits.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
@@ -9,7 +10,7 @@ use tokio::sync::mpsc;
 use twilight_cli::{LaunchConfig, run_launch_with};
 use twilight_launch::LaunchEvent;
 
-use crate::accounts::active_username;
+use crate::accounts::{active_username, load_settings, settings_path};
 use crate::instances;
 
 /// One game output line. `stream` is `"stdout"` or `"stderr"`.
@@ -21,6 +22,9 @@ struct LaunchLine {
 
 /// One game per app run: the pipeline stages artifacts in shared scratch dirs.
 static RUNNING: AtomicBool = AtomicBool::new(false);
+/// Live game pid (0 = none); set from the pipeline's `Started` event so
+/// `kill_instance` can stop the process tree.
+static GAME_PID: AtomicU32 = AtomicU32::new(0);
 
 /// Launches the instance `instance_id` from the shared instance library with
 /// the UI storage layout: shared artifacts live under the app data dir,
@@ -35,8 +39,40 @@ pub async fn launch_instance(app: AppHandle, instance_id: String) -> Result<i32,
     }
 
     let result = run(&app, &instance_id).await;
+    GAME_PID.store(0, Ordering::SeqCst);
     RUNNING.store(false, Ordering::SeqCst);
     result
+}
+
+/// Stops the running game by pid (Windows: process-tree kill).
+#[tauri::command]
+pub async fn kill_instance() -> Result<(), String> {
+    let pid = GAME_PID.swap(0, Ordering::SeqCst);
+    if pid == 0 {
+        return Err("no game is running".to_owned());
+    }
+    kill_pid(pid).await
+}
+
+async fn kill_pid(pid: u32) -> Result<(), String> {
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut c = tokio::process::Command::new("taskkill");
+        c.args(["/PID", &pid.to_string(), "/T", "/F"]);
+        c
+    };
+    #[cfg(not(windows))]
+    let mut cmd = {
+        let mut c = tokio::process::Command::new("kill");
+        c.arg(pid.to_string());
+        c
+    };
+    let status = cmd.status().await.map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("failed to kill pid {pid} (exit {status})"))
+    }
 }
 
 async fn run(app: &AppHandle, instance_id: &str) -> Result<i32, String> {
@@ -46,6 +82,15 @@ async fn run(app: &AppHandle, instance_id: &str) -> Result<i32, String> {
         .await
         .ok_or_else(|| format!("unknown instance {instance_id}"))?;
     let username = active_username(app).await;
+    // Settings: explicit java override and the -Xms/-Xmx memory allocation.
+    let settings = load_settings(&settings_path(app).await?).await;
+    let mut jvm_args = Vec::new();
+    if settings.max_memory_mb > 0 {
+        jvm_args.push(format!("-Xmx{}M", settings.max_memory_mb));
+    }
+    if settings.min_memory_mb > 0 {
+        jvm_args.push(format!("-Xms{}M", settings.min_memory_mb));
+    }
 
     // Pump pipeline events into the webview console drawer.
     let (sink_tx, mut sink_rx) = mpsc::channel::<LaunchEvent>(512);
@@ -53,17 +98,36 @@ async fn run(app: &AppHandle, instance_id: &str) -> Result<i32, String> {
         let emitters = app.clone();
         tokio::spawn(async move {
             while let Some(event) = sink_rx.recv().await {
-                let line = match event {
-                    LaunchEvent::Stdout(line) => LaunchLine {
-                        stream: "stdout",
-                        line,
-                    },
-                    LaunchEvent::Stderr(line) => LaunchLine {
-                        stream: "stderr",
-                        line,
-                    },
-                };
-                let _ = emitters.emit("launch-log", line);
+                match event {
+                    LaunchEvent::Started(pid) => {
+                        GAME_PID.store(pid, Ordering::SeqCst);
+                        let _ = emitters.emit(
+                            "launch-log",
+                            LaunchLine {
+                                stream: "stdout",
+                                line: format!("game started (pid {pid})"),
+                            },
+                        );
+                    }
+                    LaunchEvent::Stdout(line) => {
+                        let _ = emitters.emit(
+                            "launch-log",
+                            LaunchLine {
+                                stream: "stdout",
+                                line,
+                            },
+                        );
+                    }
+                    LaunchEvent::Stderr(line) => {
+                        let _ = emitters.emit(
+                            "launch-log",
+                            LaunchLine {
+                                stream: "stderr",
+                                line,
+                            },
+                        );
+                    }
+                }
             }
         })
     };
@@ -74,9 +138,13 @@ async fn run(app: &AppHandle, instance_id: &str) -> Result<i32, String> {
         instance_dir: Some(instance_dir),
         shared_dir,
         temp_dir: None,
-        java: None,
+        java: settings
+            .java_path
+            .filter(|p| !p.trim().is_empty())
+            .map(PathBuf::from),
         loader: meta.loader,
         loader_version: None,
+        jvm_args,
         dry_run: false,
     };
 

@@ -13,6 +13,18 @@ pub(crate) struct Settings {
     pub(crate) active_account: Option<String>,
     #[serde(default)]
     pub(crate) shared_dir: Option<String>,
+    /// Explicit java executable; empty = auto-discovery.
+    #[serde(default)]
+    pub(crate) java_path: Option<String>,
+    /// `-Xms` in MiB; 0 = none.
+    #[serde(default)]
+    pub(crate) min_memory_mb: u32,
+    /// `-Xmx` in MiB; 0 = none.
+    #[serde(default)]
+    pub(crate) max_memory_mb: u32,
+    /// `light` / `dark`; falls back to the OS preference.
+    #[serde(default)]
+    pub(crate) theme: Option<String>,
 }
 
 async fn app_dir(app: &AppHandle) -> Result<PathBuf, String> {

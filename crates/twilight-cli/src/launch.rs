@@ -376,6 +376,8 @@ pub async fn run_launch_with(
             &account,
             loader_profile.as_ref(),
         )?;
+        let mut plan = plan;
+        plan.jvm_args.extend(cfg.jvm_args.clone());
         println!(
             "{}",
             dry_run_report(
@@ -472,10 +474,17 @@ pub async fn run_launch_with(
         &account,
         loader_profile.as_ref(),
     )?;
+    let mut plan = plan;
+    plan.jvm_args.extend(cfg.jvm_args);
     let (tx, mut rx) = mpsc::channel::<LaunchEvent>(512);
     let printer = tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
             match event {
+                LaunchEvent::Started(pid) => {
+                    if let Some(sink) = &sink {
+                        let _ = sink.send(LaunchEvent::Started(pid)).await;
+                    }
+                }
                 LaunchEvent::Stdout(line) => {
                     println!("{line}");
                     if let Some(sink) = &sink {
@@ -551,6 +560,7 @@ mod tests {
             java: None,
             loader: None,
             loader_version: None,
+            jvm_args: Vec::new(),
             dry_run: true,
         }
     }

@@ -26,6 +26,8 @@ pub struct LaunchPlan {
 /// Line-oriented output pump target.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LaunchEvent {
+    /// Emitted once, right after a successful spawn: engine child pid.
+    Started(u32),
     Stdout(String),
     Stderr(String),
 }
@@ -60,6 +62,11 @@ pub async fn run(
         executable: plan.java_executable.display().to_string(),
         source: e,
     })?;
+
+    // expose the child pid so hosts (desktop UI) can kill the process tree
+    if let Some(pid) = child.id() {
+        let _ = events.send(LaunchEvent::Started(pid)).await;
+    }
 
     let stdout = child.stdout.take().map(BufReader::new);
     let stderr = child.stderr.take().map(BufReader::new);
@@ -121,6 +128,10 @@ mod tests {
         while let Some(event) = rx.recv().await {
             out.push(event);
         }
+        assert!(
+            matches!(out.first(), Some(LaunchEvent::Started(_))),
+            "a successful spawn leads with its pid"
+        );
         assert!(out.contains(&LaunchEvent::Stdout("twilight-out".into())));
         assert!(out.contains(&LaunchEvent::Stderr("twilight-err".into())));
     }

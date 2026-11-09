@@ -38,7 +38,7 @@ fn to_sorted_runtimes(installations: Vec<JavaInstallation>) -> Vec<JavaRuntime> 
 }
 
 #[tauri::command]
-pub async fn list_java() -> Result<Vec<JavaRuntime>, String> {
+pub async fn discover_java_installations() -> Result<Vec<JavaRuntime>, String> {
     let installations = discover_java().await.map_err(|e| e.to_string())?;
     Ok(to_sorted_runtimes(installations))
 }

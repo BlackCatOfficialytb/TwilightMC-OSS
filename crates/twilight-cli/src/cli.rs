@@ -102,6 +102,8 @@ pub struct LaunchConfig {
     pub java: Option<PathBuf>,
     pub loader: Option<String>,
     pub loader_version: Option<String>,
+    /// Extra JVM arguments appended after the manifest's own (`-Xms`/`-Xmx`).
+    pub jvm_args: Vec<String>,
     pub dry_run: bool,
 }
 
@@ -126,6 +128,7 @@ impl LaunchArgs {
             java: self.java.clone(),
             loader: self.loader.clone(),
             loader_version: self.loader_version.clone(),
+            jvm_args: Vec::new(),
             dry_run: self.dry_run,
         })
     }

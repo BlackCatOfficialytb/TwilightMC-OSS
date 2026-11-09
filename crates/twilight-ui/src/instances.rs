@@ -185,6 +185,80 @@ async fn touch_last_played(root: &Path, id: &str) {
     let _ = write_meta(&dir, &meta).await;
 }
 
+// ---- mods (edit-instance) helpers ----
+
+/// One installed mod in the instance's `minecraft/mods` dir; disabled mods
+/// are renamed `<base>.disabled`.
+#[derive(Debug, Clone, Serialize)]
+pub struct ModEntry {
+    /// File name without the `.jar`/`.disabled` suffix.
+    pub base: String,
+    pub enabled: bool,
+}
+
+async fn mods_dir(root: &Path, instance_id: &str) -> Result<PathBuf, String> {
+    let dir = root.join(instance_id).join("minecraft").join("mods");
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+async fn list_mods_in(dir: &Path) -> Result<Vec<ModEntry>, String> {
+    let mut mods = Vec::new();
+    let mut entries = tokio::fs::read_dir(dir).await.map_err(|e| e.to_string())?;
+    while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if let Some(base) = name.strip_suffix(".disabled") {
+            mods.push(ModEntry {
+                base: base.to_owned(),
+                enabled: false,
+            });
+        } else if let Some(base) = name.strip_suffix(".jar") {
+            mods.push(ModEntry {
+                base: base.to_owned(),
+                enabled: true,
+            });
+        }
+    }
+    mods.sort_by(|a, b| {
+        a.base
+            .to_ascii_lowercase()
+            .cmp(&b.base.to_ascii_lowercase())
+    });
+    Ok(mods)
+}
+
+async fn toggle_mod_in(dir: &Path, base: &str, enable: bool) -> Result<(), String> {
+    if base.is_empty() || base.contains('/') || base.contains('\\') || base.contains("..") {
+        return Err("invalid mod name".into());
+    }
+    let installed = dir.join(format!("{base}.jar"));
+    let disabled = dir.join(format!("{base}.disabled"));
+    let (from, to) = if enable {
+        (&disabled, &installed)
+    } else {
+        (&installed, &disabled)
+    };
+    if !from.exists() {
+        return Err(format!("mod {base} is not present"));
+    }
+    tokio::fs::rename(from, to).await.map_err(|e| e.to_string())
+}
+
+/// Instance ids are directory leaf names; reject anything that could escape.
+fn validate_instance_id(id: &str) -> Result<(), String> {
+    if id.is_empty()
+        || id.contains('/')
+        || id.contains('\\')
+        || id.contains("..")
+        || id.contains(':')
+    {
+        return Err(format!("invalid instance id {id:?}"));
+    }
+    Ok(())
+}
+
 // ---- tauri commands ----
 
 /// Scans the shared instance library for the grid.
@@ -211,6 +285,41 @@ pub(crate) async fn stamp_last_played(app: &AppHandle, instance_id: &str) {
     if let Ok(root) = instances_root(app).await {
         touch_last_played(&root, instance_id).await;
     }
+}
+
+/// Mods installed in an instance, enabled ones first.
+#[tauri::command]
+pub async fn list_mods(app: AppHandle, instance_id: String) -> Result<Vec<ModEntry>, String> {
+    validate_instance_id(&instance_id)?;
+    let root = instances_root(&app).await?;
+    list_mods_in(&mods_dir(&root, &instance_id).await?).await
+}
+
+/// Enables/disables a mod by renaming it `<base>.jar` <-> `<base>.disabled`.
+#[tauri::command]
+pub async fn toggle_mod(
+    app: AppHandle,
+    instance_id: String,
+    mod_base: String,
+    enable: bool,
+) -> Result<(), String> {
+    validate_instance_id(&instance_id)?;
+    let root = instances_root(&app).await?;
+    toggle_mod_in(&mods_dir(&root, &instance_id).await?, &mod_base, enable).await
+}
+
+/// Deletes an instance directory tree (metadata, game dir, mods).
+#[tauri::command]
+pub async fn delete_instance(app: AppHandle, instance_id: String) -> Result<(), String> {
+    validate_instance_id(&instance_id)?;
+    let root = instances_root(&app).await?;
+    let dir = root.join(&instance_id);
+    if !dir.is_dir() {
+        return Err(format!("unknown instance {instance_id}"));
+    }
+    tokio::fs::remove_dir_all(dir)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -263,5 +372,57 @@ mod tests {
         touch_last_played(&root, "sky-factory").await;
         let rows = get_instances_in(&root).await.unwrap();
         assert!(rows[0].last_played > 0);
+    }
+
+    #[tokio::test]
+    async fn mods_toggle_and_delete_guards() {
+        let root = temp_root();
+        create_instance_in(&root, "Modded", "1.21.4", None)
+            .await
+            .unwrap();
+
+        let mods = mods_dir(&root, "Modded").await.unwrap();
+        std::fs::write(mods.join("sodium.jar"), b"x").unwrap();
+        std::fs::write(mods.join("lithium.disabled"), b"x").unwrap();
+        std::fs::create_dir_all(mods.join("subdir")).unwrap(); // ignored
+
+        let listed = list_mods_in(&mods).await.unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(
+            listed[0].base, "lithium",
+            "alphabetical regardless of enabled state"
+        );
+        assert!(!listed[0].enabled);
+        assert_eq!(listed[1].base, "sodium");
+        assert!(listed[1].enabled);
+
+        // enable lithium -> rename only, second rename errors
+        toggle_mod_in(&mods, "lithium", true).await.unwrap();
+        assert!(mods.join("lithium.jar").exists());
+        assert!(toggle_mod_in(&mods, "lithium", true).await.is_err());
+        // disable again
+        toggle_mod_in(&mods, "lithium", false).await.unwrap();
+        assert!(mods.join("lithium.disabled").exists());
+        // traversal guard
+        assert!(toggle_mod_in(&mods, "..\\evil", false).await.is_err());
+        assert!(validate_instance_id("../escape").is_err());
+        assert!(validate_instance_id("fine-id").is_ok());
+
+        // delete instance removes the whole tree
+        delete_dir(&root, "Modded").await.unwrap();
+        assert!(!root.join("Modded").exists());
+        assert!(delete_dir(&root, "Nope").await.is_err());
+    }
+
+    /// Direct wrapper over the delete command body so tests skip tauri state.
+    async fn delete_dir(root: &Path, id: &str) -> Result<(), String> {
+        validate_instance_id(id)?;
+        let dir = root.join(id);
+        if !dir.is_dir() {
+            return Err(format!("unknown instance {id}"));
+        }
+        tokio::fs::remove_dir_all(dir)
+            .await
+            .map_err(|e| e.to_string())
     }
 }
