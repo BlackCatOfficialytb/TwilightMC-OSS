@@ -11,4 +11,7 @@ mod test_server;
 
 pub use component::{LoaderProfile, ResolvedLoaderLib};
 pub use error::LoaderError;
-pub use resolver::{ModLoader, parse_loader_meta, resolve_loader_profile};
+pub use resolver::{
+    FABRIC_META_BASE, ModLoader, QUILT_META_BASE, parse_loader_meta, profile_url,
+    resolve_loader_profile,
+};

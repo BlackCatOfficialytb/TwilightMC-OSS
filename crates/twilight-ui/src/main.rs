@@ -55,6 +55,7 @@ fn main() {
             accounts::get_active_account,
             java::discover_java_installations,
             versions::fetch_vanilla_versions,
+            versions::fetch_loader_versions,
             launch::launch_instance,
             launch::kill_instance,
             instances::get_instances,
