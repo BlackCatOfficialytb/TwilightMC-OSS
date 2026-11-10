@@ -47,6 +47,7 @@
 - [x] Task `alpha-v0.2.4` — wizard polish: loader-build dropdown with latest-stable preselection and offline free-text fallback, live `instance.json` slug (id) preview mirroring the backend slugify
 - [x] Task `alpha-v0.2.5` — delete trust boundary: `delete_instance(to_trash)` moving instances into the sibling `.twilight-trash` (outside the scan root, cross-volume copy fallback), styled confirmation modal (Move to Trash / Delete Permanently)
 - [x] Task `alpha-v0.3.0` — keyboard polish (arrow-key grid navigation with Enter-to-play, full Escape chain) and workspace version bump to 0.3.0 — Milestone 2 complete
+- [x] Task `alpha-v0.3.1` — CI hotfix: delete/resolve tests pass the slug id from `create_instance_in` instead of the display name (`Trashables` vs `trashables`), fixing the failover on case-sensitive filesystems (Linux CI)
 
 ## Theme queue (milestone-polish backlog)
 

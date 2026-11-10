@@ -490,7 +490,7 @@ mod tests {
     #[tokio::test]
     async fn mods_toggle_and_delete_guards() {
         let root = temp_root();
-        create_instance_in(&root, "Modded", "1.21.4", None, None)
+        let inst = create_instance_in(&root, "Modded", "1.21.4", None, None)
             .await
             .unwrap();
         // pinned loader version survives the round trip through the meta file
@@ -506,7 +506,8 @@ mod tests {
         let pinned = read_meta(&root.join("pinned-fabric")).await.unwrap();
         assert_eq!(pinned.loader_version.as_deref(), Some("0.16.9"));
 
-        let mods = mods_dir(&root, "Modded").await.unwrap();
+        // the grid hands out on-disk leaf names (the slug), never the display name
+        let mods = mods_dir(&root, &inst.id).await.unwrap();
         std::fs::write(mods.join("sodium.jar"), b"x").unwrap();
         std::fs::write(mods.join("lithium.disabled"), b"x").unwrap();
         std::fs::create_dir_all(mods.join("subdir")).unwrap(); // ignored
@@ -533,9 +534,9 @@ mod tests {
         assert!(validate_instance_id("../escape").is_err());
         assert!(validate_instance_id("fine-id").is_ok());
 
-        // delete instance removes the whole tree
-        delete_instance_in(&root, "Modded", false).await.unwrap();
-        assert!(!root.join("Modded").exists());
+        // delete instance removes the whole tree (the slug id, like the grid sends)
+        delete_instance_in(&root, &inst.id, false).await.unwrap();
+        assert!(!root.join(&inst.id).exists());
         assert!(delete_instance_in(&root, "Nope", true).await.is_err());
     }
 
@@ -546,12 +547,12 @@ mod tests {
         let store = temp_root();
         let root = store.join("instances");
         std::fs::create_dir_all(&root).unwrap();
-        create_instance_in(&root, "Trashables", "1.21.4", None, None)
+        let inst = create_instance_in(&root, "Trashables", "1.21.4", None, None)
             .await
             .unwrap();
 
-        delete_instance_in(&root, "Trashables", true).await.unwrap();
-        assert!(!root.join("Trashables").exists(), "gone from the grid root");
+        delete_instance_in(&root, &inst.id, true).await.unwrap();
+        assert!(!root.join(&inst.id).exists(), "gone from the grid root");
 
         let trash = store.join(".twilight-trash");
         let mut kept: Vec<std::path::PathBuf> = std::fs::read_dir(&trash)
@@ -559,12 +560,13 @@ mod tests {
             .unwrap_or_default();
         assert_eq!(kept.len(), 1, "exactly one trashed instance");
         let trashed = kept.remove(0);
+        let stamp_prefix = format!("{}-", inst.id);
         assert!(
             trashed
                 .file_name()
                 .unwrap()
                 .to_string_lossy()
-                .starts_with("Trashables-"),
+                .starts_with(&stamp_prefix),
             "trashed dir keeps the id + stamp: {:?}",
             trashed
         );

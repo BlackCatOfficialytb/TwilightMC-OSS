@@ -117,10 +117,11 @@ validators — so precedence is defined here:
 ## 6. Current version
 
 - Latest Stable: `v0.2.0`.
-- Bolide line: `v0.3.0` — the workspace `version` carries `0.3.0` since the
+- Bolide line: `v0.3.1` — the workspace `version` carries `0.3.1` since the
   Milestone-2 instance-manager desktop UI (Bolide tags `alpha-v0.2.1` …
-  `alpha-v0.3.0`); Bolide builds carry no API-stability promises (§2).
-- Snapshot line: `v0.3.0-ddmmyyyy-<commit>`, built as rolling works land on
+  `alpha-v0.3.1`; `0.3.1` is a CI test hotfix for case-sensitive
+  filesystems); Bolide builds carry no API-stability promises (§2).
+- Snapshot line: `v0.3.1-ddmmyyyy-<commit>`, built as rolling works land on
   `main`.
 
 ## 7. Supported build targets
