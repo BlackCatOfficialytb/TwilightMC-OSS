@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod accounts;
+mod instance;
 mod instances;
 mod java;
 mod launch;
@@ -58,6 +59,7 @@ fn main() {
             launch::kill_instance,
             instances::get_instances,
             instances::create_instance,
+            instance::scan_instances,
             instances::delete_instance,
             instances::list_mods,
             instances::toggle_mod,
@@ -69,6 +71,7 @@ fn main() {
             prefs::set_theme_config,
             storage::get_storage,
             storage::set_shared_dir,
+            storage::set_instances_dir,
             storage::clean_staging
         ])
         .run(tauri::generate_context!())

@@ -1,13 +1,14 @@
 // IPC bridge for instance management: each instance is a directory under
-// `<shared>/instances/<id>` holding `twilight.json` metadata
-// (`{version, loader, last_played}`) and the game work dir `minecraft/`.
+// the resolved instances root holding `instance.json` metadata (legacy
+// `twilight.json` stays readable/writable in place) and the game work
+// dir `minecraft/`.
 
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-use crate::storage::shared_root;
+use crate::instance::{display_loader, resolved_instances_root};
 
 /// Instance metadata persisted as `twilight.json` inside the instance dir.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +26,9 @@ pub struct InstanceMeta {
     /// Unix seconds of the last play; 0 = never.
     #[serde(default)]
     pub last_played: u64,
+    /// Accumulated play time in seconds.
+    #[serde(default)]
+    pub total_time_played: u64,
 }
 
 /// One row of the instance grid.
@@ -60,16 +64,31 @@ fn slugify(name: &str) -> String {
     }
 }
 
+/// Reads the instance metadata, accepting both the canonical `instance.json`
+/// and the legacy `twilight.json`.
 pub(crate) async fn read_meta(instance_dir: &Path) -> Option<InstanceMeta> {
-    let data = tokio::fs::read_to_string(instance_dir.join("twilight.json"))
-        .await
-        .ok()?;
-    serde_json::from_str(&data).ok()
+    for file in ["instance.json", "twilight.json"] {
+        if let Ok(data) = tokio::fs::read_to_string(instance_dir.join(file)).await
+            && let Ok(meta) = serde_json::from_str::<InstanceMeta>(&data)
+        {
+            return Some(meta);
+        }
+    }
+    None
 }
 
+/// Writes metadata beside wherever it already lives: an instance carrying the
+/// legacy `twilight.json` keeps that file, all others use `instance.json`.
 async fn write_meta(instance_dir: &Path, meta: &InstanceMeta) -> Result<(), String> {
+    let file = if instance_dir.join("instance.json").exists()
+        || !instance_dir.join("twilight.json").exists()
+    {
+        "instance.json"
+    } else {
+        "twilight.json"
+    };
     let json = serde_json::to_string_pretty(meta).map_err(|e| e.to_string())?;
-    tokio::fs::write(instance_dir.join("twilight.json"), json)
+    tokio::fs::write(instance_dir.join(file), json)
         .await
         .map_err(|e| e.to_string())
 }
@@ -83,7 +102,8 @@ fn now_secs() -> u64 {
 }
 
 async fn instances_root(app: &AppHandle) -> Result<PathBuf, String> {
-    let root = shared_root(app).await?.join("instances");
+    // resolved root: settings override -> Windows Prism default -> our library
+    let root = resolved_instances_root(app).await?;
     tokio::fs::create_dir_all(&root)
         .await
         .map_err(|e| e.to_string())?;
@@ -107,6 +127,7 @@ async fn get_instances_in(root: &Path) -> Result<Vec<InstanceRow>, String> {
             loader: None,
             loader_version: None,
             last_played: 0,
+            total_time_played: 0,
         });
         let id = path
             .file_name()
@@ -117,16 +138,12 @@ async fn get_instances_in(root: &Path) -> Result<Vec<InstanceRow>, String> {
         } else {
             meta.name.clone()
         };
-        let loader = match meta.loader.as_deref().map(|l| l.to_ascii_lowercase()) {
-            Some(l) if l == "fabric" => "Fabric",
-            Some(l) if l == "quilt" => "Quilt",
-            _ => "Vanilla",
-        };
+        let loader_type = display_loader(meta.loader.as_deref());
         rows.push(InstanceRow {
             id,
             name,
             version: meta.version,
-            loader: loader.to_owned(),
+            loader: loader_type.to_owned(),
             last_played: meta.last_played,
         });
     }
@@ -164,6 +181,7 @@ async fn create_instance_in(
                     .map(|v| v.trim().to_owned())
                     .filter(|v| !v.is_empty()),
                 last_played: 0,
+                total_time_played: 0,
             };
             write_meta(&dir, &meta).await?;
             meta
@@ -171,25 +189,23 @@ async fn create_instance_in(
     };
     Ok(InstanceRow {
         name: name.to_owned(),
-        loader: match meta.loader.as_deref().map(|l| l.to_ascii_lowercase()) {
-            Some(l) if l == "fabric" => "Fabric".to_owned(),
-            Some(l) if l == "quilt" => "Quilt".to_owned(),
-            _ => "Vanilla".to_owned(),
-        },
+        loader: display_loader(meta.loader.as_deref()).to_owned(),
         id,
         version: meta.version,
         last_played: meta.last_played,
     })
 }
 
-/// Marks `instance` as played today (UTC); best-effort.
-async fn touch_last_played(root: &Path, id: &str) {
+/// Marks `instance` as played now and accrues the session's seconds;
+/// best-effort. Only touches our own metadata files (Prism files are left
+/// for Prism to manage).
+async fn touch_last_played(root: &Path, id: &str, played_secs: u64) {
     let dir = root.join(id);
-    let mut meta = match read_meta(&dir).await {
-        Some(meta) => meta,
-        None => return,
+    let Some(mut meta) = read_meta(&dir).await else {
+        return;
     };
     meta.last_played = now_secs();
+    meta.total_time_played += played_secs;
     let _ = write_meta(&dir, &meta).await;
 }
 
@@ -322,10 +338,10 @@ pub async fn create_instance(
     create_instance_in(&root, &name, &version, loader, loader_version).await
 }
 
-/// Best-effort last-played stamp, called from the launch path.
-pub(crate) async fn stamp_last_played(app: &AppHandle, instance_id: &str) {
+/// Best-effort last-played + play-time stamp, called from the launch path.
+pub(crate) async fn stamp_last_played(app: &AppHandle, instance_id: &str, played_secs: u64) {
     if let Ok(root) = instances_root(app).await {
-        touch_last_played(&root, instance_id).await;
+        touch_last_played(&root, instance_id, played_secs).await;
     }
 }
 
@@ -397,7 +413,8 @@ mod tests {
             .unwrap();
         assert_eq!(row.id, "sky-factory");
         assert_eq!(row.loader, "Fabric");
-        assert!(root.join("sky-factory/twilight.json").exists());
+        // new instances carry the canonical instance.json
+        assert!(root.join("sky-factory/instance.json").exists());
         assert!(root.join("sky-factory/minecraft").is_dir());
 
         // idempotent: second create returns the same instance
@@ -411,7 +428,7 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].name, "Sky Factory");
 
-        touch_last_played(&root, "sky-factory").await;
+        touch_last_played(&root, "sky-factory", 0).await;
         let rows = get_instances_in(&root).await.unwrap();
         assert!(rows[0].last_played > 0);
     }
@@ -422,7 +439,7 @@ mod tests {
         create_instance_in(&root, "Modded", "1.21.4", None, None)
             .await
             .unwrap();
-        // pinned loader version survives the round trip through twilight.json
+        // pinned loader version survives the round trip through the meta file
         create_instance_in(
             &root,
             "Pinned Fabric",
@@ -466,6 +483,54 @@ mod tests {
         delete_dir(&root, "Modded").await.unwrap();
         assert!(!root.join("Modded").exists());
         assert!(delete_dir(&root, "Nope").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn legacy_twilight_json_reads_and_stays_put() {
+        let root = temp_root();
+        let dir = root.join("legacy");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("twilight.json"),
+            r#"{"version":"1.21.4","name":"Legacy","loader":"quilt"}"#,
+        )
+        .unwrap();
+
+        // read through the alias-aware reader
+        let meta = read_meta(&dir).await.unwrap();
+        assert_eq!(meta.version, "1.21.4");
+
+        // a play stamp keeps writing the legacy file in place
+        touch_last_played(&root, "legacy", 120).await;
+        assert!(dir.join("twilight.json").exists(), "legacy file preserved");
+        assert!(!dir.join("instance.json").exists(), "no new file spawned");
+        let stamped = read_meta(&dir).await.unwrap();
+        assert!(stamped.last_played > 0);
+        assert_eq!(stamped.total_time_played, 120);
+
+        // and the legacy-less create writes the canonical instance.json
+        let fresh = root.join("fresh");
+        std::fs::create_dir_all(&fresh).unwrap();
+        std::fs::write(
+            fresh.join("instance.json"),
+            r#"{"version":"26.3","name":"Fresh"}"#,
+        )
+        .unwrap();
+        touch_last_played(&root, "fresh", 0).await;
+        assert!(fresh.join("instance.json").exists());
+    }
+
+    #[tokio::test]
+    async fn display_loader_tokens() {
+        assert_eq!(display_loader(None), "Vanilla");
+        assert_eq!(display_loader(Some("")), "Vanilla");
+        assert_eq!(display_loader(Some("VANILLA")), "Vanilla");
+        assert_eq!(display_loader(Some("fabric")), "Fabric");
+        assert_eq!(display_loader(Some("Quilt")), "Quilt");
+        assert_eq!(display_loader(Some("horizon")), "Horizon");
+        assert_eq!(display_loader(Some("Horizon-Rust")), "Horizon");
+        assert_eq!(display_loader(Some("forge")), "Forge");
+        assert_eq!(display_loader(Some("neoforge")), "NeoForge");
     }
 
     /// Direct wrapper over the delete command body so tests skip tauri state.

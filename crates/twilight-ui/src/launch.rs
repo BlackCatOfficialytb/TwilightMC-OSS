@@ -148,11 +148,13 @@ async fn run(app: &AppHandle, instance_id: &str) -> Result<i32, String> {
         dry_run: false,
     };
 
+    let started = std::time::Instant::now();
     let code = run_launch_with(cfg, Some(sink_tx))
         .await
         .map_err(|e| e.to_string())?;
 
-    instances::stamp_last_played(app, instance_id).await;
+    // session duration accrues into the instance's total play time
+    instances::stamp_last_played(app, instance_id, started.elapsed().as_secs()).await;
 
     // the pipeline dropped its sender; the pump drains and closes
     let _ = forwarder.await;

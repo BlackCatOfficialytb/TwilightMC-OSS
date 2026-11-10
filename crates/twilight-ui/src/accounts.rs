@@ -13,6 +13,11 @@ pub(crate) struct Settings {
     pub(crate) active_account: Option<String>,
     #[serde(default)]
     pub(crate) shared_dir: Option<String>,
+    /// Custom instances root override (e.g. `D:\ins\instances`); empty =
+    /// `%APPDATA%\PrismLauncher\instances` on Windows when present, else the
+    /// shared library's `instances` dir.
+    #[serde(default)]
+    pub(crate) instances_dir: Option<String>,
     /// Explicit java executable; empty = auto-discovery.
     #[serde(default)]
     pub(crate) java_path: Option<String>,
