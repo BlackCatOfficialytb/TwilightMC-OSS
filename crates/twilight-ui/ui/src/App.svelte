@@ -64,6 +64,9 @@
   let wizardLoader = $state('');
   let wizardLoaderVersion = $state('');
   let wizardError = $state('');
+  // loader build dropdown (fabric/quilt meta); error falls back to free text
+  let loaderBuilds = $state([]);
+  let loaderBuildsState = $state('idle'); // idle | loading | error
 
   // ---- modpack dropzone (wizard tab 3) ----
   let modpackTarget = $state('');
@@ -144,7 +147,47 @@
     wizardLoader = '';
     wizardLoaderVersion = '';
     wizardError = '';
+    loaderBuilds = [];
+    loaderBuildsState = 'idle';
     if (!catalog) fetchVersions();
+  }
+
+  // Loader pick: Vanilla clears the dropdown, fabric/quilt fetch their build
+  // list for this Minecraft version (latest stable pre-selected).
+  async function pickLoader(id) {
+    wizardLoader = id;
+    wizardLoaderVersion = '';
+    if (!id) {
+      loaderBuilds = [];
+      loaderBuildsState = 'idle';
+      return;
+    }
+    loaderBuildsState = 'loading';
+    try {
+      loaderBuilds = await api('fetch_loader_versions', {
+        loader: id,
+        gameVersion: wizardVersion,
+      });
+      // meta lists the latest stable first when it exists
+      wizardLoaderVersion = loaderBuilds.find((b) => b.stable)?.version ?? '';
+      loaderBuildsState = loaderBuilds.length ? 'idle' : 'error';
+    } catch {
+      loaderBuilds = [];
+      loaderBuildsState = 'error';
+    }
+  }
+
+  // Client mirror of the backend slugify for the live id preview.
+  function slugifyLocal(name) {
+    let slug = '';
+    for (const ch of name) {
+      const code = ch.codePointAt(0);
+      if (code >= 65 && code <= 90) slug += String.fromCharCode(code + 32);
+      else if ((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || ch === '-' || ch === '_')
+        slug += ch;
+      else if (ch === ' ' || ch === '.') slug += '-';
+    }
+    return slug.replace(/^-+|-+$/g, '');
   }
 
   async function createFromWizard() {
@@ -924,25 +967,47 @@
               bind:value={wizardName}
               placeholder={wizardVersion || '1.21.4'}
             />
+            {#if wizardName.trim() && slugifyLocal(wizardName.trim()) !== wizardName.trim()}
+              <p class="mt-1 text-[10px] text-(--text-muted)">id: {slugifyLocal(wizardName.trim())}</p>
+            {/if}
             <div class="mt-3 flex gap-2">
               {#each [['', 'Vanilla'], ['fabric', 'Fabric'], ['quilt', 'Quilt']] as [id, label] (id)}
                 <button
                   class="flex-1 rounded border border-(--border) px-3 py-2 text-[13px] {wizardLoader === id
                     ? 'border-(--accent) bg-(--accent)/10 font-medium text-(--accent)'
                     : 'text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)'}"
-                  onclick={() => (wizardLoader = id)}
+                  onclick={() => pickLoader(id)}
                 >
                   {label}
                 </button>
               {/each}
             </div>
             {#if wizardLoader}
-              <label class="mt-3 block text-[12px] font-medium text-(--text-muted)">{wizardLoader} version (empty = latest stable)</label>
-              <input
-                class="mt-1 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none focus:border-(--accent)"
-                bind:value={wizardLoaderVersion}
-                placeholder="latest"
-              />
+              <label class="mt-3 block text-[12px] font-medium text-(--text-muted)">{wizardLoader} version</label>
+              {#if loaderBuildsState === 'loading'}
+                <div class="mt-1 flex h-8 items-center rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] text-(--text-muted)">
+                  Loading {wizardLoader} builds for {wizardVersion}…
+                </div>
+              {:else if loaderBuildsState === 'error'}
+                <input
+                  class="mt-1 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none focus:border-(--accent)"
+                  bind:value={wizardLoaderVersion}
+                  placeholder="version (offline — type manually, empty = latest stable)"
+                />
+                <p class="mt-1 text-[10px] text-(--accent-star)">Build list unavailable — enter a version manually.</p>
+              {:else}
+                <select
+                  class="mt-1 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2 text-[13px] outline-none focus:border-(--accent)"
+                  bind:value={wizardLoaderVersion}
+                >
+                  <option value="">Latest stable</option>
+                  {#each loaderBuilds as build (build.version)}
+                    <option value={build.version}>
+                      {build.version}{build.stable ? '' : ' (unstable)'}
+                    </option>
+                  {/each}
+                </select>
+              {/if}
             {/if}
           </div>
         {:else}
