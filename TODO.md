@@ -31,7 +31,7 @@
 - [x] Task 6 `alpha-v0.1.5`: storage path configuration — `get_storage` / `set_shared_dir` / `clean_staging` IPC, custom shared library dir persisted in `settings.json` (launches honor it, default `app_data_dir/shared`), staging root shown (`%TEMP%\twilightmc_staging`) with a Clean-staging button in the Settings page
 - [x] Task 7 `alpha-v0.2.0`: full UI/UX audit (nav dead-ends fixed - Accounts opens the account manager, Logs renders live game output inline) and workspace version bump to 0.2.0 - milestone complete
 
-## Milestone 2 - Prism-style launcher UI (v0.2.0 → next minor)
+## Milestone 2 - Prism-style launcher UI (v0.2.0 → v0.3.0) — complete
 
 - [x] `feat(ipc)`: backend hooks - `LaunchEvent::Started(pid)` child-pid event, `kill_instance` (Windows tree-kill via `taskkill /T /F`), `LaunchConfig.jvm_args` (`-Xms`/`-Xmx`), persisted java/memory/theme prefs (`get_java_prefs`/`set_java_prefs`/`get_theme_config`/`set_theme_config` in `settings.json`), `list_mods`/`toggle_mod` (`.disabled` rename), `delete_instance` (+ id traversal guards), `install_modpack` bridge to `twilight-cli::modpack`, `discover_java_installations`/`fetch_vanilla_versions` command renames, `open_path` (explorer/open/xdg-open)
 - [x] Theme engine polished to the Cosmic Cyan palettes (Twilight Dark `#06B6D4` accent / Twilight Light Dawn `#0891B2`), no Indigo anywhere; theme choice persists locally and to `settings.json`
@@ -41,6 +41,12 @@
 - [x] Edit Instance modal: Version Components / Mods (.jar toggles + path import), Screenshots, Logs tabs
 - [x] Settings modal: java dropdown (detected JREs), memory sliders (`-Xms`/`-Xmx`), storage paths + staging cleanup
 - [x] Console drawer: always-visible collapsible bar (`h-10` ⇄ `h-48`), level coloring (INFO cyan / WARN amber / ERROR rose), Copy-to-clipboard and Kill-process controls
+- [x] Task `alpha-v0.2.1` — instance discovery engine: unified `scan_instances` grid source over own `instance.json` (+ legacy `twilight.json`) and foreign Prism/MultiMC (`instance.cfg` + `mmc-pack.json`) metadata, root resolution (`settings.json` override → `%APPDATA%\PrismLauncher\instances` → `<shared>/instances`), local `icon.*` / Prism icon-library artwork, `set_instances_dir` override surfaced in Settings
+- [x] Task `alpha-v0.2.2` — live instance grid: `InstanceGrid`/`InstanceCard` (click selection, Enter/Space play, right-click menu, hover play overlay), `convertFileSrc` icons via the asset protocol, Prism-style empty states (no-match + first-run)
+- [x] Task `alpha-v0.2.3` — `fetch_loader_versions`: fabric (meta v2) / quilt (meta v3) build lists for one game version feeding the wizard dropdown
+- [x] Task `alpha-v0.2.4` — wizard polish: loader-build dropdown with latest-stable preselection and offline free-text fallback, live `instance.json` slug (id) preview mirroring the backend slugify
+- [x] Task `alpha-v0.2.5` — delete trust boundary: `delete_instance(to_trash)` moving instances into the sibling `.twilight-trash` (outside the scan root, cross-volume copy fallback), styled confirmation modal (Move to Trash / Delete Permanently)
+- [x] Task `alpha-v0.3.0` — keyboard polish (arrow-key grid navigation with Enter-to-play, full Escape chain) and workspace version bump to 0.3.0 — Milestone 2 complete
 
 ## Theme queue (milestone-polish backlog)
 

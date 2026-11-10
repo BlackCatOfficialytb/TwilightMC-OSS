@@ -545,6 +545,36 @@
         else if (editFor) editFor = null;
         else if (settingsOpen) settingsOpen = false;
         else if (drawerOpen) drawerOpen = false;
+        return;
+      }
+      // arrow-key grid navigation while the desktop is the active surface:
+      // no modal/menu open and focus not inside a text field or a select.
+      if (
+        menuFor ||
+        deleteFor ||
+        modalOpen ||
+        wizardOpen ||
+        editFor ||
+        settingsOpen ||
+        drawerOpen
+      )
+        return;
+      const field = e.target?.closest?.('input, textarea, select, [contenteditable]');
+      if (field) return;
+      const rows = visibleInstances();
+      if (!rows.length) return;
+      const cur = rows.findIndex((i) => i.id === selectedId);
+      let next = null;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = cur + 1;
+      else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = cur < 0 ? 0 : cur - 1;
+      else if (e.key === 'Enter' && cur >= 0 && document.activeElement === document.body) {
+        e.preventDefault();
+        launchInstance(rows[cur].id);
+        return;
+      }
+      if (next != null && rows[next]) {
+        e.preventDefault();
+        selectedId = rows[next].id;
       }
     };
     window.addEventListener('keydown', onKey);

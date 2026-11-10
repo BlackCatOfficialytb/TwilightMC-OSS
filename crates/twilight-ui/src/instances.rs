@@ -541,7 +541,11 @@ mod tests {
 
     #[tokio::test]
     async fn delete_to_trash_keeps_metadata_outside_the_scan_root() {
-        let root = temp_root();
+        // the instances root is nested so the sibling trash lands inside the
+        // per-run temp store instead of the shared %TEMP%
+        let store = temp_root();
+        let root = store.join("instances");
+        std::fs::create_dir_all(&root).unwrap();
         create_instance_in(&root, "Trashables", "1.21.4", None, None)
             .await
             .unwrap();
@@ -549,7 +553,7 @@ mod tests {
         delete_instance_in(&root, "Trashables", true).await.unwrap();
         assert!(!root.join("Trashables").exists(), "gone from the grid root");
 
-        let trash = root.parent().unwrap().join(".twilight-trash");
+        let trash = store.join(".twilight-trash");
         let mut kept: Vec<std::path::PathBuf> = std::fs::read_dir(&trash)
             .map(|entries| entries.flatten().map(|e| e.path()).collect())
             .unwrap_or_default();

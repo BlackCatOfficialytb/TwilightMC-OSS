@@ -3969,7 +3969,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "twilight-auth"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "md-5",
  "serde",
@@ -3981,7 +3981,7 @@ dependencies = [
 
 [[package]]
 name = "twilight-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "reqwest 0.12.28",
@@ -4000,7 +4000,7 @@ dependencies = [
 
 [[package]]
 name = "twilight-downloader"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bytes",
  "futures",
@@ -4015,7 +4015,7 @@ dependencies = [
 
 [[package]]
 name = "twilight-horizon"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4027,7 +4027,7 @@ dependencies = [
 
 [[package]]
 name = "twilight-launch"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde_json",
  "thiserror 2.0.21",
@@ -4038,7 +4038,7 @@ dependencies = [
 
 [[package]]
 name = "twilight-manifest"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -4047,7 +4047,7 @@ dependencies = [
 
 [[package]]
 name = "twilight-modloader"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
@@ -4060,7 +4060,7 @@ dependencies = [
 
 [[package]]
 name = "twilight-modrinth"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
@@ -4072,7 +4072,7 @@ dependencies = [
 
 [[package]]
 name = "twilight-runtime"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -4082,7 +4082,7 @@ dependencies = [
 
 [[package]]
 name = "twilight-ui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "reqwest 0.12.28",
  "serde",
