@@ -101,7 +101,7 @@ fn now_secs() -> u64 {
         .as_secs()
 }
 
-async fn instances_root(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) async fn instances_root(app: &AppHandle) -> Result<PathBuf, String> {
     // resolved root: settings override -> Windows Prism default -> our library
     let root = resolved_instances_root(app).await?;
     tokio::fs::create_dir_all(&root)
@@ -153,7 +153,7 @@ async fn get_instances_in(root: &Path) -> Result<Vec<InstanceRow>, String> {
 
 /// Creates (or returns the existing) instance `id` for `version` + `loader`.
 /// Idempotent: an existing instance is returned unchanged.
-async fn create_instance_in(
+pub(crate) async fn create_instance_in(
     root: &Path,
     name: &str,
     version: &str,
@@ -207,100 +207,6 @@ async fn touch_last_played(root: &Path, id: &str, played_secs: u64) {
     meta.last_played = now_secs();
     meta.total_time_played += played_secs;
     let _ = write_meta(&dir, &meta).await;
-}
-
-// ---- mods (edit-instance) helpers ----
-
-/// One installed mod in the instance's `minecraft/mods` dir; disabled mods
-/// are renamed `<base>.disabled`.
-#[derive(Debug, Clone, Serialize)]
-pub struct ModEntry {
-    /// File name without the `.jar`/`.disabled` suffix.
-    pub base: String,
-    pub enabled: bool,
-}
-
-async fn mods_dir(root: &Path, instance_id: &str) -> Result<PathBuf, String> {
-    let dir = root.join(instance_id).join("minecraft").join("mods");
-    tokio::fs::create_dir_all(&dir)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(dir)
-}
-
-async fn list_mods_in(dir: &Path) -> Result<Vec<ModEntry>, String> {
-    let mut mods = Vec::new();
-    let mut entries = tokio::fs::read_dir(dir).await.map_err(|e| e.to_string())?;
-    while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
-        let name = entry.file_name().to_string_lossy().to_string();
-        if let Some(base) = name.strip_suffix(".disabled") {
-            mods.push(ModEntry {
-                base: base.to_owned(),
-                enabled: false,
-            });
-        } else if let Some(base) = name.strip_suffix(".jar") {
-            mods.push(ModEntry {
-                base: base.to_owned(),
-                enabled: true,
-            });
-        }
-    }
-    mods.sort_by(|a, b| {
-        a.base
-            .to_ascii_lowercase()
-            .cmp(&b.base.to_ascii_lowercase())
-    });
-    Ok(mods)
-}
-
-async fn toggle_mod_in(dir: &Path, base: &str, enable: bool) -> Result<(), String> {
-    if base.is_empty() || base.contains('/') || base.contains('\\') || base.contains("..") {
-        return Err("invalid mod name".into());
-    }
-    let installed = dir.join(format!("{base}.jar"));
-    let disabled = dir.join(format!("{base}.disabled"));
-    let (from, to) = if enable {
-        (&disabled, &installed)
-    } else {
-        (&installed, &disabled)
-    };
-    if !from.exists() {
-        return Err(format!("mod {base} is not present"));
-    }
-    tokio::fs::rename(from, to).await.map_err(|e| e.to_string())
-}
-
-/// Copies an external `.jar` into the instance mods dir (enabled).
-#[tauri::command]
-pub async fn import_mod(
-    app: AppHandle,
-    instance_id: String,
-    jar_path: String,
-) -> Result<(), String> {
-    validate_instance_id(&instance_id)?;
-    let src = PathBuf::from(&jar_path);
-    if !src.is_file() {
-        return Err(format!("file not found: {jar_path}"));
-    }
-    let Some(file_name) = src.file_name().map(|n| n.to_string_lossy().to_string()) else {
-        return Err("invalid mod file name".into());
-    };
-    if !file_name.to_ascii_lowercase().ends_with(".jar") {
-        return Err("mod files must be .jar archives".into());
-    }
-    let dest = mods_dir(&instances_root(&app).await?, &instance_id)
-        .await?
-        .join(file_name);
-    if dest.exists() {
-        return Err(format!(
-            "mod {} already exists",
-            src.file_name().unwrap().to_string_lossy()
-        ));
-    }
-    tokio::fs::copy(&src, &dest)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(())
 }
 
 /// Deletes an instance: either moves it out of the scan root into a sibling
@@ -360,7 +266,7 @@ async fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
 }
 
 /// Instance ids are directory leaf names; reject anything that could escape.
-fn validate_instance_id(id: &str) -> Result<(), String> {
+pub(crate) fn validate_instance_id(id: &str) -> Result<(), String> {
     if id.is_empty()
         || id.contains('/')
         || id.contains('\\')
@@ -401,27 +307,6 @@ pub(crate) async fn stamp_last_played(app: &AppHandle, instance_id: &str, played
     }
 }
 
-/// Mods installed in an instance, enabled ones first.
-#[tauri::command]
-pub async fn list_mods(app: AppHandle, instance_id: String) -> Result<Vec<ModEntry>, String> {
-    validate_instance_id(&instance_id)?;
-    let root = instances_root(&app).await?;
-    list_mods_in(&mods_dir(&root, &instance_id).await?).await
-}
-
-/// Enables/disables a mod by renaming it `<base>.jar` <-> `<base>.disabled`.
-#[tauri::command]
-pub async fn toggle_mod(
-    app: AppHandle,
-    instance_id: String,
-    mod_base: String,
-    enable: bool,
-) -> Result<(), String> {
-    validate_instance_id(&instance_id)?;
-    let root = instances_root(&app).await?;
-    toggle_mod_in(&mods_dir(&root, &instance_id).await?, &mod_base, enable).await
-}
-
 /// Deletes an instance: `to_trash` moves it into a sibling `.twilight-trash`
 /// directory; `false` removes it permanently.
 #[tauri::command]
@@ -438,7 +323,7 @@ pub async fn delete_instance(
 mod tests {
     use super::*;
 
-    fn temp_root() -> PathBuf {
+    pub(crate) fn temp_root() -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
             "twi-instances-test-{}-{}",
             std::process::id(),
@@ -488,7 +373,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn mods_toggle_and_delete_guards() {
+    async fn delete_guards_remove_the_whole_tree() {
         let root = temp_root();
         let inst = create_instance_in(&root, "Modded", "1.21.4", None, None)
             .await
@@ -506,31 +391,7 @@ mod tests {
         let pinned = read_meta(&root.join("pinned-fabric")).await.unwrap();
         assert_eq!(pinned.loader_version.as_deref(), Some("0.16.9"));
 
-        // the grid hands out on-disk leaf names (the slug), never the display name
-        let mods = mods_dir(&root, &inst.id).await.unwrap();
-        std::fs::write(mods.join("sodium.jar"), b"x").unwrap();
-        std::fs::write(mods.join("lithium.disabled"), b"x").unwrap();
-        std::fs::create_dir_all(mods.join("subdir")).unwrap(); // ignored
-
-        let listed = list_mods_in(&mods).await.unwrap();
-        assert_eq!(listed.len(), 2);
-        assert_eq!(
-            listed[0].base, "lithium",
-            "alphabetical regardless of enabled state"
-        );
-        assert!(!listed[0].enabled);
-        assert_eq!(listed[1].base, "sodium");
-        assert!(listed[1].enabled);
-
-        // enable lithium -> rename only, second rename errors
-        toggle_mod_in(&mods, "lithium", true).await.unwrap();
-        assert!(mods.join("lithium.jar").exists());
-        assert!(toggle_mod_in(&mods, "lithium", true).await.is_err());
-        // disable again
-        toggle_mod_in(&mods, "lithium", false).await.unwrap();
-        assert!(mods.join("lithium.disabled").exists());
-        // traversal guard
-        assert!(toggle_mod_in(&mods, "..\\evil", false).await.is_err());
+        // traversal guards on the instance id
         assert!(validate_instance_id("../escape").is_err());
         assert!(validate_instance_id("fine-id").is_ok());
 

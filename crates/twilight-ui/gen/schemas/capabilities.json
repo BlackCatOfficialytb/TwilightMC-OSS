@@ -1,1 +1,1 @@
-{}
+{"default":{"identifier":"default","description":"Default window capabilities: core plugin set plus the native file dialog used by the mods manager.","local":true,"windows":["main"],"permissions":["core:default","dialog:default"]}}

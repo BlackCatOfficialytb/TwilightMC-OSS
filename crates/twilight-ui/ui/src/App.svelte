@@ -1,6 +1,8 @@
 <script>
   import { onMount } from 'svelte';
   import InstanceGrid from './lib/InstanceGrid.svelte';
+  import EditInstanceModal from './lib/EditInstanceModal.svelte';
+  import { topOverlay } from './lib/overlays.js';
 
   let version = $state('…');
   let active = $state('instances');
@@ -74,11 +76,6 @@
 
   // ---- edit instance modal ----
   let editFor = $state(null);
-  let editTab = $state('mods');
-  let mods = $state([]);
-  let modsBusy = $state(false);
-  let modsMsg = $state('');
-  let importPath = $state('');
 
   // ---- settings modal ----
   let settingsOpen = $state(false);
@@ -371,46 +368,6 @@
 
   function openEdit(inst) {
     editFor = inst;
-    editTab = 'mods';
-    modsMsg = '';
-    importPath = '';
-    refreshMods();
-  }
-
-  async function refreshMods() {
-    if (!editFor) return;
-    modsBusy = true;
-    try {
-      mods = await api('list_mods', { instanceId: editFor.id });
-    } catch (e) {
-      modsMsg = String(e);
-    } finally {
-      modsBusy = false;
-    }
-  }
-
-  async function toggleMod(base, enable) {
-    try {
-      await api('toggle_mod', { instanceId: editFor.id, modBase: base, enable });
-    } catch (e) {
-      modsMsg = String(e);
-    }
-    await refreshMods();
-  }
-
-  async function importMod() {
-    if (!importPath.trim()) return;
-    modsBusy = true;
-    modsMsg = '';
-    try {
-      await api('import_mod', { instanceId: editFor.id, jarPath: importPath.trim() });
-      importPath = '';
-      await refreshMods();
-    } catch (e) {
-      modsMsg = String(e);
-    } finally {
-      modsBusy = false;
-    }
   }
 
   // ---- java / memory prefs ----
@@ -537,6 +494,12 @@
     const unlisteners = [];
     const onKey = (e) => {
       if (e.key === 'Escape') {
+        // frontend modals own their closers; pop the frontmost one
+        const top = topOverlay();
+        if (top) {
+          top();
+          return;
+        }
         if (menuFor) menuFor = null;
         else if (deleteFor) (deleteFor = null), (deleteError = '');
         else if (selectedId) selectedId = null;
@@ -556,7 +519,8 @@
         wizardOpen ||
         editFor ||
         settingsOpen ||
-        drawerOpen
+        drawerOpen ||
+        topOverlay()
       )
         return;
       const field = e.target?.closest?.('input, textarea, select, [contenteditable]');
@@ -1119,105 +1083,13 @@
   {/if}
 
   {#if editFor}
-    <!-- Edit Instance modal -->
-    <div
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onclick={(e) => {
-        if (e.target === e.currentTarget) editFor = null;
-      }}
-    >
-      <div class="flex h-[480px] w-[640px] overflow-hidden rounded-lg border border-(--border) bg-(--bg-surface) shadow-2xl">
-        <div class="flex w-44 shrink-0 flex-col gap-0.5 border-r border-(--border) bg-(--bg-subtle) p-2">
-          <h3 class="mt-1 px-2 text-[13px] font-semibold">{editFor.name}</h3>
-          <p class="px-2 text-[11px] text-(--text-muted)">{editFor.minecraft_version} · {editFor.loader_type}</p>
-          <div class="mt-3 border-t border-(--border)"></div>
-          {#each ['components', 'mods', 'screenshots', 'logs'] as tab (tab)}
-            <button
-              class="rounded px-2 py-1.5 text-left text-[12px] {editTab === tab
-                ? 'bg-(--accent)/15 font-medium text-(--accent)'
-                : 'text-(--text-muted) hover:text-(--text-main)'}"
-              onclick={() => (editTab = tab)}
-            >
-              {tab === 'components'
-                ? 'Version Components'
-                : tab === 'screenshots'
-                  ? 'Screenshots'
-                  : tab[0].toUpperCase() + tab.slice(1)}
-            </button>
-          {/each}
-          <button class="mt-auto rounded px-2 py-1.5 text-left text-[12px] text-(--text-muted) hover:text-(--text-main)" onclick={() => (editFor = null)}>
-            Close
-          </button>
-        </div>
-
-        <div class="min-w-0 flex-1 overflow-y-auto p-4">
-          {#if editTab === 'components'}
-            <div class="rounded border border-(--border) bg-(--bg-subtle) p-3 text-[12px]">
-              <div class="font-medium">Minecraft {editFor.minecraft_version}</div>
-              <div class="mt-1 text-(--text-muted)">Loader: {editFor.loader_type}</div>
-              <div class="mt-1 text-(--text-muted)">
-                Last played: {editFor.last_played ? new Date(editFor.last_played * 1000).toLocaleDateString() : 'never'}
-              </div>
-              <p class="mt-3 text-[11px] text-(--text-muted)">Version component switching (up/downgrade with progression) lands in a later milestone.</p>
-            </div>
-          {:else if editTab === 'mods'}
-            <div class="flex items-center justify-between">
-              <span class="text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Mods ({mods.length})</span>
-              <button class="text-[11px] text-(--text-muted) hover:text-(--text-main)" onclick={refreshMods}>Refresh</button>
-            </div>
-            <div class="mt-2 flex items-center gap-2">
-              <input
-                class="h-8 flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-                placeholder="Path to a .jar file…"
-                bind:value={importPath}
-              />
-              <button
-                class="rounded bg-(--accent) px-3 py-1 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
-                disabled={modsBusy || !importPath.trim()}
-                onclick={importMod}
-              >
-                Add Mod
-              </button>
-            </div>
-            <ul class="mt-3 max-h-72 divide-y divide-(--border) overflow-y-auto rounded border border-(--border) bg-(--bg-subtle)">
-                {#each mods as mod (mod.base)}
-                  <li class="flex items-center gap-3 px-3 py-2">
-                    <button
-                      class="flex h-5 w-9 shrink-0 items-center rounded-full border border-(--border) px-0.5 {mod.enabled
-                        ? 'justify-end bg-(--accent)'
-                        : 'justify-start bg-(--bg-canvas)'}"
-                      title={mod.enabled ? 'Disable' : 'Enable'}
-                      onclick={() => toggleMod(mod.base, !mod.enabled)}
-                    >
-                      <span class="h-3.5 w-3.5 rounded-full bg-(--bg-surface)"></span>
-                    </button>
-                    <span class="min-w-0 flex-1 truncate text-[13px]" class:opacity-50={!mod.enabled}>{mod.base}</span>
-                    <span class="text-[10px] uppercase tracking-wide {mod.enabled ? 'text-(--text-muted)' : 'text-(--accent-star)'}">
-                      {mod.enabled ? 'enabled' : 'disabled'}
-                    </span>
-                  </li>
-                {:else}
-                  <li class="px-3 py-3 text-[12px] text-(--text-muted)">No mods — drop .jar files into the instance mods dir or paste a path above.</li>
-                {/each}
-              </ul>
-              {#if modsMsg}
-              <p class="mt-2 text-[12px] text-red-400">{modsMsg}</p>
-            {/if}
-          {:else if editTab === 'screenshots'}
-            <div class="rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px] text-(--text-muted)">
-              Screenshot browser (thumbnail grid over <span class="text-(--text-main)">minecraft/screenshots</span>) lands in a later milestone.
-            </div>
-          {:else}
-            <div class="flex h-full max-h-80 flex-col rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px] text-(--text-muted)">
-              <p>Live game output renders in the console drawer with level coloring.</p>
-              <button class="mt-3 w-fit rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)" onclick={() => (drawerOpen = true)}>
-                Open console
-              </button>
-            </div>
-          {/if}
-        </div>
-      </div>
-    </div>
+    <!-- Edit Instance modal (custom + foreign instances) -->
+    <EditInstanceModal
+      instance={editFor}
+      {storage}
+      onclose={() => (editFor = null)}
+      onopenconsole={() => (drawerOpen = true)}
+    />
   {/if}
 
   {#if settingsOpen}

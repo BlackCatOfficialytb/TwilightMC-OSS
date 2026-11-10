@@ -7,6 +7,7 @@ mod instances;
 mod java;
 mod launch;
 mod modpack;
+mod mods;
 mod prefs;
 mod storage;
 mod versions;
@@ -45,6 +46,7 @@ fn open_path(path: String) -> Result<(), String> {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             get_version,
             open_path,
@@ -62,9 +64,10 @@ fn main() {
             instances::create_instance,
             instance::scan_instances,
             instances::delete_instance,
-            instances::list_mods,
-            instances::toggle_mod,
-            instances::import_mod,
+            mods::list_instance_mods,
+            mods::toggle_mod,
+            mods::delete_mod,
+            mods::import_mod,
             modpack::install_modpack,
             prefs::get_java_prefs,
             prefs::set_java_prefs,
