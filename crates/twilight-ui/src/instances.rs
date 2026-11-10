@@ -303,6 +303,62 @@ pub async fn import_mod(
     Ok(())
 }
 
+/// Deletes an instance: either moves it out of the scan root into a sibling
+/// `.twilight-trash` (reversible-ish), or removes the tree outright.
+async fn delete_instance_in(root: &Path, id: &str, to_trash: bool) -> Result<(), String> {
+    validate_instance_id(id)?;
+    let dir = root.join(id);
+    if !dir.is_dir() {
+        return Err(format!("unknown instance {id}"));
+    }
+    if !to_trash {
+        return tokio::fs::remove_dir_all(dir)
+            .await
+            .map_err(|e| e.to_string());
+    }
+    // Trash lives outside the scan root so trashed instances never resurface
+    // in the grid; a unique stamp keeps repeat trashes from colliding.
+    let parent = root.parent().unwrap_or(Path::new("."));
+    let trash = parent.join(".twilight-trash");
+    tokio::fs::create_dir_all(&trash)
+        .await
+        .map_err(|e| e.to_string())?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let dest = trash.join(format!("{id}-{stamp}"));
+    match tokio::fs::rename(&dir, &dest).await {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            // cross-volume move: copy the tree, then drop the original
+            copy_dir_all(&dir, &dest).await?;
+            tokio::fs::remove_dir_all(dir)
+                .await
+                .map_err(|e| e.to_string())
+        }
+    }
+}
+
+async fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), String> {
+    tokio::fs::create_dir_all(dst)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut entries = tokio::fs::read_dir(src).await.map_err(|e| e.to_string())?;
+    while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            Box::pin(copy_dir_all(&from, &to)).await?;
+        } else {
+            tokio::fs::copy(&from, &to)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 /// Instance ids are directory leaf names; reject anything that could escape.
 fn validate_instance_id(id: &str) -> Result<(), String> {
     if id.is_empty()
@@ -366,18 +422,16 @@ pub async fn toggle_mod(
     toggle_mod_in(&mods_dir(&root, &instance_id).await?, &mod_base, enable).await
 }
 
-/// Deletes an instance directory tree (metadata, game dir, mods).
+/// Deletes an instance: `to_trash` moves it into a sibling `.twilight-trash`
+/// directory; `false` removes it permanently.
 #[tauri::command]
-pub async fn delete_instance(app: AppHandle, instance_id: String) -> Result<(), String> {
-    validate_instance_id(&instance_id)?;
+pub async fn delete_instance(
+    app: AppHandle,
+    instance_id: String,
+    to_trash: bool,
+) -> Result<(), String> {
     let root = instances_root(&app).await?;
-    let dir = root.join(&instance_id);
-    if !dir.is_dir() {
-        return Err(format!("unknown instance {instance_id}"));
-    }
-    tokio::fs::remove_dir_all(dir)
-        .await
-        .map_err(|e| e.to_string())
+    delete_instance_in(&root, &instance_id, to_trash).await
 }
 
 #[cfg(test)]
@@ -480,9 +534,38 @@ mod tests {
         assert!(validate_instance_id("fine-id").is_ok());
 
         // delete instance removes the whole tree
-        delete_dir(&root, "Modded").await.unwrap();
+        delete_instance_in(&root, "Modded", false).await.unwrap();
         assert!(!root.join("Modded").exists());
-        assert!(delete_dir(&root, "Nope").await.is_err());
+        assert!(delete_instance_in(&root, "Nope", true).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn delete_to_trash_keeps_metadata_outside_the_scan_root() {
+        let root = temp_root();
+        create_instance_in(&root, "Trashables", "1.21.4", None, None)
+            .await
+            .unwrap();
+
+        delete_instance_in(&root, "Trashables", true).await.unwrap();
+        assert!(!root.join("Trashables").exists(), "gone from the grid root");
+
+        let trash = root.parent().unwrap().join(".twilight-trash");
+        let mut kept: Vec<std::path::PathBuf> = std::fs::read_dir(&trash)
+            .map(|entries| entries.flatten().map(|e| e.path()).collect())
+            .unwrap_or_default();
+        assert_eq!(kept.len(), 1, "exactly one trashed instance");
+        let trashed = kept.remove(0);
+        assert!(
+            trashed
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("Trashables-"),
+            "trashed dir keeps the id + stamp: {:?}",
+            trashed
+        );
+        let meta = read_meta(&trashed).await.unwrap();
+        assert_eq!(meta.version, "1.21.4", "metadata survives the move");
     }
 
     #[tokio::test]
@@ -531,17 +614,5 @@ mod tests {
         assert_eq!(display_loader(Some("Horizon-Rust")), "Horizon");
         assert_eq!(display_loader(Some("forge")), "Forge");
         assert_eq!(display_loader(Some("neoforge")), "NeoForge");
-    }
-
-    /// Direct wrapper over the delete command body so tests skip tauri state.
-    async fn delete_dir(root: &Path, id: &str) -> Result<(), String> {
-        validate_instance_id(id)?;
-        let dir = root.join(id);
-        if !dir.is_dir() {
-            return Err(format!("unknown instance {id}"));
-        }
-        tokio::fs::remove_dir_all(dir)
-            .await
-            .map_err(|e| e.to_string())
     }
 }

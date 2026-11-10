@@ -284,6 +284,10 @@
   let menuFor = $state(null);
   let instanceQuery = $state('');
   let selectedId = $state(null);
+  // delete confirmation modal (targets the id being removed)
+  let deleteFor = $state(null);
+  let deleteError = $state('');
+  let deleteBusy = $state(false);
 
   function visibleInstances() {
     const q = instanceQuery.trim().toLowerCase();
@@ -341,15 +345,25 @@
     );
   }
 
-  async function deleteInstance(id) {
-    if (!window.confirm(`Delete instance ${id} and all of its game files?`)) return;
+  function requestDelete(id) {
+    deleteError = '';
+    deleteFor = id;
+  }
+
+  async function confirmDelete(toTrash) {
+    if (!deleteFor || deleteBusy) return;
+    deleteBusy = true;
+    deleteError = '';
     try {
-      await api('delete_instance', { instanceId: id });
-      if (selectedId === id) selectedId = null;
-      menuFor = null;
+      await api('delete_instance', { instanceId: deleteFor, toTrash });
+      if (selectedId === deleteFor) selectedId = null;
+      deleteFor = null;
       await loadInstances();
+      status = toTrash ? 'Instance moved to trash.' : 'Instance deleted.';
     } catch (e) {
-      status = String(e);
+      deleteError = String(e);
+    } finally {
+      deleteBusy = false;
     }
   }
 
@@ -524,6 +538,7 @@
     const onKey = (e) => {
       if (e.key === 'Escape') {
         if (menuFor) menuFor = null;
+        else if (deleteFor) (deleteFor = null), (deleteError = '');
         else if (selectedId) selectedId = null;
         else if (modalOpen) modalOpen = false;
         else if (wizardOpen) wizardOpen = false;
@@ -723,7 +738,7 @@
           onedit={openEdit}
           onopenfolder={openInstanceFolder}
           onviewlogs={() => (drawerOpen = true)}
-          ondelete={deleteInstance}
+          ondelete={requestDelete}
           onclosemenu={() => (menuFor = null)}
           onadd={openWizard}
         />
@@ -1263,6 +1278,51 @@
         <div class="flex items-center justify-end gap-2 border-t border-(--border) px-4 py-3">
           <button class="rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:text-(--text-main)" onclick={() => (settingsOpen = false)}>Close</button>
           <button class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)" onclick={savePrefs}>Save Java</button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if deleteFor}
+    <!-- Delete instance confirmation -->
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onclick={(e) => {
+        if (e.target === e.currentTarget && !deleteBusy) deleteFor = null;
+      }}
+    >
+      <div class="w-[380px] rounded-lg border border-(--border) bg-(--bg-surface) p-5 shadow-2xl">
+        <h3 class="text-[14px] font-semibold">Delete instance</h3>
+        <p class="mt-2 text-[12px] text-(--text-muted)">
+          Delete <span class="font-medium text-(--text-main)">{deleteFor}</span> and all of its game files?
+        </p>
+        {#if deleteError}
+          <p class="mt-2 rounded border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-[11px] text-rose-400">{deleteError}</p>
+        {/if}
+        <div class="mt-4 flex justify-end gap-2">
+          <button
+            class="rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
+            disabled={deleteBusy}
+            onclick={() => (deleteFor = null)}
+          >
+            Cancel
+          </button>
+          <button
+            class="rounded border border-(--accent-star)/40 bg-(--accent-star)/10 px-3 py-1.5 text-[12px] font-medium text-(--accent-star) hover:bg-(--accent-star)/20 disabled:opacity-40"
+            disabled={deleteBusy}
+            title="Moves the folder into .twilight-trash next to the instances root"
+            onclick={() => confirmDelete(true)}
+          >
+            ♻ Move to Trash
+          </button>
+          <button
+            class="rounded bg-rose-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-rose-500 disabled:opacity-40"
+            disabled={deleteBusy}
+            title="Removes this instance directory permanently"
+            onclick={() => confirmDelete(false)}
+          >
+            ✕ Delete Permanently
+          </button>
         </div>
       </div>
     </div>
