@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import InstanceGrid from './lib/InstanceGrid.svelte';
 
   let version = $state('…');
   let active = $state('instances');
@@ -239,6 +240,7 @@
   let instancesError = $state('');
   let menuFor = $state(null);
   let instanceQuery = $state('');
+  let selectedId = $state(null);
 
   function visibleInstances() {
     const q = instanceQuery.trim().toLowerCase();
@@ -246,17 +248,22 @@
     return instances.filter(
       (i) =>
         i.name.toLowerCase().includes(q) ||
-        i.version.toLowerCase().includes(q) ||
+        i.minecraft_version.toLowerCase().includes(q) ||
         i.id.toLowerCase().includes(q),
     );
   }
 
   async function loadInstances() {
     try {
-      instances = await api('get_instances');
+      instances = await api('scan_instances');
+      instancesError = '';
     } catch (e) {
       instancesError = String(e);
     }
+  }
+
+  function selectInstance(id) {
+    selectedId = id;
   }
 
   async function launchInstance(id) {
@@ -279,22 +286,23 @@
     }
   }
 
-  function openInstanceFolder(id) {
+  function openInstanceDir() {
     if (!storage) return;
-    api('open_path', { path: [storage.shared_dir.replace(/\\/g, '/'), 'instances', id].join('/') }).catch(
-      (e) => (status = String(e)),
-    );
+    api('open_path', { path: storage.instances_dir }).catch((e) => (status = String(e)));
   }
 
-  function openSharedFolder() {
+  function openInstanceFolder(id) {
     if (!storage) return;
-    api('open_path', { path: storage.shared_dir }).catch((e) => (status = String(e)));
+    api('open_path', { path: [storage.instances_dir.replace(/\\/g, '/'), id].join('/') }).catch(
+      (e) => (status = String(e)),
+    );
   }
 
   async function deleteInstance(id) {
     if (!window.confirm(`Delete instance ${id} and all of its game files?`)) return;
     try {
       await api('delete_instance', { instanceId: id });
+      if (selectedId === id) selectedId = null;
       menuFor = null;
       await loadInstances();
     } catch (e) {
@@ -473,6 +481,7 @@
     const onKey = (e) => {
       if (e.key === 'Escape') {
         if (menuFor) menuFor = null;
+        else if (selectedId) selectedId = null;
         else if (modalOpen) modalOpen = false;
         else if (wizardOpen) wizardOpen = false;
         else if (editFor) editFor = null;
@@ -627,8 +636,8 @@
           <button
             class="rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
             disabled={!storage}
-            title={storage ? storage.shared_dir : ''}
-            onclick={openSharedFolder}
+            title={storage ? storage.instances_dir : ''}
+            onclick={openInstanceDir}
           >
             📂 Instance Folder
           </button>
@@ -658,79 +667,23 @@
         </div>
 
         <!-- instance grid -->
-        <div class="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-3">
-          {#each visibleInstances() as inst (inst.id)}
-            <div
-              class="group/inst relative flex flex-col gap-2 rounded border border-(--border) bg-(--bg-surface) p-3 hover:border-(--accent)"
-              ondblclick={() => launchInstance(inst.id)}
-            >
-              <div class="flex items-center gap-2.5">
-                <span class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded bg-(--accent)/15">
-                  <img src="/logo.png" alt="" draggable="false" class="h-6 w-6" />
-                </span>
-                <div class="min-w-0 flex-1">
-                  <div class="truncate text-[13px] font-medium">{inst.name}</div>
-                  <div class="mt-0.5 flex items-center gap-1">
-                    <span class="rounded bg-(--accent)/15 px-1.5 py-0.5 text-[10px] font-medium text-(--accent)">{inst.version}</span>
-                    <span class="rounded bg-(--bg-subtle) px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-(--text-muted)">{inst.loader}</span>
-                  </div>
-                </div>
-                <button
-                  class="shrink-0 rounded px-1.5 text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-                  title="Menu"
-                  onclick={() => (menuFor = menuFor === inst.id ? null : inst.id)}
-                >
-                  ⋯
-                </button>
-              </div>
-              <span class="text-[11px] text-(--text-muted)">
-                {inst.last_played ? new Date(inst.last_played * 1000).toLocaleDateString() : 'Never played'}
-              </span>
-
-              <!-- hover play overlay: appears on card hover, click launches -->
-              <div
-                class="absolute inset-0 z-10 flex cursor-pointer items-center justify-center rounded bg-(--bg-canvas)/80 opacity-0 transition-opacity duration-150 group-hover/inst:opacity-100"
-                onclick={() => launchInstance(inst.id)}
-              >
-                <span class="pointer-events-none rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) {gameRunning ? 'opacity-40' : ''}">
-                  ▶ Play
-                </span>
-              </div>
-
-              {#if menuFor === inst.id}
-                <div class="fixed inset-0 z-20" onclick={() => (menuFor = null)}></div>
-                <div class="absolute top-9 right-2 z-30 w-44 rounded border border-(--border) bg-(--bg-surface) py-1 shadow-xl">
-                  <button class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--bg-subtle) disabled:opacity-40" disabled={gameRunning} onclick={() => (menuFor = null, launchInstance(inst.id))}>
-                    ▶ Play
-                  </button>
-                  <button class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--bg-subtle)" onclick={() => (menuFor = null, openEdit(inst))}>
-                    ✎ Edit Instance
-                  </button>
-                  <button class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--bg-subtle)" onclick={() => (menuFor = null, openInstanceFolder(inst.id))}>
-                    📂 Open Folder
-                  </button>
-                  <button class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--bg-subtle)" onclick={() => (menuFor = null, drawerOpen = true)}>
-                    ▤ View Logs
-                  </button>
-                  <div class="my-1 border-t border-(--border)"></div>
-                  <button class="block w-full px-3 py-1.5 text-left text-[12px] text-red-400 hover:bg-red-500/10" onclick={() => (menuFor = null, deleteInstance(inst.id))}>
-                    ✕ Delete
-                  </button>
-                </div>
-              {/if}
-            </div>
-          {:else}
-            <div class="col-span-full rounded border border-(--border) bg-(--bg-surface) p-6 text-center text-[12px] text-(--text-muted)">
-              {#if instancesError}
-                {instancesError}
-              {:else if instanceQuery.trim()}
-                No instances match "{instanceQuery.trim()}".
-              {:else}
-                No instances yet — open the wizard or install a modpack.
-              {/if}
-            </div>
-          {/each}
-        </div>
+        <InstanceGrid
+          instances={visibleInstances()}
+          error={instancesError}
+          query={instanceQuery}
+          {selectedId}
+          {gameRunning}
+          {menuFor}
+          onselect={selectInstance}
+          onplay={launchInstance}
+          ontogglemenu={(id) => (menuFor = menuFor === id ? null : id)}
+          onedit={openEdit}
+          onopenfolder={openInstanceFolder}
+          onviewlogs={() => (drawerOpen = true)}
+          ondelete={deleteInstance}
+          onclosemenu={() => (menuFor = null)}
+          onadd={openWizard}
+        />
       {:else}
         <h2 class="text-lg font-semibold">{sections[active][0]}</h2>
         <p class="mt-1 text-(--text-muted)">{sections[active][1]}</p>
@@ -1066,7 +1019,7 @@
       <div class="flex h-[480px] w-[640px] overflow-hidden rounded-lg border border-(--border) bg-(--bg-surface) shadow-2xl">
         <div class="flex w-44 shrink-0 flex-col gap-0.5 border-r border-(--border) bg-(--bg-subtle) p-2">
           <h3 class="mt-1 px-2 text-[13px] font-semibold">{editFor.name}</h3>
-          <p class="px-2 text-[11px] text-(--text-muted)">{editFor.version} · {editFor.loader}</p>
+          <p class="px-2 text-[11px] text-(--text-muted)">{editFor.minecraft_version} · {editFor.loader_type}</p>
           <div class="mt-3 border-t border-(--border)"></div>
           {#each ['components', 'mods', 'screenshots', 'logs'] as tab (tab)}
             <button
@@ -1090,8 +1043,8 @@
         <div class="min-w-0 flex-1 overflow-y-auto p-4">
           {#if editTab === 'components'}
             <div class="rounded border border-(--border) bg-(--bg-subtle) p-3 text-[12px]">
-              <div class="font-medium">Minecraft {editFor.version}</div>
-              <div class="mt-1 text-(--text-muted)">Loader: {editFor.loader}</div>
+              <div class="font-medium">Minecraft {editFor.minecraft_version}</div>
+              <div class="mt-1 text-(--text-muted)">Loader: {editFor.loader_type}</div>
               <div class="mt-1 text-(--text-muted)">
                 Last played: {editFor.last_played ? new Date(editFor.last_played * 1000).toLocaleDateString() : 'never'}
               </div>
