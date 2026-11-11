@@ -1,7 +1,8 @@
 <script>
   // One instance card: icon, custom title, version + loader pills, last
-  // played, hover play overlay and the context menu. Selection is the
-  // parent's business; interactions bubble up as callbacks.
+  // played and the context menu. Single click selects (drives the right
+  // context panel), double click or Enter/Space launches; interactions
+  // bubble up as callbacks.
   let {
     instance,
     selected = false,
@@ -41,7 +42,7 @@
 </script>
 
 <div
-  class="group/inst relative flex cursor-pointer flex-col gap-2 rounded border bg-(--bg-surface) p-3 outline-none transition-colors duration-100 focus-visible:border-(--accent) focus-visible:ring-1 focus-visible:ring-(--accent) {selected
+  class="relative flex cursor-pointer flex-col gap-2 rounded border bg-(--bg-surface) p-3 outline-none transition-colors duration-100 focus-visible:border-(--accent) focus-visible:ring-1 focus-visible:ring-(--accent) {selected
     ? 'border-(--accent)'
     : 'border-(--border) hover:border-(--accent)'}"
   tabindex="0"
@@ -98,16 +99,6 @@
   <span class="text-[11px] text-(--text-muted)">
     {instance.last_played ? new Date(instance.last_played * 1000).toLocaleDateString() : 'Never played'}
   </span>
-
-  <!-- hover play overlay: appears on card hover, click launches -->
-  <div
-    class="absolute inset-0 z-10 flex cursor-pointer items-center justify-center rounded bg-(--bg-canvas)/80 opacity-0 transition-opacity duration-150 group-hover/inst:opacity-100"
-    onclick={onplay}
-  >
-    <span class="pointer-events-none rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) {gameRunning ? 'opacity-40' : ''}">
-      ▶ Play
-    </span>
-  </div>
 
   {#if menuOpen}
     <!-- backdrop click closes; menu entries stop the card's own handlers -->
