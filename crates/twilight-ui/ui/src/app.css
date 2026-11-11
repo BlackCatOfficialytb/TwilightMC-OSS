@@ -1,29 +1,75 @@
 @import 'tailwindcss';
 
-/* Cosmic Cyan design tokens — dual themes via class on <html> (.dark / .light). */
-:root,
-.dark {
-  --bg-canvas: #0b0f19;
-  --bg-surface: #111827;
-  --bg-subtle: #182234;
-  --border: #2d3a4f;
-  --text-main: #f8fafc;
-  --text-muted: #94a3b8;
-  --accent: #06b6d4;
-  --accent-hover: #22d3ee;
-  --accent-star: #f59e0b;
-  /* cyan-500 is too luminous for white text; dark ink wins on cyan in both modes */
-  --on-accent: #0f172a;
+/* TwilightMC design tokens — adopted from opendesign/design-systems/
+   twilight-product. Dual themes via class on <html> (.dark / .light); the
+   accent is user-selectable (XMCL-style) and every derived treatment
+   recalculates from it through color-mix(). */
+
+/* ---- type + fixed chrome ---- */
+:root {
+  --user-accent: #06b6d4; /* Cosmic Cyan; overridden inline by the picker */
+  --on-accent: #0f172a; /* dark ink wins on cyan in both modes */
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas,
+    monospace;
+
+  /* type scale steps used across the shell */
+  --step-caption: 10px; /* uppercase + tracked section labels, pills */
+  --step-meta: 11px; /* muted annotations, dates */
+  --step-body: 12px; /* buttons, table cells, body */
+  --step-card: 13px; /* card/nav titles, inputs */
+  --step-heading: 14px; /* modal + drawer headings */
+
+  --scrim: rgb(0 0 0 / 0.6);
+  --focus-ring: 0 0 0 1px var(--accent-1);
+}
+
+/* ---- theme grounds (canvas < surface < subtle: elevation by value) ---- */
+.dark,
+:root {
+  --bg-1: #0b0f19;
+  --bg-2: #111827;
+  --bg-3: #182234;
+  --border-1: #2d3a4f;
+  --fg-1: #f8fafc;
+  --fg-2: #94a3b8;
+  --accent-1: var(--user-accent, #06b6d4);
+  --accent-1-hover: color-mix(in srgb, var(--accent-1) 85%, #ffffff);
+  --accent-2: #f59e0b;
 }
 
 .light {
-  --bg-canvas: #f1f5f9;
-  --bg-surface: #ffffff;
-  --bg-subtle: #f8fafc;
-  --border: #e2e8f0;
-  --text-main: #0f172a;
-  --text-muted: #64748b;
-  --accent: #0891b2;
-  --accent-hover: #0e7490;
-  --accent-star: #d97706;
+  --bg-1: #f1f5f9;
+  --bg-2: #ffffff;
+  --bg-3: #f8fafc;
+  --border-1: #e2e8f0;
+  --fg-1: #0f172a;
+  --fg-2: #64748b;
+  --accent-1: var(--user-accent, #0891b2);
+  --accent-1-hover: color-mix(in srgb, var(--accent-1) 85%, #000000);
+  --accent-2: #d97706;
+}
+
+/* ---- derived treatments ---- */
+:root {
+  /* the accent is almost always a 15% wash; solid cyan is for primary
+     buttons only */
+  --brand-tint: color-mix(in srgb, var(--accent-1) 15%, transparent);
+  --star-tint: color-mix(in srgb, var(--accent-2) 15%, transparent);
+}
+
+/* ---- legacy aliases: the shipped components target these names ---- */
+:root,
+.dark {
+  --bg-canvas: var(--bg-1);
+  --bg-surface: var(--bg-2);
+  --bg-subtle: var(--bg-3);
+  --border: var(--border-1);
+  --text-main: var(--fg-1);
+  --text-muted: var(--fg-2);
+  --accent: var(--accent-1);
+  --accent-hover: var(--accent-1-hover);
+  --accent-star: var(--accent-2);
 }

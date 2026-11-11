@@ -2,7 +2,9 @@
   import { onMount } from 'svelte';
   import InstanceGrid from './lib/InstanceGrid.svelte';
   import EditInstanceModal from './lib/EditInstanceModal.svelte';
+  import AccentPicker from './lib/AccentPicker.svelte';
   import { topOverlay } from './lib/overlays.js';
+  import { loadSavedAccent } from './lib/theme';
 
   let version = $state('…');
   let active = $state('instances');
@@ -19,6 +21,9 @@
     localStorage.setItem('twilight-theme', theme);
     window.__TAURI__?.core.invoke('set_theme_config', { theme }).catch(() => {});
   });
+
+  // Restore the user's accent color pick before first interactive paint.
+  loadSavedAccent();
 
   // No crutch states or animations: a busy desktop reads one crisp status word.
   let status = $state('Ready');
@@ -1107,7 +1112,9 @@
         </div>
 
         <div class="min-h-0 flex-1 overflow-y-auto p-4">
-          <h4 class="text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Java</h4>
+          <AccentPicker />
+
+          <h4 class="mt-5 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Java</h4>
           <select
             class="mt-2 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2 text-[13px] outline-none focus:border-(--accent)"
             bind:value={javaPath}
