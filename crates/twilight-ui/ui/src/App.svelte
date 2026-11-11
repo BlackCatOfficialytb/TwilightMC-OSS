@@ -3,6 +3,7 @@
   import InstanceGrid from './lib/InstanceGrid.svelte';
   import EditInstanceModal from './lib/EditInstanceModal.svelte';
   import AccentPicker from './lib/AccentPicker.svelte';
+  import InstanceContextPanel from './lib/InstanceContextPanel.svelte';
   import { topOverlay } from './lib/overlays.js';
   import { loadSavedAccent } from './lib/theme';
 
@@ -374,6 +375,26 @@
   function openEdit(inst) {
     editFor = inst;
   }
+
+  // ---- right context panel (Yardarm grammar: selection drives it) ----
+
+  const selectedInst = $derived(instances.find((i) => i.id === selectedId) ?? null);
+  let ctxMods = $state(null);
+  let ctxModsToken = 0;
+  $effect(() => {
+    const inst = selectedInst;
+    editFor; // re-run when the edit modal closes to refresh the count
+    const token = ++ctxModsToken;
+    ctxMods = null;
+    if (!inst) return;
+    api('list_instance_mods', { instanceId: inst.id })
+      .then((mods) => {
+        if (token === ctxModsToken) ctxMods = mods.length;
+      })
+      .catch(() => {
+        if (token === ctxModsToken) ctxMods = null;
+      });
+  });
 
   // ---- java / memory prefs ----
 
@@ -821,6 +842,21 @@
       </div>
     </section>
   </div>
+
+  <!-- Yardarm-style right context panel: selection drives it, Escape clears -->
+  {#if active === 'instances' && selectedInst}
+    <InstanceContextPanel
+      instance={selectedInst}
+      {storage}
+      {gameRunning}
+      modsCount={ctxMods}
+      onlaunch={() => launchInstance(selectedInst.id)}
+      onedit={() => openEdit(selectedInst)}
+      onopenfolder={() => openInstanceFolder(selectedInst.id)}
+      onmoremods={() => openEdit(selectedInst)}
+      ondelete={() => requestDelete(selectedInst.id)}
+    />
+  {/if}
 
   {#if modalOpen}
     <!-- backdrop click closes; panel click does not -->

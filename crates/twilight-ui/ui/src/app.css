@@ -60,6 +60,16 @@
   --star-tint: color-mix(in srgb, var(--accent-2) 15%, transparent);
 }
 
+/* context panel arrival: opacity-only, keeps the no-transforms grammar */
+@keyframes ctx-in {
+  from {
+    opacity: 0;
+  }
+}
+.ctx-in {
+  animation: ctx-in 200ms ease;
+}
+
 /* ---- legacy aliases: the shipped components target these names ---- */
 :root,
 .dark {
