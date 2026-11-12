@@ -2,8 +2,8 @@
   import { onMount } from 'svelte';
   import InstanceGrid from './lib/InstanceGrid.svelte';
   import EditInstanceModal from './lib/EditInstanceModal.svelte';
-  import ModrinthBrowserModal from './lib/ModrinthBrowserModal.svelte';
   import MrpackInstallModal from './lib/MrpackInstallModal.svelte';
+  import NewInstanceModal from './lib/NewInstanceModal.svelte';
   import InstanceContextPanel from './lib/InstanceContextPanel.svelte';
   import SettingsPage from './lib/SettingsPage.svelte';
   import { topOverlay } from './lib/overlays.js';
@@ -65,36 +65,17 @@
   let scanning = $state(false);
   let javaError = $state('');
 
-  // ---- vanilla version picker state (wizard tab 1) ----
-  let catalog = $state(null);
-  let fetchingVersions = $state(false);
-  let versionsError = $state('');
-  let versionQuery = $state('');
-  let typeFilter = $state('all');
-
-  // ---- new instance wizard ----
+  // ---- new instance wizard (layout lives in NewInstanceModal) ----
   let wizardOpen = $state(false);
-  let wizardTab = $state(1);
-  let wizardVersion = $state('');
-  let wizardName = $state('');
-  let wizardLoader = $state('');
-  let wizardLoaderVersion = $state('');
-  let wizardError = $state('');
-  // loader build dropdown (fabric/quilt meta); error falls back to free text
-  let loaderBuilds = $state([]);
-  let loaderBuildsState = $state('idle'); // idle | loading | error
 
-  // ---- modpack dropzone (wizard tab 3) ----
+  // ---- install modpack modal (path/URL + drop target) ----
+  let modpackOpen = $state(false);
   let modpackTarget = $state('');
   let modpackBusy = $state(false);
+  let modpackError = $state('');
 
   // ---- edit instance modal ----
   let editFor = $state(null);
-
-  // ---- in-app Modrinth browser (context panel + edit modal open it) ----
-  let browserFor = $state(null);
-  // bumps whenever a mod lands, so the context panel re-counts
-  let ctxNonce = $state(0);
 
   // ---- global .mrpack drag-and-drop ----
   let mrpackFor = $state(null);
@@ -134,112 +115,25 @@
     }
   }
 
-  async function fetchVersions() {
-    fetchingVersions = true;
-    versionsError = '';
-    try {
-      catalog = await api('fetch_vanilla_versions');
-    } catch (e) {
-      versionsError = String(e);
-    } finally {
-      fetchingVersions = false;
-    }
-  }
-
-  function filteredVersions() {
-    if (!catalog) return [];
-    const q = versionQuery.trim().toLowerCase();
-    return catalog.versions.filter((v) => {
-      const typeOk =
-        typeFilter === 'all' ||
-        (typeFilter === 'releases' ? v.version_type === 'release' : v.version_type !== 'release');
-      return typeOk && (!q || v.id.toLowerCase().includes(q));
-    });
-  }
-
   // ---- wizard flow ----
 
   function openWizard() {
     wizardOpen = true;
-    wizardTab = 1;
-    wizardVersion = '';
-    wizardName = '';
-    wizardLoader = '';
-    wizardLoaderVersion = '';
-    wizardError = '';
-    loaderBuilds = [];
-    loaderBuildsState = 'idle';
-    if (!catalog) fetchVersions();
-  }
-
-  // Loader pick: Vanilla clears the dropdown, fabric/quilt fetch their build
-  // list for this Minecraft version (latest stable pre-selected).
-  async function pickLoader(id) {
-    wizardLoader = id;
-    wizardLoaderVersion = '';
-    if (!id) {
-      loaderBuilds = [];
-      loaderBuildsState = 'idle';
-      return;
-    }
-    loaderBuildsState = 'loading';
-    try {
-      loaderBuilds = await api('fetch_loader_versions', {
-        loader: id,
-        gameVersion: wizardVersion,
-      });
-      // meta lists the latest stable first when it exists
-      wizardLoaderVersion = loaderBuilds.find((b) => b.stable)?.version ?? '';
-      loaderBuildsState = loaderBuilds.length ? 'idle' : 'error';
-    } catch {
-      loaderBuilds = [];
-      loaderBuildsState = 'error';
-    }
-  }
-
-  // Client mirror of the backend slugify for the live id preview.
-  function slugifyLocal(name) {
-    let slug = '';
-    for (const ch of name) {
-      const code = ch.codePointAt(0);
-      if (code >= 65 && code <= 90) slug += String.fromCharCode(code + 32);
-      else if ((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || ch === '-' || ch === '_')
-        slug += ch;
-      else if (ch === ' ' || ch === '.') slug += '-';
-    }
-    return slug.replace(/^-+|-+$/g, '');
-  }
-
-  async function createFromWizard() {
-    const name = wizardName.trim() || wizardVersion;
-    wizardError = '';
-    try {
-      await api('create_instance', {
-        name,
-        version: wizardVersion,
-        loader: wizardLoader.trim() ? wizardLoader.trim() : null,
-        loaderVersion: wizardLoaderVersion.trim() || null,
-      });
-      wizardOpen = false;
-      await loadInstances();
-      status = `Instance ${name} created.`;
-    } catch (e) {
-      wizardError = String(e);
-    }
   }
 
   async function installFromWizard() {
     if (!modpackTarget.trim()) return;
     modpackBusy = true;
-    wizardError = '';
+    modpackError = '';
     try {
-      await api('install_modpack', { pathOrUrl: modpackTarget.trim() });
-      wizardOpen = false;
+      const id = await api('install_modpack', { pathOrUrl: modpackTarget.trim() });
+      modpackOpen = false;
       modpackTarget = '';
       await loadInstances();
+      if (id) selectedId = id;
       status = 'Modpack installed.';
     } catch (e) {
-      wizardError = String(e);
+      modpackError = String(e);
     } finally {
       modpackBusy = false;
     }
@@ -392,6 +286,80 @@
     }
   }
 
+  // ---- Prism-order context panel actions ----
+
+  // Groups live in the root's shared `instgroups.json`; the wizard and panel
+  // both read the labels straight off the scanned rows.
+  const groupList = $derived(
+    [...new Set(instances.map((i) => i.group).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+  );
+
+  async function changeGroup(group) {
+    if (!selectedInst) return;
+    const label = selectedInst.name;
+    try {
+      await api('set_instance_group', { instanceId: selectedInst.id, group });
+      await loadInstances();
+      status = group ? `Moved ${label} to ${group}.` : `${label} is ungrouped.`;
+    } catch (e) {
+      status = String(e);
+    }
+  }
+
+  async function copyInstance() {
+    if (!selectedInst) return;
+    const label = selectedInst.name;
+    try {
+      const row = await api('duplicate_instance', { instanceId: selectedInst.id });
+      await loadInstances();
+      selectedId = row.id;
+      status = `Copied ${label}.`;
+    } catch (e) {
+      status = String(e);
+    }
+  }
+
+  async function exportInstance() {
+    if (!selectedInst) return;
+    const save = window.__TAURI__?.dialog?.save;
+    if (!save) {
+      status = 'File picker unavailable in this build.';
+      return;
+    }
+    try {
+      const dest = await save({
+        title: 'Export instance',
+        defaultPath: `${selectedInst.name.replace(/[\\/:*?"<>|]/g, '_')}.zip`,
+        filters: [{ name: 'Zip archive', extensions: ['zip'] }],
+      });
+      if (!dest) return;
+      const path = await api('export_instance_zip', {
+        instanceId: selectedInst.id,
+        destPath: dest,
+      });
+      status = `Exported to ${path}.`;
+    } catch (e) {
+      status = String(e);
+    }
+  }
+
+  async function shortcutInstance() {
+    if (!selectedInst) return;
+    try {
+      const path = await api('create_desktop_shortcut', { instanceId: selectedInst.id });
+      status = `Shortcut created: ${path}`;
+    } catch (e) {
+      status = String(e);
+    }
+  }
+
+  async function onWizardCreated(row, warning) {
+    wizardOpen = false;
+    await loadInstances();
+    if (row?.id) selectedId = row.id;
+    status = warning || `Instance ${row?.name ?? ''} created.`;
+  }
+
   // ---- edit instance (mods) ----
 
   function openEdit(inst) {
@@ -406,7 +374,6 @@
   $effect(() => {
     const inst = selectedInst;
     editFor; // re-run when the edit modal closes to refresh the count
-    ctxNonce; // re-run after Modrinth installs land
     const token = ++ctxModsToken;
     ctxMods = null;
     if (!inst) return;
@@ -553,7 +520,7 @@
         else if (deleteFor) (deleteFor = null), (deleteError = '');
         else if (selectedId) selectedId = null;
         else if (modalOpen) modalOpen = false;
-        else if (wizardOpen) wizardOpen = false;
+        else if (modpackOpen) modpackOpen = false;
         else if (editFor) editFor = null;
         else if (drawerOpen) drawerOpen = false;
         return;
@@ -564,7 +531,7 @@
         menuFor ||
         deleteFor ||
         modalOpen ||
-        wizardOpen ||
+        modpackOpen ||
         editFor ||
         drawerOpen ||
         topOverlay()
@@ -604,9 +571,9 @@
             const path = e.payload?.paths?.[0];
             if (!path) return;
             if (path.endsWith('.mrpack')) {
-              // wizard open: the dropzone tab owns the path; anywhere else:
+              // install modal open: it owns the path; anywhere else:
               // intercept into the dedicated install modal
-              if (wizardOpen) modpackTarget = path;
+              if (modpackOpen) modpackTarget = path;
               else mrpackFor = path;
             }
           }),
@@ -617,6 +584,13 @@
       await refreshAccounts();
       await loadInstances();
       await loadStorage();
+      // desktop shortcut boot: auto-launch the instance the shortcut names
+      try {
+        const pending = await api('get_startup_launch');
+        if (pending && instances.some((i) => i.id === pending)) launchInstance(pending);
+      } catch {
+        // plain web build: no startup flag
+      }
     })();
     return () => unlisteners.forEach((off) => off());
   });
@@ -764,6 +738,13 @@
           </button>
           <button
             class="rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+            title="Install a Modrinth .mrpack into a new instance"
+            onclick={() => (modpackOpen = true)}
+          >
+            ⤓ Install .mrpack
+          </button>
+          <button
+            class="rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
             onclick={() => {
               active = 'settings';
               loadPrefs();
@@ -893,22 +874,16 @@
       {storage}
       {gameRunning}
       modsCount={ctxMods}
+      groups={groupList}
       onlaunch={() => launchInstance(selectedInst.id)}
+      onkill={killGame}
       onedit={() => openEdit(selectedInst)}
+      onchangegroup={changeGroup}
       onopenfolder={() => openInstanceFolder(selectedInst.id)}
-      onmoremods={() => (browserFor = selectedInst)}
+      onexport={exportInstance}
+      oncopy={copyInstance}
       ondelete={() => requestDelete(selectedInst.id)}
-    />
-  {/if}
-
-  {#if browserFor}
-    <ModrinthBrowserModal
-      instance={browserFor}
-      onclose={() => (browserFor = null)}
-      oninstalled={() => {
-        ctxNonce += 1;
-        status = `Mod installed into ${browserFor.name}.`;
-      }}
+      onshortcut={shortcutInstance}
     />
   {/if}
 
@@ -1005,187 +980,67 @@
   {/if}
 
   {#if wizardOpen}
-    <!-- New Instance wizard -->
+    <NewInstanceModal
+      groups={groupList}
+      onclose={() => (wizardOpen = false)}
+      oncreated={onWizardCreated}
+    />
+  {/if}
+
+  {#if modpackOpen}
+    <!-- Install Modpack: drop target + path/URL -->
     <div
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
       onclick={(e) => {
-        if (e.target === e.currentTarget) wizardOpen = false;
+        if (e.target === e.currentTarget && !modpackBusy) modpackOpen = false;
       }}
     >
-      <div class="flex h-[480px] w-[560px] flex-col rounded-lg border border-(--border) bg-(--bg-surface) shadow-2xl">
+      <div class="w-[480px] rounded-lg border border-(--border) bg-(--bg-surface) shadow-2xl">
         <div class="flex items-center justify-between border-b border-(--border) px-4 py-3">
-          <h3 class="text-sm font-semibold">New Instance</h3>
-          <button class="text-(--text-muted) hover:text-(--text-main)" onclick={() => (wizardOpen = false)}>✕</button>
+          <h3 class="text-sm font-semibold">Install Modpack</h3>
+          <button
+            class="text-(--text-muted) hover:text-(--text-main)"
+            onclick={() => (modpackOpen = false)}>✕</button
+          >
         </div>
-        <div class="flex items-center gap-1 border-b border-(--border) px-3 py-2 text-[11px]">
-          <span class="px-2 py-1 text-(--text-muted) {wizardTab === 1 ? 'bg-(--bg-subtle) rounded text-(--text-main) font-medium' : ''}">1 · Version</span>
-          <span class="px-2 py-1 text-(--text-muted) {wizardTab === 2 ? 'bg-(--bg-subtle) rounded text-(--text-main) font-medium' : ''}">2 · Loader</span>
-          <span class="px-2 py-1 text-(--text-muted) {wizardTab === 3 ? 'bg-(--bg-subtle) rounded text-(--text-main) font-medium' : ''}">3 · Modpack</span>
-        </div>
-
-        {#if wizardTab === 1}
-          <div class="min-h-0 flex-1 overflow-y-auto p-4">
-            <div class="flex items-center justify-between">
-              <button
-                class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
-                disabled={fetchingVersions}
-                onclick={fetchVersions}
-              >
-                {fetchingVersions ? 'Fetching…' : catalog ? 'Refresh' : 'Load version list'}
-              </button>
-              <div class="flex gap-1">
-                {#each [['all', 'All'], ['releases', 'Releases'], ['snapshots', 'Snapshots']] as [id, label] (id)}
-                  <button
-                    class="rounded px-2 py-1 text-[11px] {typeFilter === id
-                      ? 'bg-(--accent) font-medium text-(--on-accent)'
-                      : 'text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)'}"
-                    onclick={() => (typeFilter = id)}
-                  >
-                    {label}
-                  </button>
-                {/each}
-              </div>
-            </div>
-            <input
-              class="mt-3 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-              placeholder={catalog ? `Search ${catalog.total} versions…` : 'Load the version list first'}
-              bind:value={versionQuery}
-              disabled={!catalog}
-            />
-            <ul class="mt-3 h-full max-h-[280px] divide-y divide-(--border) overflow-y-auto rounded border border-(--border) bg-(--bg-subtle)">
-              {#each filteredVersions() as v (v.id)}
-                <li class="flex items-center gap-3 px-3 py-2 {wizardVersion === v.id ? 'bg-(--accent)/10' : ''}">
-                  <button
-                    class="h-8 min-w-0 flex-1 cursor-pointer text-left"
-                    onclick={() => {
-                      wizardVersion = v.id;
-                      wizardName = wizardName || v.id;
-                    }}
-                  >
-                    <span class="text-[13px]">{v.id}</span>
-                    {#if v.is_latest_release}
-                      <span class="ml-1 rounded bg-(--accent-star)/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-(--accent-star)">LATEST</span>
-                    {/if}
-                    <span class="ml-2 text-[10px] uppercase tracking-wide {v.version_type === 'release' ? 'text-(--text-muted)' : 'text-(--accent-star)/80'}">{v.version_type}</span>
-                  </button>
-                </li>
-              {:else}
-                <li class="px-3 py-3 text-[12px] text-(--text-muted)">
-                  {catalog ? 'No versions match this filter.' : versionsError ?? 'Choose a source…'}
-                </li>
-              {/each}
-            </ul>
+        <div class="p-4">
+          <div
+            class="flex h-36 flex-col items-center justify-center rounded border border-dashed border-(--border) text-center text-(--text-muted) hover:border-(--accent)"
+            ondragover={(e) => e.preventDefault()}
+            ondrop={(e) => {
+              e.preventDefault();
+              const path = e.dataTransfer?.files?.[0]?.path;
+              if (path) modpackTarget = path;
+            }}
+          >
+            <span class="text-xl">⤓</span>
+            <span class="mt-2 text-[12px]">Drop an <span class="text-(--text-main)">.mrpack</span> here</span>
+            <span class="text-[11px]">or paste its path / URL below</span>
           </div>
-        {:else if wizardTab === 2}
-          <div class="flex-1 overflow-y-auto p-4">
-            <label class="block text-[12px] font-medium text-(--text-muted)">Instance name</label>
-            <input
-              class="mt-1 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none focus:border-(--accent)"
-              bind:value={wizardName}
-              placeholder={wizardVersion || '1.21.4'}
-            />
-            {#if wizardName.trim() && slugifyLocal(wizardName.trim()) !== wizardName.trim()}
-              <p class="mt-1 text-[10px] text-(--text-muted)">id: {slugifyLocal(wizardName.trim())}</p>
-            {/if}
-            <div class="mt-3 flex gap-2">
-              {#each [['', 'Vanilla'], ['fabric', 'Fabric'], ['quilt', 'Quilt']] as [id, label] (id)}
-                <button
-                  class="flex-1 rounded border border-(--border) px-3 py-2 text-[13px] {wizardLoader === id
-                    ? 'border-(--accent) bg-(--accent)/10 font-medium text-(--accent)'
-                    : 'text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)'}"
-                  onclick={() => pickLoader(id)}
-                >
-                  {label}
-                </button>
-              {/each}
-            </div>
-            {#if wizardLoader}
-              <label class="mt-3 block text-[12px] font-medium text-(--text-muted)">{wizardLoader} version</label>
-              {#if loaderBuildsState === 'loading'}
-                <div class="mt-1 flex h-8 items-center rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] text-(--text-muted)">
-                  Loading {wizardLoader} builds for {wizardVersion}…
-                </div>
-              {:else if loaderBuildsState === 'error'}
-                <input
-                  class="mt-1 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none focus:border-(--accent)"
-                  bind:value={wizardLoaderVersion}
-                  placeholder="version (offline — type manually, empty = latest stable)"
-                />
-                <p class="mt-1 text-[10px] text-(--accent-star)">Build list unavailable — enter a version manually.</p>
-              {:else}
-                <select
-                  class="mt-1 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2 text-[13px] outline-none focus:border-(--accent)"
-                  bind:value={wizardLoaderVersion}
-                >
-                  <option value="">Latest stable</option>
-                  {#each loaderBuilds as build (build.version)}
-                    <option value={build.version}>
-                      {build.version}{build.stable ? '' : ' (unstable)'}
-                    </option>
-                  {/each}
-                </select>
-              {/if}
-            {/if}
-          </div>
-        {:else}
-          <div class="flex-1 overflow-y-auto p-4">
-            <div
-              class="flex h-40 flex-col items-center justify-center rounded border border-dashed border-(--border) text-center text-(--text-muted) hover:border-(--accent)"
-              ondragover={(e) => e.preventDefault()}
-              ondrop={(e) => {
-                e.preventDefault();
-                const path = e.dataTransfer?.files?.[0]?.path;
-                if (path) modpackTarget = path;
-              }}
-            >
-              <span class="text-xl">⤓</span>
-              <span class="mt-2 text-[12px]">Drop an <span class="text-(--text-main)">.mrpack</span> here</span>
-              <span class="text-[11px]">or paste its path / URL below</span>
-            </div>
-            <input
-              class="mt-3 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-              placeholder="C:\downloads\pack.mrpack  |  https://modrinth.com/…"
-              bind:value={modpackTarget}
-            />
-            <p class="mt-2 text-[11px] text-(--text-muted)">Modrinth packs stage their own instance (name from the pack slug).</p>
-          </div>
-        {/if}
-
-        <div class="flex items-center justify-between border-t border-(--border) px-4 py-3">
-          {#if wizardTab === 1}
-            <span class="text-[12px] text-(--text-muted)">{wizardVersion ? `Selected ${wizardVersion}` : 'Pick a version to continue'}</span>
-            <button
-              class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
-              disabled={!wizardVersion}
-              onclick={() => (wizardTab = 2)}
-            >
-              Next
-            </button>
-          {:else if wizardTab === 2}
-            <button class="rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:text-(--text-main)" onclick={() => (wizardTab = 1)}>Back</button>
-            <div class="flex gap-2">
-              <button class="rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:text-(--text-main)" onclick={() => (wizardTab = 3)}>Modpack instead</button>
-              <button
-                class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
-                onclick={createFromWizard}
-              >
-                Create Instance
-              </button>
-            </div>
-          {:else}
-            <button class="rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:text-(--text-main)" onclick={() => (wizardTab = 2)}>Back</button>
-            <button
-              class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
-              disabled={modpackBusy || !modpackTarget.trim()}
-              onclick={installFromWizard}
-            >
-              {modpackBusy ? 'Installing…' : 'Install .mrpack'}
-            </button>
+          <input
+            class="mt-3 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+            placeholder="C:\downloads\pack.mrpack  |  https://modrinth.com/…"
+            bind:value={modpackTarget}
+          />
+          {#if modpackError}
+            <p class="mt-2 text-[12px] text-red-400">{modpackError}</p>
           {/if}
         </div>
-        {#if wizardError}
-          <p class="border-t border-(--border) px-4 py-2 text-[12px] text-red-400">{wizardError}</p>
-        {/if}
+        <div class="flex items-center justify-end gap-2 border-t border-(--border) px-4 py-3">
+          <button
+            class="rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:text-(--text-main)"
+            onclick={() => (modpackOpen = false)}
+          >
+            Cancel
+          </button>
+          <button
+            class="rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
+            disabled={modpackBusy || !modpackTarget.trim()}
+            onclick={installFromWizard}
+          >
+            {modpackBusy ? 'Installing…' : 'Install .mrpack'}
+          </button>
+        </div>
       </div>
     </div>
   {/if}

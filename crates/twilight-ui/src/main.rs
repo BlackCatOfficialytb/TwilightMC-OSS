@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod accounts;
+mod export;
 mod instance;
 mod instances;
 mod java;
@@ -10,6 +11,7 @@ mod modpack;
 mod modrinth;
 mod mods;
 mod prefs;
+mod shortcut;
 mod storage;
 mod versions;
 
@@ -46,6 +48,10 @@ fn open_path(path: String) -> Result<(), String> {
 }
 
 fn main() {
+    // Desktop-shortcut boot: `--launch <id>` / `--launch=<id>` decides the
+    // auto-launch target before Tauri takes over the event loop.
+    shortcut::init_startup_launch(&std::env::args().collect::<Vec<_>>());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
@@ -65,8 +71,14 @@ fn main() {
             launch::kill_instance,
             instances::get_instances,
             instances::create_instance,
+            instances::duplicate_instance,
+            instances::set_instance_icon,
             instance::scan_instances,
+            instance::set_instance_group,
             instances::delete_instance,
+            shortcut::create_desktop_shortcut,
+            shortcut::get_startup_launch,
+            export::export_instance_zip,
             mods::list_instance_mods,
             mods::toggle_mod,
             mods::delete_mod,

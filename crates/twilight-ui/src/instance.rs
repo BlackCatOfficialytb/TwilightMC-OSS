@@ -11,7 +11,7 @@ use serde::Serialize;
 use tauri::AppHandle;
 
 use crate::accounts::{load_settings, settings_path};
-use crate::instances::read_meta;
+use crate::instances::{instances_root, read_meta, validate_instance_id};
 use crate::storage::shared_root;
 
 /// One row of the instance grid; the superset of our own and Prism metadata.
@@ -32,6 +32,8 @@ pub struct InstanceInfo {
     pub last_played: u64,
     /// Accumulated play time in seconds.
     pub total_time_played: u64,
+    /// Prism group label from the root's shared `instgroups.json`.
+    pub group: Option<String>,
 }
 
 /// Maps a stored loader token onto a display name; `None`/`vanilla` stays
@@ -225,12 +227,156 @@ fn icon_for(dir: &Path, icon_key: Option<&str>, root: &Path) -> Option<String> {
     None
 }
 
+// ---- Prism group membership (`instgroups.json`) ----------------------------
+
+/// The shared group document every launcher in the root reads: each group
+/// carries a display name and its member instance directory names.
+fn instgroups_path(root: &Path) -> PathBuf {
+    root.join("instgroups.json")
+}
+
+/// Directory-id → group-name map from `<root>/instgroups.json`; missing or
+/// malformed files read as empty. Hidden groups are skipped and duplicate
+/// memberships resolve to the first visible group that claims the instance.
+pub(crate) fn group_map(root: &Path) -> BTreeMap<String, String> {
+    let Ok(text) = std::fs::read_to_string(instgroups_path(root)) else {
+        return BTreeMap::new();
+    };
+    let Ok(raw) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return BTreeMap::new();
+    };
+    groups_from_doc(&raw)
+}
+
+/// Extracts the membership map from a parsed document (testable core).
+fn groups_from_doc(raw: &serde_json::Value) -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
+    for (_key, group) in raw
+        .get("groups")
+        .and_then(|g| g.as_object())
+        .into_iter()
+        .flatten()
+    {
+        if group
+            .get("hidden")
+            .and_then(|h| h.as_bool())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let Some(name) = group.get("name").and_then(|n| n.as_str()) else {
+            continue;
+        };
+        for member in group
+            .get("instances")
+            .and_then(|i| i.as_array())
+            .into_iter()
+            .flatten()
+        {
+            if let Some(id) = member.as_str() {
+                map.entry(id.to_owned()).or_insert_with(|| name.to_owned());
+            }
+        }
+    }
+    map
+}
+
+/// Rewrites the group document: `id` leaves every group it belongs to and,
+/// when `group` is set, joins that one — existing display names win, fresh
+/// groups are keyed by their name (colliding keys get a numeric suffix).
+/// Pure core of the IPC command.
+fn set_group_membership(
+    raw: &mut serde_json::Value,
+    id: &str,
+    group: Option<&str>,
+) -> Result<(), String> {
+    let object = raw
+        .as_object_mut()
+        .ok_or("instgroups.json must be a JSON object")?;
+    if !object.get("groups").is_some_and(|g| g.is_object()) {
+        object.insert("groups".to_owned(), serde_json::json!({}));
+    }
+    let groups = object
+        .get_mut("groups")
+        .and_then(|g| g.as_object_mut())
+        .ok_or("groups must be a JSON object")?;
+
+    // strip the instance from every group's member list
+    for entry in groups.values_mut() {
+        if let Some(list) = entry.get_mut("instances").and_then(|i| i.as_array_mut()) {
+            list.retain(|member| member.as_str() != Some(id));
+        }
+    }
+
+    let Some(label) = group.map(str::trim).filter(|g| !g.is_empty()) else {
+        return Ok(());
+    };
+    let entry = groups
+        .iter_mut()
+        .find(|(_key, g)| g.get("name").and_then(|n| n.as_str()) == Some(label))
+        .map(|(_key, g)| g);
+    let entry = match entry {
+        Some(existing) => existing,
+        None => {
+            let mut key = label.to_owned();
+            let mut n = 2;
+            while groups.contains_key(&key) {
+                key = format!("{label}-{n}");
+                n += 1;
+            }
+            groups.insert(
+                key.clone(),
+                serde_json::json!({ "name": label, "hidden": false, "instances": [] }),
+            );
+            groups.get_mut(&key).unwrap()
+        }
+    };
+    if !entry.get("instances").is_some_and(|i| i.is_array()) {
+        entry["instances"] = serde_json::json!([]);
+    }
+    if let Some(list) = entry.get_mut("instances").and_then(|i| i.as_array_mut())
+        && !list.iter().any(|member| member.as_str() == Some(id))
+    {
+        list.push(serde_json::json!(id));
+    }
+    Ok(())
+}
+
+/// Moves an instance between groups: `None`/empty clears the membership.
+/// Groups live in the root's shared `instgroups.json`, so native and
+/// foreign (Prism-imported) instances behave identically — and Prism
+/// itself reads the same file.
+#[tauri::command]
+pub async fn set_instance_group(
+    app: AppHandle,
+    instance_id: String,
+    group: Option<String>,
+) -> Result<(), String> {
+    validate_instance_id(&instance_id)?;
+    let root = instances_root(&app).await?;
+    let path = instgroups_path(&root);
+    let mut raw = match tokio::fs::read_to_string(&path).await {
+        Ok(text) => serde_json::from_str::<serde_json::Value>(&text)
+            .map_err(|e| format!("instgroups.json is malformed: {e}"))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            serde_json::json!({ "formatVersion": "1", "groups": {} })
+        }
+        Err(e) => return Err(e.to_string()),
+    };
+    set_group_membership(&mut raw, &instance_id, group.as_deref())?;
+    let json = serde_json::to_string_pretty(&raw).map_err(|e| e.to_string())?;
+    tokio::fs::write(&path, json)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 // ---- the scan ---------------------------------------------------------------
 
 /// Scans `root` one level deep, listing every directory that carries our own
 /// or foreign instance metadata. Unknown directories (`.trash`, staging, ...)
 /// are skipped silently.
 pub(crate) async fn scan_instances_in(root: &Path) -> Result<Vec<InstanceInfo>, String> {
+    let groups = group_map(root);
     let mut infos = Vec::new();
     let mut entries = tokio::fs::read_dir(root).await.map_err(|e| e.to_string())?;
     while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
@@ -242,9 +388,10 @@ pub(crate) async fn scan_instances_in(root: &Path) -> Result<Vec<InstanceInfo>, 
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
-        let info = native_info(&dir, &id)
+        let group = groups.get(&id).cloned();
+        let info = native_info(&dir, &id, group.clone())
             .await
-            .or_else(|| prism_info(&dir, &id, root));
+            .or_else(|| prism_info(&dir, &id, root, group));
         if let Some(info) = info {
             infos.push(info);
         }
@@ -259,7 +406,7 @@ pub(crate) async fn scan_instances_in(root: &Path) -> Result<Vec<InstanceInfo>, 
 }
 
 /// Builds a row from our own `instance.json` / legacy `twilight.json`.
-async fn native_info(dir: &Path, id: &str) -> Option<InstanceInfo> {
+async fn native_info(dir: &Path, id: &str, group: Option<String>) -> Option<InstanceInfo> {
     let meta = read_meta(dir).await?;
     let name = if meta.name.is_empty() {
         meta.version.clone()
@@ -275,12 +422,13 @@ async fn native_info(dir: &Path, id: &str) -> Option<InstanceInfo> {
         loader_version: meta.loader_version,
         last_played: meta.last_played,
         total_time_played: meta.total_time_played,
+        group,
     })
 }
 
 /// Builds a row from foreign Prism/MultiMC metadata, `None` when the
 /// directory carries no `instance.cfg`.
-fn prism_info(dir: &Path, id: &str, root: &Path) -> Option<InstanceInfo> {
+fn prism_info(dir: &Path, id: &str, root: &Path, group: Option<String>) -> Option<InstanceInfo> {
     let cfg_text = std::fs::read_to_string(dir.join("instance.cfg")).ok()?;
     let cfg = parse_cfg(&cfg_text);
     let cfg_get = |key: &str| cfg.get(key).map(|v| v.as_str());
@@ -314,6 +462,7 @@ fn prism_info(dir: &Path, id: &str, root: &Path) -> Option<InstanceInfo> {
         loader_version,
         last_played,
         total_time_played,
+        group,
     })
 }
 
@@ -498,6 +647,13 @@ mod tests {
         std::fs::create_dir_all(root.join("not-an-instance")).unwrap();
         std::fs::write(root.join("notes.txt"), b"x").unwrap();
 
+        // shared Prism group file: one member instance gets a group label
+        std::fs::write(
+            root.join("instgroups.json"),
+            r#"{"formatVersion":"1","groups":{"sky":{"name":"Sky","hidden":false,"instances":["vanilla-sky"]}}}"#,
+        )
+        .unwrap();
+
         let scanned = scan_instances_in(&root).await.unwrap();
         assert_eq!(scanned.len(), 3, "junk dirs skipped: {scanned:?}");
 
@@ -525,6 +681,68 @@ mod tests {
         assert_eq!(scanned[2].last_played, 42);
         assert_eq!(scanned[2].total_time_played, 90);
         assert!(scanned[2].icon_path.is_none());
+        assert_eq!(
+            scanned[2].group.as_deref(),
+            Some("Sky"),
+            "instgroups.json member"
+        );
+        assert_eq!(scanned[0].group, None, "ungrouped instances read as None");
+    }
+
+    #[test]
+    fn group_membership_moves_between_groups() {
+        let mut doc = serde_json::json!({
+            "formatVersion": "1",
+            "groups": {
+                "newgen": { "name": "New gen", "hidden": false, "instances": ["alpha", "beta"] }
+            }
+        });
+        set_group_membership(&mut doc, "alpha", Some("Sky")).unwrap();
+        let map = groups_from_doc(&doc);
+        assert_eq!(map.get("alpha").map(String::as_str), Some("Sky"));
+        assert_eq!(
+            map.get("beta").map(String::as_str),
+            Some("New gen"),
+            "untouched member keeps its group"
+        );
+
+        // joining an existing group matches by display name, key unchanged
+        set_group_membership(&mut doc, "gamma", Some("New gen")).unwrap();
+        assert_eq!(
+            groups_from_doc(&doc).get("gamma").map(String::as_str),
+            Some("New gen")
+        );
+
+        // clearing membership removes the instance everywhere
+        set_group_membership(&mut doc, "alpha", None).unwrap();
+        assert!(!groups_from_doc(&doc).contains_key("alpha"));
+
+        // a fresh document gains formatVersion groups when written by hand
+        let mut bare = serde_json::json!({});
+        set_group_membership(&mut bare, "solo", Some("Lone")).unwrap();
+        let map = groups_from_doc(&bare);
+        assert_eq!(map.get("solo").map(String::as_str), Some("Lone"));
+
+        // non-object documents are refused, not silently rewritten
+        let mut junk = serde_json::json!("nope");
+        assert!(set_group_membership(&mut junk, "x", None).is_err());
+    }
+
+    #[test]
+    fn group_map_skips_hidden_groups() {
+        let doc = serde_json::json!({
+            "groups": {
+                "a": { "name": "Visible", "instances": ["one", "two"] },
+                "b": { "name": "Hidden", "hidden": true, "instances": ["two"] }
+            }
+        });
+        let map = groups_from_doc(&doc);
+        assert_eq!(map.get("one").map(String::as_str), Some("Visible"));
+        assert_eq!(
+            map.get("two").map(String::as_str),
+            Some("Visible"),
+            "the first visible group wins"
+        );
     }
 
     #[tokio::test]

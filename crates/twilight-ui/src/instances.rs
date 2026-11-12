@@ -374,6 +374,140 @@ pub async fn delete_instance(
     delete_instance_in(&root, &instance_id, to_trash).await
 }
 
+/// First free `<base>-copy[-n]` slug for a duplicate, checked against
+/// `exists` (the instances root) so copies never collide.
+fn next_copy_id(base: &str, exists: &dyn Fn(&str) -> bool) -> String {
+    let mut candidate = format!("{base}-copy");
+    let mut n = 2;
+    while exists(&candidate) {
+        candidate = format!("{base}-copy-{n}");
+        n += 1;
+    }
+    candidate
+}
+
+/// Replaces the `name=` line of an `instance.cfg`; every other line stays
+/// byte-identical.
+fn rewrite_cfg_name(text: &str, new_name: &str) -> String {
+    let mut out = String::with_capacity(text.len() + new_name.len());
+    for line in text.split_inclusive('\n') {
+        if line.trim_start().starts_with("name=") {
+            out.push_str("name=");
+            out.push_str(new_name);
+            out.push('\n');
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
+}
+
+/// Copies an instance directory under a unique `<name>-copy` slug and
+/// returns its fresh grid row. Native metadata gets the copy's name and
+/// zeroed play counters; foreign Prism `instance.cfg` files only get their
+/// `name=` line rewritten — the copied files keep the rest as-is.
+#[tauri::command]
+pub async fn duplicate_instance(
+    app: AppHandle,
+    instance_id: String,
+) -> Result<crate::instance::InstanceInfo, String> {
+    validate_instance_id(&instance_id)?;
+    let root = instances_root(&app).await?;
+    let src = root.join(&instance_id);
+    if !src.is_dir() {
+        return Err(format!("unknown instance {instance_id}"));
+    }
+
+    // display name: our metadata first, then Prism's cfg, then the id
+    let display = read_meta(&src)
+        .await
+        .map(|meta| {
+            if meta.name.is_empty() {
+                meta.version
+            } else {
+                meta.name
+            }
+        })
+        .or_else(|| {
+            parse_cfg(&std::fs::read_to_string(src.join("instance.cfg")).unwrap_or_default())
+                .get("name")
+                .cloned()
+                .filter(|n| !n.is_empty())
+        })
+        .filter(|d| !d.is_empty())
+        .unwrap_or_else(|| instance_id.clone());
+    let new_name = format!("{display} Copy");
+
+    let id = next_copy_id(&slugify(&display), &|c| root.join(c).exists());
+    let dest = root.join(&id);
+    copy_dir_all(&src, &dest).await?;
+
+    if let Some(mut meta) = read_meta(&dest).await {
+        meta.name = new_name.clone();
+        meta.last_played = 0;
+        meta.total_time_played = 0;
+        write_meta(&dest, &meta).await?;
+    } else if dest.join("instance.cfg").is_file() {
+        let path = dest.join("instance.cfg");
+        let text = tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| e.to_string())?;
+        tokio::fs::write(&path, rewrite_cfg_name(&text, &new_name))
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    // the fresh row straight from the scan engine (icon, group, meta)
+    crate::instance::scan_instances_in(&root)
+        .await?
+        .into_iter()
+        .find(|row| row.id == id)
+        .ok_or_else(|| "copy vanished after staging".to_owned())
+}
+
+/// Copies an image file into the instance directory as `icon.<ext>` and
+/// removes the other recognized icon variants, so the scan resolves
+/// exactly one artwork file afterwards.
+#[tauri::command]
+pub async fn set_instance_icon(
+    app: AppHandle,
+    instance_id: String,
+    image_path: String,
+) -> Result<String, String> {
+    validate_instance_id(&instance_id)?;
+    let src = PathBuf::from(image_path.trim());
+    if !src.is_file() {
+        return Err(format!("image not found: {image_path}"));
+    }
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    if !matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "webp" | "ico") {
+        return Err("icons must be png, jpg, jpeg, webp or ico files".into());
+    }
+    let size = tokio::fs::metadata(&src)
+        .await
+        .map_err(|e| e.to_string())?
+        .len();
+    if size > 16 * 1024 * 1024 {
+        return Err("icon files larger than 16 MiB are rejected".into());
+    }
+    let dir = instances_root(&app).await?.join(&instance_id);
+    if !dir.is_dir() {
+        return Err(format!("unknown instance {instance_id}"));
+    }
+    for stale in ["icon.png", "icon.jpg", "icon.jpeg", "icon.ico", "icon.webp"] {
+        let _ = tokio::fs::remove_file(dir.join(stale)).await;
+    }
+    let dest = dir.join(format!("icon.{ext}"));
+    tokio::fs::copy(&src, &dest)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(dest.display().to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -396,6 +530,29 @@ mod tests {
         assert_eq!(slugify("My Cool Instance!"), "my-cool-instance");
         assert_eq!(slugify("1.21.4 Fabric"), "1-21-4-fabric");
         assert_eq!(slugify("///"), "instance");
+    }
+
+    #[test]
+    fn copy_ids_never_collide() {
+        let taken = |candidate: &str| candidate == "modded-copy" || candidate == "modded-copy-2";
+        assert_eq!(next_copy_id("modded", &taken), "modded-copy-3");
+        assert_eq!(next_copy_id("fresh", &|_| false), "fresh-copy");
+    }
+
+    #[test]
+    fn cfg_name_rewrite_touches_only_the_name_line() {
+        let cfg = "InstanceType=OneSix\nname=Old Name\niconKey=chickens\n";
+        assert_eq!(
+            rewrite_cfg_name(cfg, "Old Name Copy"),
+            "InstanceType=OneSix\nname=Old Name Copy\niconKey=chickens\n"
+        );
+        // a trailing name line without a newline still gets replaced
+        assert_eq!(rewrite_cfg_name("name=Old", "New"), "name=New\n");
+        // files without a name line stay byte-identical
+        assert_eq!(
+            rewrite_cfg_name("InstanceType=OneSix\n", "x"),
+            "InstanceType=OneSix\n"
+        );
     }
 
     #[tokio::test]
