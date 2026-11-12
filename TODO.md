@@ -77,4 +77,4 @@
 
 ## Special thanks
 
-- Special thanks to `cheryy_on_top` and `mimoji` from `.gg/sabatank` for the hilarious late-night debate about the Minecraft Narrator jumpscare (listening to Lofi gone wrong) that sparked the idea for the Blind & Deaf accessibility modes.
+- Special thanks to `cheryy_on_top` and `mimoji` from `discord.gg/sabatank` for the hilarious late-night debate about the Minecraft Narrator jumpscare (listening to Lofi gone wrong) that sparked the idea for the Blind & Deaf accessibility modes.
