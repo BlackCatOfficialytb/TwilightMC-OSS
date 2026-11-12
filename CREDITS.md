@@ -54,6 +54,15 @@ govern those snapshots themselves.
 - **XMCL** — inspiration for the dynamic accent color engine
   (whole-shell recolor from a single pick).
 
+## Interface iconography
+
+- The current temporary interface iconography borrows from **Twitter
+  Twemoji** ([github.com/twitter/twemoji](https://github.com/twitter/twemoji)),
+  licensed under the **Creative Commons Attribution 4.0 International
+  (CC-BY 4.0)** license. These emoji-based glyphs are placeholders until the
+  dedicated TwilightMC icon set lands; attribution is kept here as long as
+  any of them ship.
+
 ## Special thanks
 
 - Special thanks to `cheryy_on_top` and `mimoji` from `discord.gg/sabatank`
