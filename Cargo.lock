@@ -4181,6 +4181,7 @@ dependencies = [
  "twilight-downloader",
  "twilight-launch",
  "twilight-modloader",
+ "twilight-modrinth",
  "twilight-runtime",
 ]
 

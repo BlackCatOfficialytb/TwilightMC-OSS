@@ -3,6 +3,7 @@
   import InstanceGrid from './lib/InstanceGrid.svelte';
   import EditInstanceModal from './lib/EditInstanceModal.svelte';
   import ModrinthBrowserModal from './lib/ModrinthBrowserModal.svelte';
+  import MrpackInstallModal from './lib/MrpackInstallModal.svelte';
   import InstanceContextPanel from './lib/InstanceContextPanel.svelte';
   import SettingsPage from './lib/SettingsPage.svelte';
   import { topOverlay } from './lib/overlays.js';
@@ -89,6 +90,9 @@
   let browserFor = $state(null);
   // bumps whenever a mod lands, so the context panel re-counts
   let ctxNonce = $state(0);
+
+  // ---- global .mrpack drag-and-drop ----
+  let mrpackFor = $state(null);
 
   // ---- settings page state (full-page view on the `settings` nav route) ----
   let storage = $state(null);
@@ -591,7 +595,13 @@
         unlisteners.push(
           await window.__TAURI__.event.listen('tauri://drag-drop', (e) => {
             const path = e.payload?.paths?.[0];
-            if (path && (wizardOpen || path.endsWith('.mrpack'))) modpackTarget = path;
+            if (!path) return;
+            if (path.endsWith('.mrpack')) {
+              // wizard open: the dropzone tab owns the path; anywhere else:
+              // intercept into the dedicated install modal
+              if (wizardOpen) modpackTarget = path;
+              else mrpackFor = path;
+            }
           }),
         );
       } catch {
@@ -891,6 +901,19 @@
       oninstalled={() => {
         ctxNonce += 1;
         status = `Mod installed into ${browserFor.name}.`;
+      }}
+    />
+  {/if}
+
+  {#if mrpackFor}
+    <MrpackInstallModal
+      path={mrpackFor}
+      onclose={() => (mrpackFor = null)}
+      oninstalled={async (id) => {
+        mrpackFor = null;
+        await loadInstances();
+        selectedId = id;
+        status = 'Modpack installed.';
       }}
     />
   {/if}

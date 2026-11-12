@@ -18,6 +18,9 @@ pub struct ModpackIndex {
     pub name: String,
     #[serde(default)]
     pub version_id: String,
+    /// Long-form pack description; absent in some packs.
+    #[serde(default)]
+    pub summary: Option<String>,
     #[serde(default)]
     pub dependencies: BTreeMap<String, String>,
     #[serde(default)]
@@ -161,6 +164,19 @@ mod tests {
             .filter(|file| file.applies_to_client())
             .count();
         assert_eq!(client_files, 2, "beta is server-only and never stages");
+    }
+
+    #[test]
+    fn summary_is_optional() {
+        let index = parse_index(INDEX_JSON.as_bytes()).unwrap();
+        assert_eq!(index.summary, None, "no summary in the fixture");
+
+        let with_summary = parse_index(
+            br#"{ "formatVersion": 1, "game": "minecraft", "name": "pack",
+                "summary": "A curated pack." }"#,
+        )
+        .unwrap();
+        assert_eq!(with_summary.summary.as_deref(), Some("A curated pack."));
     }
 
     #[test]

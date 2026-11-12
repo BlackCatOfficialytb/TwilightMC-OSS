@@ -45,8 +45,9 @@ pub struct InstanceRow {
 
 // ---- core operations (isolated from tauri so they can be tested) ----
 
-/// Slugs a display name into a filesystem-safe instance id.
-fn slugify(name: &str) -> String {
+/// Slugs a display name into a filesystem-safe instance id: lowercase,
+/// every non-alphanumeric run becomes one dash, dash-trimmed.
+pub(crate) fn slugify(name: &str) -> String {
     let slug: String = name
         .chars()
         .map(|c| c.to_ascii_lowercase())
@@ -133,7 +134,7 @@ fn prism_launch_meta(instance_dir: &Path) -> Option<InstanceMeta> {
 
 /// Writes metadata beside wherever it already lives: an instance carrying the
 /// legacy `twilight.json` keeps that file, all others use `instance.json`.
-async fn write_meta(instance_dir: &Path, meta: &InstanceMeta) -> Result<(), String> {
+pub(crate) async fn write_meta(instance_dir: &Path, meta: &InstanceMeta) -> Result<(), String> {
     let file = if instance_dir.join("instance.json").exists()
         || !instance_dir.join("twilight.json").exists()
     {

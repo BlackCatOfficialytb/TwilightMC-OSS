@@ -71,6 +71,8 @@ fn main() {
             mods::toggle_mod,
             mods::delete_mod,
             mods::import_mod,
+            modpack::inspect_modpack,
+            modpack::install_mrpack,
             modpack::install_modpack,
             prefs::get_java_prefs,
             prefs::set_java_prefs,

@@ -21,4 +21,5 @@ twilight-downloader = { path = "../twilight-downloader" }
 twilight-cli = { path = "../twilight-cli" }
 twilight-launch = { path = "../twilight-launch" }
 twilight-modloader = { path = "../twilight-modloader" }
+twilight-modrinth = { path = "../twilight-modrinth" }
 reqwest = { workspace = true }
