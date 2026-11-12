@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import InstanceGrid from './lib/InstanceGrid.svelte';
   import EditInstanceModal from './lib/EditInstanceModal.svelte';
+  import ModrinthBrowserModal from './lib/ModrinthBrowserModal.svelte';
   import InstanceContextPanel from './lib/InstanceContextPanel.svelte';
   import SettingsPage from './lib/SettingsPage.svelte';
   import { topOverlay } from './lib/overlays.js';
@@ -83,6 +84,11 @@
 
   // ---- edit instance modal ----
   let editFor = $state(null);
+
+  // ---- in-app Modrinth browser (context panel + edit modal open it) ----
+  let browserFor = $state(null);
+  // bumps whenever a mod lands, so the context panel re-counts
+  let ctxNonce = $state(0);
 
   // ---- settings page state (full-page view on the `settings` nav route) ----
   let storage = $state(null);
@@ -389,6 +395,7 @@
   $effect(() => {
     const inst = selectedInst;
     editFor; // re-run when the edit modal closes to refresh the count
+    ctxNonce; // re-run after Modrinth installs land
     const token = ++ctxModsToken;
     ctxMods = null;
     if (!inst) return;
@@ -872,8 +879,19 @@
       onlaunch={() => launchInstance(selectedInst.id)}
       onedit={() => openEdit(selectedInst)}
       onopenfolder={() => openInstanceFolder(selectedInst.id)}
-      onmoremods={() => openEdit(selectedInst)}
+      onmoremods={() => (browserFor = selectedInst)}
       ondelete={() => requestDelete(selectedInst.id)}
+    />
+  {/if}
+
+  {#if browserFor}
+    <ModrinthBrowserModal
+      instance={browserFor}
+      onclose={() => (browserFor = null)}
+      oninstalled={() => {
+        ctxNonce += 1;
+        status = `Mod installed into ${browserFor.name}.`;
+      }}
     />
   {/if}
 

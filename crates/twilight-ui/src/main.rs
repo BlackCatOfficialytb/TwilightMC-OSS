@@ -7,6 +7,7 @@ mod instances;
 mod java;
 mod launch;
 mod modpack;
+mod modrinth;
 mod mods;
 mod prefs;
 mod storage;
@@ -58,6 +59,8 @@ fn main() {
             java::discover_java_installations,
             versions::fetch_vanilla_versions,
             versions::fetch_loader_versions,
+            modrinth::search_modrinth_mods,
+            modrinth::install_modrinth_mod,
             launch::launch_instance,
             launch::kill_instance,
             instances::get_instances,

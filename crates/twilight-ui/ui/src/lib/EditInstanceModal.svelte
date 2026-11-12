@@ -1,10 +1,11 @@
 <script>
   import { onMount } from 'svelte';
   import { pushOverlay, popOverlay } from './overlays.js';
+  import ModrinthBrowserModal from './ModrinthBrowserModal.svelte';
 
   // Prism-style edit-instance sheet: left tab rail, right content pane.
-  // The mods tab is fully live (list/toggle/delete/add); the remaining tabs
-  // keep their milestone placeholders.
+  // The mods tab is fully live (list/toggle/delete/add + Modrinth browser);
+  // the remaining tabs keep their milestone placeholders.
   let { instance, storage = null, onclose, onopenconsole } = $props();
 
   const tabs = ['components', 'mods', 'screenshots', 'logs'];
@@ -15,6 +16,7 @@
   let modsBusy = $state(false);
   let modsMsg = $state('');
   let modsQuery = $state('');
+  let browserOpen = $state(false);
 
   function visibleMods() {
     const q = modsQuery.trim().toLowerCase();
@@ -181,6 +183,13 @@
           placeholder="Filter installed mods…"
           bind:value={modsQuery}
         />
+        <button
+          class="mt-2 w-full rounded border border-(--border) bg-(--bg-subtle) px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-canvas) hover:text-(--text-main)"
+          title="Browse and install mods straight from Modrinth"
+          onclick={() => (browserOpen = true)}
+        >
+          ⤓ Get More Mods
+        </button>
         <table class="mt-3 w-full overflow-hidden rounded border border-(--border) bg-(--bg-subtle) text-[12px]">
           <tbody>
             {#each visibleMods() as mod (mod.filename)}
@@ -262,4 +271,13 @@
       {/if}
     </div>
   </div>
+
+  {#if browserOpen}
+    <!-- stacked above the edit sheet; Escape pops this one first -->
+    <ModrinthBrowserModal
+      {instance}
+      onclose={() => (browserOpen = false)}
+      oninstalled={() => listMods()}
+    />
+  {/if}
 </div>
