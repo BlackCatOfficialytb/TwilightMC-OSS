@@ -49,6 +49,18 @@
 - [x] Task `alpha-v0.3.0` — keyboard polish (arrow-key grid navigation with Enter-to-play, full Escape chain) and workspace version bump to 0.3.0 — Milestone 2 complete
 - [x] Task `alpha-v0.3.1` — CI hotfix: delete/resolve tests pass the slug id from `create_instance_in` instead of the display name (`Trashables` vs `trashables`), fixing the failover on case-sensitive filesystems (Linux CI)
 
+## Milestone 3 - desktop-grade design pass & modding (v0.3.1 → v0.4.0) — complete
+
+- [x] Task `alpha-v0.3.2` — edit-instance modal extracted from the shell, mods manager with enable-toggles, sizes, delete and native OS picker
+- [x] OpenDesign token implementation plus an XMCL-style dynamic accent color picker (ore presets + custom hex, whole-shell recolor)
+- [x] Yardarm-style right context panel for the selected instance (identity, path, meta, action column, live mods count)
+- [x] Instance card grammar: select on single click, launch on double click, hover play overlay dropped
+- [x] Launch pipeline repair, verified with a real 26.4-snapshot-8 Fabric 0.20.1 launch booting to the title screen: launch resolves the same instances root the grid scans, metadata reads report precise failures (and accept Prism `instance.cfg`/`mmc-pack.json`), `javaVersion.majorVersion` bridges into `compatible_java_majors` (real manifests never carried a top-level list — Java 17 was spawned for a Java 25 game), launcherMeta v2 profiles synthesize the loader jar (Knot died with ClassNotFoundException without it), the game work dir is created before spawn, and launch failures print bright red in the auto-opened console drawer
+- [x] Settings refactored from the 520px modal into a full-page two-column view (Appearance / Java & Memory / Storage & Staging / About & Updates) on the `settings` nav route
+- [x] Task `alpha-v0.3.3` — in-app Modrinth browser and 1-click mod install: v2 search bridge (project_type/version/loader facets), latest compatible version resolution, SHA-1 verified primary-jar install into `<instance>/mods`, debounced browser modal wired from the context panel and the mods tab
+- [x] Task `alpha-v0.3.4` — global drag-and-drop `.mrpack` installer: dropping a pack anywhere opens MrpackInstallModal (title, summary, versions, loader, file counts via `inspect_modpack`), `install_mrpack` stages downloads + overrides under a user-chosen instance name and writes the grid metadata (wizard installs previously stayed invisible to the scan), auto-selecting the new instance
+- [x] Task `alpha-v0.4.0` — quality gates audit (fmt/clippy -D warnings/test workspace/frontend build) and workspace version bump to 0.4.0 — Milestone 3 complete
+
 ## Theme queue (milestone-polish backlog)
 
 - [ ] Catppuccin Latte flavor (light palette pass over `app.css` tokens)
