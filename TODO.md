@@ -65,3 +65,16 @@
 
 - [ ] Catppuccin Latte flavor (light palette pass over `app.css` tokens)
 - [ ] Catppuccin Macchiato flavor (dark palette pass over `app.css` tokens)
+
+## Accessibility Suite (Chế độ Trợ Năng Chuyên Biệt)
+
+- [ ] **Blind Mode (Chế độ Khiếm Thị)** — profile preset / toggle in the settings page:
+  - When creating or editing a Fabric instance: auto-suggest and 1-click install the **Minecraft Access** mod plus assistive spatial-audio tooling (reusing the Modrinth browser pipeline).
+  - Show an explicit warning / guidance advising against Vanilla and Horizon engines for this profile — they lack the deep 3D screen-reader hooks and spatial navigation support that modded clients provide.
+- [ ] **Deaf Mode (Chế độ Khiếm Thính)** — profile preset / toggle in the settings page:
+  - Automatically enforce `showSubtitles: true` in the instance's `options.txt` before every launch.
+  - Suggest visual audio-cue / subtitle-enhancer mods when the instance runs Fabric (without discouraging Vanilla — native closed captions are already supported there).
+
+## Special thanks
+
+- Special thanks to `cheryy_on_top` and `mimoji` from `.gg/sabatank` for the hilarious late-night debate about the Minecraft Narrator jumpscare (listening to Lofi gone wrong) that sparked the idea for the Blind & Deaf accessibility modes.
