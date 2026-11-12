@@ -203,5 +203,6 @@ release — except the `snapshot` tag, whose files snapshot.yml supplies itself.
 
 TwilightMC uses a multi-tier model: the core utility crates are **Apache-2.0**,
 the application crates are **AGPL-3.0-or-later** — see
-[LICENSE.md](LICENSE.md). By contributing you accept the CLA terms
+[LICENSE.md](LICENSE.md). Upstream projects, APIs and people that made this
+possible are credited in [CREDITS.md](CREDITS.md). By contributing you accept the CLA terms
 in [CONTRIBUTING.md](CONTRIBUTING.md).
