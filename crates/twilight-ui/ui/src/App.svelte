@@ -2,8 +2,8 @@
   import { onMount } from 'svelte';
   import InstanceGrid from './lib/InstanceGrid.svelte';
   import EditInstanceModal from './lib/EditInstanceModal.svelte';
-  import AccentPicker from './lib/AccentPicker.svelte';
   import InstanceContextPanel from './lib/InstanceContextPanel.svelte';
+  import SettingsPage from './lib/SettingsPage.svelte';
   import { topOverlay } from './lib/overlays.js';
   import { loadSavedAccent } from './lib/theme';
 
@@ -36,6 +36,7 @@
     { id: 'instances', label: 'Instances', icon: '▦' },
     { id: 'worlds', label: 'Servers & P2P', icon: '⌗' },
     { id: 'downloads', label: 'Downloads', icon: '⤓' },
+    { id: 'settings', label: 'Settings', icon: '⚙' },
   ];
 
   const sections = {
@@ -83,8 +84,7 @@
   // ---- edit instance modal ----
   let editFor = $state(null);
 
-  // ---- settings modal ----
-  let settingsOpen = $state(false);
+  // ---- settings page state (full-page view on the `settings` nav route) ----
   let storage = $state(null);
   let sharedInput = $state('');
   let storageBusy = $state(false);
@@ -328,11 +328,16 @@
       const code = await api('launch_instance', { instanceId: id });
       logLine({ stream: 'stdout', line: `launcher reports exit code ${code}` });
       await loadInstances();
+      status = 'Ready';
     } catch (e) {
-      logLine({ stream: 'stderr', line: String(e) });
+      // every backend failure surfaces here: bright red in the auto-opened
+      // drawer, never a silent no-op
+      console.error('Launch failed:', e);
+      logLine({ stream: 'stderr', line: `[ERROR] Launch failed: ${e}` });
+      status = 'Launch failed';
     } finally {
       gameRunning = false;
-      status = 'Ready';
+      if (status !== 'Launch failed') status = 'Ready';
     }
   }
 
@@ -532,7 +537,6 @@
         else if (modalOpen) modalOpen = false;
         else if (wizardOpen) wizardOpen = false;
         else if (editFor) editFor = null;
-        else if (settingsOpen) settingsOpen = false;
         else if (drawerOpen) drawerOpen = false;
         return;
       }
@@ -544,7 +548,6 @@
         modalOpen ||
         wizardOpen ||
         editFor ||
-        settingsOpen ||
         drawerOpen ||
         topOverlay()
       )
@@ -623,7 +626,13 @@
             ? 'bg-(--accent) font-medium text-(--on-accent)'
             : 'text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)'}"
           title={item.label}
-          onclick={() => (active = item.id)}
+          onclick={() => {
+            active = item.id;
+            if (item.id === 'settings') {
+              loadPrefs();
+              if (!storage) loadStorage();
+            }
+          }}
         >
           <span class="w-5 shrink-0 text-center text-[15px] leading-none">{item.icon}</span>
           {#if sidebarExpanded}
@@ -640,21 +649,6 @@
         <span class="w-5 shrink-0 text-center text-[15px] leading-none">＋</span>
         {#if sidebarExpanded}
           <span class="truncate text-[13px]">Add Instance</span>
-        {/if}
-      </button>
-
-      <button
-        class="mt-3 border-t border-(--border) flex h-9 items-center gap-2.5 rounded px-2.5 text-left {sidebarExpanded ? '' : 'justify-center'} text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-        title="Settings"
-        onclick={() => {
-          settingsOpen = true;
-          loadPrefs();
-          loadStorage();
-        }}
-      >
-        <span class="w-5 shrink-0 text-center text-[15px] leading-none">⚙</span>
-        {#if sidebarExpanded}
-          <span class="truncate text-[13px]">Settings</span>
         {/if}
       </button>
     </div>
@@ -702,7 +696,32 @@
     </header>
 
     <main class="min-w-0 flex-1 overflow-y-auto p-6">
-      {#if active === 'instances'}
+      {#if active === 'settings'}
+        <!-- full-page settings: the grid and context panel stay behind -->
+        <SettingsPage
+          {version}
+          bind:theme
+          {storage}
+          {runtimes}
+          {scanning}
+          {javaError}
+          bind:javaPath
+          bind:minMem
+          bind:maxMem
+          bind:sharedInput
+          {storageBusy}
+          {storageMsg}
+          {javaMsg}
+          {gameRunning}
+          onback={() => (active = 'instances')}
+          onscanjava={scanJava}
+          onsaveprefs={savePrefs}
+          onsaveshared={saveShared}
+          onresetshared={resetShared}
+          oncleanstaging={cleanStaging}
+          onopenurl={(url) => api('open_path', { path: url }).catch((e) => (status = String(e)))}
+        />
+      {:else if active === 'instances'}
         <!-- action toolbar -->
         <div class="mb-4 flex items-center gap-2">
           <button
@@ -722,7 +741,7 @@
           <button
             class="rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
             onclick={() => {
-              settingsOpen = true;
+              active = 'settings';
               loadPrefs();
               if (!storage) loadStorage();
             }}
@@ -1131,101 +1150,6 @@
       onclose={() => (editFor = null)}
       onopenconsole={() => (drawerOpen = true)}
     />
-  {/if}
-
-  {#if settingsOpen}
-    <!-- Settings modal -->
-    <div
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onclick={(e) => {
-        if (e.target === e.currentTarget) settingsOpen = false;
-      }}
-    >
-      <div class="flex max-h-[560px] w-[520px] flex-col overflow-hidden rounded-lg border border-(--border) bg-(--bg-surface) shadow-2xl">
-        <div class="flex items-center justify-between border-b border-(--border) px-4 py-3">
-          <h3 class="text-sm font-semibold">Settings</h3>
-          <button class="text-(--text-muted) hover:text-(--text-main)" onclick={() => (settingsOpen = false)}>✕</button>
-        </div>
-
-        <div class="min-h-0 flex-1 overflow-y-auto p-4">
-          <AccentPicker />
-
-          <h4 class="mt-5 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Java</h4>
-          <select
-            class="mt-2 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2 text-[13px] outline-none focus:border-(--accent)"
-            bind:value={javaPath}
-          >
-            <option value="">Auto-discovery (recommended)</option>
-            {#each runtimes as r (r.executable)}
-              <option value={r.executable}>Java {r.major} — {r.home}</option>
-            {/each}
-          </select>
-          {#if !runtimes.length}
-            <p class="mt-2 text-[11px] text-(--text-muted)">{scanning ? 'Probing system roots…' : 'No runtimes detected.'}</p>
-          {/if}
-          <button class="mt-2 text-[11px] text-(--text-muted) hover:text-(--text-main)" onclick={scanJava}>Rescan JREs</button>
-
-          <h4 class="mt-5 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Memory</h4>
-          <div class="mt-2 flex items-center gap-2">
-            <span class="w-14 text-[12px] text-(--text-muted)">-Xms</span>
-            <input type="range" min="0" max="16384" step="256" bind:value={minMem} class="flex-1 accent-[var(--accent)]" />
-            <input type="number" min="0" max="65536" step="256" bind:value={minMem} class="h-7 w-20 rounded border border-(--border) bg-(--bg-subtle) px-2 text-right text-[12px] outline-none focus:border-(--accent)" />
-            <span class="text-[11px] text-(--text-muted)">MiB</span>
-          </div>
-          <div class="mt-1 flex items-center gap-2">
-            <span class="w-14 text-[12px] text-(--text-muted)">-Xmx</span>
-            <input type="range" min="0" max="16384" step="256" bind:value={maxMem} class="flex-1 accent-[var(--accent)]" />
-            <input type="number" min="0" max="65536" step="256" bind:value={maxMem} class="h-7 w-20 rounded border border-(--border) bg-(--bg-subtle) px-2 text-right text-[12px] outline-none focus:border-(--accent)" />
-            <span class="text-[11px] text-(--text-muted)">MiB</span>
-          </div>
-          <p class="mt-1 text-[11px] text-(--text-muted)">0 = launcher default. Recommended: 2048–4096.</p>
-
-          <h4 class="mt-5 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Storage</h4>
-          {#if storage}
-            <div class="mt-2 rounded border border-(--border) bg-(--bg-subtle) p-3">
-              <div class="text-[11px] text-(--text-muted)">Shared library {storage.is_default_shared ? '(default)' : '(custom)'}</div>
-              <div class="mt-2 flex gap-2">
-                <input
-                  class="h-8 flex-1 rounded border border-(--border) bg-(--bg-canvas) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-                  placeholder={storage.shared_dir}
-                  bind:value={sharedInput}
-                />
-                <button
-                  class="rounded bg-(--accent) px-3 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
-                  disabled={storageBusy}
-                  onclick={saveShared}>Save</button
-                >
-                {#if !storage.is_default_shared}
-                  <button
-                    class="rounded px-3 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
-                    disabled={storageBusy}
-                    onclick={resetShared}>Reset</button
-                  >
-                {/if}
-              </div>
-              <div class="mt-3 flex items-center justify-between gap-2">
-                <span class="min-w-0 flex-1 truncate text-[11px] text-(--text-muted)">Staging: {storage.staging_root}</span>
-                <button
-                  class="shrink-0 rounded px-3 py-1 text-[11px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
-                  disabled={storageBusy || gameRunning}
-                  onclick={cleanStaging}
-                >
-                  Clean staging
-                </button>
-              </div>
-            </div>
-          {/if}
-          {#if javaMsg || storageMsg}
-            <p class="mt-3 text-[12px] {javaMsg ? 'text-(--accent)' : 'text-(--text-muted)'}">{javaMsg || storageMsg}</p>
-          {/if}
-        </div>
-
-        <div class="flex items-center justify-end gap-2 border-t border-(--border) px-4 py-3">
-          <button class="rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:text-(--text-main)" onclick={() => (settingsOpen = false)}>Close</button>
-          <button class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)" onclick={savePrefs}>Save Java</button>
-        </div>
-      </div>
-    </div>
   {/if}
 
   {#if deleteFor}

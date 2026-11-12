@@ -1,0 +1,271 @@
+<script>
+  // Full-page settings: a left navigation rail over four sections and a
+  // spacious content column. Input values are $bindable so App.svelte keeps
+  // owning persistence; actions bubble up as callbacks.
+  import AccentPicker from './AccentPicker.svelte';
+
+  let {
+    version = '',
+    theme = $bindable('dark'),
+    storage = null,
+    runtimes = [],
+    scanning = false,
+    javaError = '',
+    javaPath = $bindable(''),
+    minMem = $bindable(0),
+    maxMem = $bindable(0),
+    sharedInput = $bindable(''),
+    storageBusy = false,
+    storageMsg = '',
+    javaMsg = '',
+    gameRunning = false,
+    onback,
+    onscanjava,
+    onsaveprefs,
+    onsaveshared,
+    onresetshared,
+    oncleanstaging,
+    onopenurl,
+  } = $props();
+
+  const sections = [
+    { id: 'appearance', label: 'Appearance', icon: '🎨' },
+    { id: 'java', label: 'Java & Memory', icon: '☕' },
+    { id: 'storage', label: 'Storage & Staging', icon: '📁' },
+    { id: 'about', label: 'About & Updates', icon: 'ℹ️' },
+  ];
+  let section = $state('appearance');
+
+  const REPO = 'https://github.com/BlackCatOfficialytb/TwilightMC-OSS';
+</script>
+
+<div class="flex h-full">
+  <!-- left navigation rail -->
+  <nav
+    class="flex w-56 shrink-0 flex-col border-r border-(--border) bg-(--bg-subtle) p-3"
+    aria-label="Settings sections"
+  >
+    <button
+      class="mb-3 flex h-9 items-center gap-2 rounded px-2.5 text-left text-[13px] font-medium text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main)"
+      title="Back to the instance library"
+      onclick={onback}
+    >
+      <span class="w-5 shrink-0 text-center text-[15px]">←</span>
+      <span class="truncate">Back to Instances</span>
+    </button>
+    <div class="flex flex-col gap-0.5">
+      {#each sections as s (s.id)}
+        <button
+          class="flex h-10 items-center gap-2.5 rounded px-2.5 text-left text-[13px] {section === s.id
+            ? 'bg-(--brand-tint) font-medium text-(--accent)'
+            : 'text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main)'}"
+          aria-current={section === s.id ? 'true' : undefined}
+          onclick={() => (section = s.id)}
+        >
+          <span class="w-5 shrink-0 text-center text-[15px]">{s.icon}</span>
+          <span class="truncate">{s.label}</span>
+        </button>
+      {/each}
+    </div>
+  </nav>
+
+  <!-- content column -->
+  <div class="min-w-0 flex-1 overflow-y-auto">
+    <div class="mx-auto max-w-2xl p-8">
+      {#if section === 'appearance'}
+        <h2 class="text-[16px] font-semibold">Appearance</h2>
+        <p class="mt-1 text-[12px] text-(--text-muted)">
+          Theme mode and the accent that recolors the entire launcher.
+        </p>
+
+        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Theme mode</h3>
+        <div class="mt-2 inline-flex rounded border border-(--border) bg-(--bg-subtle) p-1">
+          <button
+            class="h-8 rounded px-4 text-[12px] font-medium {theme === 'dark'
+              ? 'bg-(--accent) text-(--on-accent)'
+              : 'text-(--text-muted) hover:text-(--text-main)'}"
+            aria-pressed={theme === 'dark'}
+            onclick={() => (theme = 'dark')}
+          >
+            ☾ Twilight Dark
+          </button>
+          <button
+            class="h-8 rounded px-4 text-[12px] font-medium {theme === 'light'
+              ? 'bg-(--accent) text-(--on-accent)'
+              : 'text-(--text-muted) hover:text-(--text-main)'}"
+            aria-pressed={theme === 'light'}
+            onclick={() => (theme = 'light')}
+          >
+            ☀ Twilight Light
+          </button>
+        </div>
+
+        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Accent color</h3>
+        <div class="mt-3">
+          <AccentPicker />
+        </div>
+      {:else if section === 'java'}
+        <h2 class="text-[16px] font-semibold">Java &amp; Memory</h2>
+        <p class="mt-1 text-[12px] text-(--text-muted)">
+          Which JVM runs the game and how much memory it gets.
+        </p>
+
+        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Java runtime</h3>
+        <select
+          class="mt-2 h-9 w-full rounded border border-(--border) bg-(--bg-subtle) px-2 text-[13px] outline-none focus:border-(--accent)"
+          bind:value={javaPath}
+        >
+          <option value="">Auto-discovery (recommended)</option>
+          {#each runtimes as r (r.executable)}
+            <option value={r.executable}>Java {r.major} — {r.home}</option>
+          {/each}
+        </select>
+        {#if !runtimes.length}
+          <p class="mt-2 text-[12px] text-(--text-muted)">
+            {scanning ? 'Probing system roots…' : 'No runtimes detected.'}
+          </p>
+        {/if}
+        {#if javaError}
+          <p class="mt-2 text-[12px] text-rose-400">{javaError}</p>
+        {/if}
+        <button
+          class="mt-3 text-[12px] text-(--text-muted) hover:text-(--text-main)"
+          disabled={scanning}
+          onclick={onscanjava}
+        >
+          ↻ Rescan JREs
+        </button>
+
+        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Memory allocation</h3>
+        <div class="mt-3 flex items-center gap-3">
+          <span class="w-12 font-mono text-[12px] text-(--text-muted)">-Xms</span>
+          <input type="range" min="0" max="16384" step="256" bind:value={minMem} class="flex-1 accent-[var(--accent)]" />
+          <input
+            type="number"
+            min="0"
+            max="65536"
+            step="256"
+            bind:value={minMem}
+            class="h-8 w-24 rounded border border-(--border) bg-(--bg-subtle) px-2 text-right text-[12px] outline-none focus:border-(--accent)"
+          />
+          <span class="w-8 text-[11px] text-(--text-muted)">MiB</span>
+        </div>
+        <div class="mt-3 flex items-center gap-3">
+          <span class="w-12 font-mono text-[12px] text-(--text-muted)">-Xmx</span>
+          <input type="range" min="0" max="16384" step="256" bind:value={maxMem} class="flex-1 accent-[var(--accent)]" />
+          <input
+            type="number"
+            min="0"
+            max="65536"
+            step="256"
+            bind:value={maxMem}
+            class="h-8 w-24 rounded border border-(--border) bg-(--bg-subtle) px-2 text-right text-[12px] outline-none focus:border-(--accent)"
+          />
+          <span class="w-8 text-[11px] text-(--text-muted)">MiB</span>
+        </div>
+        <p class="mt-2 text-[12px] text-(--text-muted)">0 = launcher default. Recommended: 2048–4096.</p>
+
+        <button
+          class="mt-6 rounded bg-(--accent) px-4 py-2 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
+          onclick={onsaveprefs}
+        >
+          Save Java settings
+        </button>
+      {:else if section === 'storage'}
+        <h2 class="text-[16px] font-semibold">Storage &amp; Staging</h2>
+        <p class="mt-1 text-[12px] text-(--text-muted)">
+          Where the shared artifact library lives and where launch scratch files stage.
+        </p>
+
+        {#if storage}
+          <div class="mt-6 rounded border border-(--border) bg-(--bg-subtle) p-4">
+            <div class="text-[12px] font-medium">Shared library <span class="font-normal text-(--text-muted)">{storage.is_default_shared ? '(default)' : '(custom)'}</span></div>
+            <div class="mt-3 flex gap-2">
+              <input
+                class="h-9 flex-1 rounded border border-(--border) bg-(--bg-canvas) px-2.5 font-mono text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+                placeholder={storage.shared_dir}
+                bind:value={sharedInput}
+              />
+              <button
+                class="rounded bg-(--accent) px-4 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
+                disabled={storageBusy}
+                onclick={onsaveshared}
+              >
+                Save
+              </button>
+              {#if !storage.is_default_shared}
+                <button
+                  class="rounded px-4 text-[12px] text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main) disabled:opacity-40"
+                  disabled={storageBusy}
+                  onclick={onresetshared}
+                >
+                  Reset
+                </button>
+              {/if}
+            </div>
+          </div>
+
+          <div class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-4">
+            <div class="text-[12px] font-medium">Instances library <span class="font-normal text-(--text-muted)">{storage.is_default_instances ? '(default)' : '(override)'}</span></div>
+            <div class="mt-2 truncate font-mono text-[12px] text-(--text-muted)" title={storage.instances_dir}>
+              {storage.instances_dir}
+            </div>
+          </div>
+
+          <div class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-4">
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-[12px] font-medium">Staging area</div>
+                <div class="mt-2 truncate font-mono text-[12px] text-(--text-muted)" title={storage.staging_root}>
+                  {storage.staging_root}
+                </div>
+              </div>
+              <button
+                class="shrink-0 rounded px-4 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main) disabled:opacity-40"
+                disabled={storageBusy || gameRunning}
+                title={gameRunning ? 'Unavailable while a game is running' : 'Purges the staging area'}
+                onclick={oncleanstaging}
+              >
+                Purge staging
+              </button>
+            </div>
+          </div>
+        {/if}
+      {:else}
+        <h2 class="text-[16px] font-semibold">About &amp; Updates</h2>
+        <p class="mt-1 text-[12px] text-(--text-muted)">Build info and project links.</p>
+
+        <div class="mt-6 rounded border border-(--border) bg-(--bg-subtle) p-4">
+          <div class="flex items-center gap-2">
+            <img src="/logo.png" alt="" draggable="false" class="h-10 w-10" />
+            <div>
+              <div class="text-[13px] font-semibold">TwilightMC <span class="font-normal text-(--text-muted)">v{version}</span></div>
+              <div class="mt-0.5 text-[12px] text-(--text-muted)">
+                pre-release UI · snapshot channel (built from every push)
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-4 flex flex-col items-start gap-2">
+          <button class="text-[12px] text-(--accent) hover:underline" onclick={() => onopenurl?.(`${REPO}`)}>
+            ↗ GitHub repository
+          </button>
+          <button class="text-[12px] text-(--accent) hover:underline" onclick={() => onopenurl?.(`${REPO}/releases`)}>
+            ↗ Releases (stable builds)
+          </button>
+          <button class="text-[12px] text-(--accent) hover:underline" onclick={() => onopenurl?.(`${REPO}/issues`)}>
+            ↗ Report an issue
+          </button>
+        </div>
+        <p class="mt-6 text-[12px] text-(--text-muted)">
+          An open-source Minecraft launcher. Vanilla, Fabric and Quilt today; more loaders land in later milestones.
+        </p>
+      {/if}
+
+      {#if javaMsg || storageMsg}
+        <p class="mt-5 text-[12px] {javaMsg ? 'text-(--accent)' : 'text-(--text-muted)'}">{javaMsg || storageMsg}</p>
+      {/if}
+    </div>
+  </div>
+</div>

@@ -174,6 +174,18 @@ impl RawProfile {
             )?);
         }
 
+        // launcherMeta v2 dropped the loader artifact from its library lists
+        // (`common` carries only support jars like asm/mixin): spawning the
+        // Knot main class without it dies instantly with
+        // `ClassNotFoundException: ...launch.knot.KnotClient`. Synthesize the
+        // loader coordinate from the resolved version unless the meta already
+        // lists it (older meta wordings did).
+        let loader_coordinate = loader.loader_coordinate(&loader_version);
+        if !libraries.iter().any(|lib| lib.name == loader_coordinate) {
+            // right behind the mapping jar keeps the loader-first classpath
+            libraries.insert(1, resolve_ref(&loader_coordinate, None, None, maven_base)?);
+        }
+
         Ok(LoaderProfile {
             loader,
             loader_version,
@@ -338,6 +350,58 @@ mod tests {
             libs[2].url,
             "https://maven.fabricmc.net/org/ow2/asm/asm/9.6/asm-9.6.jar"
         );
+    }
+
+    #[test]
+    fn meta_without_the_loader_jar_still_yields_the_loader_artifact() {
+        // genuine fabric launcherMeta v2 shape (0.20.x era): `common` carries
+        // only asm support jars — the fabric-loader artifact itself is absent
+        let raw = serde_json::json!({
+            "loader": { "version": "0.20.1", "stable": true },
+            "intermediary": { "maven": "net.fabricmc:intermediary:26.4-snapshot-8" },
+            "launcherMeta": { "libraries": {
+                "common": [
+                    { "name": "org.ow2.asm:asm:9.10.1", "url": "https://maven.fabricmc.net/" }
+                ],
+                "client": [],
+                "server": []
+            } }
+        });
+        let profile = parse_loader_meta(ModLoader::Fabric, &raw).unwrap();
+        let libs = &profile.libraries;
+        assert_eq!(
+            libs.len(),
+            3,
+            "intermediary + synthesized loader jar + meta-carried asm"
+        );
+        assert_eq!(libs[0].name, "net.fabricmc:intermediary:26.4-snapshot-8");
+        assert_eq!(libs[1].name, "net.fabricmc:fabric-loader:0.20.1");
+        assert_eq!(
+            libs[1].storage,
+            "net/fabricmc/fabric-loader/0.20.1/fabric-loader-0.20.1.jar"
+        );
+        assert_eq!(
+            libs[1].url,
+            "https://maven.fabricmc.net/net/fabricmc/fabric-loader/0.20.1/fabric-loader-0.20.1.jar"
+        );
+        assert_eq!(
+            libs[2].name, "org.ow2.asm:asm:9.10.1",
+            "meta-carried libraries keep following the synthesized loader jar"
+        );
+    }
+
+    #[test]
+    fn a_meta_that_already_lists_the_loader_jar_is_not_duplicated() {
+        // the fixture carries fabric-loader inside `common` (older meta
+        // wordings did); the synthesis must not append it a second time
+        let profile = fabric_profile();
+        let count = profile
+            .libraries
+            .iter()
+            .filter(|lib| lib.name == "net.fabricmc:fabric-loader:0.16.9")
+            .count();
+        assert_eq!(count, 1);
+        assert_eq!(profile.libraries.len(), 4);
     }
 
     #[test]

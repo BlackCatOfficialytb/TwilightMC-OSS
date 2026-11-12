@@ -397,6 +397,10 @@ pub async fn run_launch_with(
     staging.clean().await?;
     staging.ensure_dirs().await?;
 
+    // the game cwd must exist before the JVM spawns inside it — foreign
+    // Prism layouts and freshly created instances alike
+    tokio::fs::create_dir_all(&paths.work_dir).await?;
+
     // ---- libraries + client jar (parallel, sha1-verified)
     let downloader = ParallelDownloader::new(client.clone(), 8);
     let none = BTreeSet::<String>::new();

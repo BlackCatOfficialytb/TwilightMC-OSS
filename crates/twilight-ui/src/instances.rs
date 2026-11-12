@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-use crate::instance::{display_loader, resolved_instances_root};
+use crate::instance::{display_loader, parse_cfg, parse_mmc_pack, resolved_instances_root};
 
 /// Instance metadata persisted as `twilight.json` inside the instance dir.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,6 +75,60 @@ pub(crate) async fn read_meta(instance_dir: &Path) -> Option<InstanceMeta> {
         }
     }
     None
+}
+
+/// Launch-time metadata: native files first, then foreign Prism/MultiMC
+/// metadata — everything the grid can list, the launcher must be able to run.
+/// Unlike [`read_meta`] (whose `Option` keeps the scan tolerant) this reports
+/// the precise failure so the launch command surfaces a real error instead of
+/// an opaque "unknown instance".
+pub(crate) async fn read_launch_meta(instance_dir: &Path) -> Result<InstanceMeta, String> {
+    if !instance_dir.is_dir() {
+        return Err(format!(
+            "instance directory not found: {}",
+            instance_dir.display()
+        ));
+    }
+    for file in ["instance.json", "twilight.json"] {
+        let path = instance_dir.join(file);
+        match tokio::fs::read_to_string(&path).await {
+            Ok(data) => match serde_json::from_str::<InstanceMeta>(&data) {
+                Ok(meta) => return Ok(meta),
+                Err(e) => return Err(format!("{} is malformed: {e}", path.display())),
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
+        }
+    }
+    if let Some(meta) = prism_launch_meta(instance_dir) {
+        return Ok(meta);
+    }
+    Err(format!(
+        "no readable instance metadata in {} (expected instance.json / twilight.json, \
+         or Prism's instance.cfg + mmc-pack.json with a Minecraft version)",
+        instance_dir.display()
+    ))
+}
+
+/// Launch metadata from foreign Prism/MultiMC files. `None` when the
+/// directory carries no `instance.cfg`, or the metadata names no Minecraft
+/// version (the one field a launch cannot proceed without).
+fn prism_launch_meta(instance_dir: &Path) -> Option<InstanceMeta> {
+    let cfg_text = std::fs::read_to_string(instance_dir.join("instance.cfg")).ok()?;
+    let cfg = parse_cfg(&cfg_text);
+    let (minecraft, loader) = std::fs::read_to_string(instance_dir.join("mmc-pack.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .map(|raw| parse_mmc_pack(&raw))
+        .unwrap_or((None, None));
+    Some(InstanceMeta {
+        version: minecraft?,
+        name: cfg.get("name").cloned().unwrap_or_default(),
+        loader: loader.as_ref().map(|(token, _)| token.clone()),
+        loader_version: loader.map(|(_, version)| version),
+        last_played: 0,
+        total_time_played: 0,
+    })
 }
 
 /// Writes metadata beside wherever it already lives: an instance carrying the
@@ -468,6 +522,60 @@ mod tests {
         .unwrap();
         touch_last_played(&root, "fresh", 0).await;
         assert!(fresh.join("instance.json").exists());
+    }
+
+    #[tokio::test]
+    async fn launch_meta_reports_native_prism_and_failures() {
+        let root = temp_root();
+
+        // native instance.json
+        std::fs::create_dir_all(root.join("native")).unwrap();
+        std::fs::write(
+            root.join("native").join("instance.json"),
+            r#"{"version":"1.21.4","name":"Native"}"#,
+        )
+        .unwrap();
+        let meta = read_launch_meta(&root.join("native")).await.unwrap();
+        assert_eq!(meta.version, "1.21.4");
+
+        // foreign Prism instance (instance.cfg + mmc-pack.json)
+        std::fs::create_dir_all(root.join("prism-pack")).unwrap();
+        std::fs::write(
+            root.join("prism-pack").join("instance.cfg"),
+            "name=Prism Pack\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("prism-pack").join("mmc-pack.json"),
+            r#"{"components":[
+                {"uid":"net.minecraft","version":"1.20.1"},
+                {"uid":"net.minecraftforge","version":"47.2.0"}
+            ]}"#,
+        )
+        .unwrap();
+        let meta = read_launch_meta(&root.join("prism-pack")).await.unwrap();
+        assert_eq!(meta.version, "1.20.1");
+        assert_eq!(meta.name, "Prism Pack");
+        assert_eq!(meta.loader.as_deref(), Some("forge"));
+        assert_eq!(meta.loader_version.as_deref(), Some("47.2.0"));
+
+        // a missing directory names the path it looked for
+        let err = read_launch_meta(&root.join("ghost")).await.unwrap_err();
+        assert!(err.contains("not found") && err.contains("ghost"), "{err}");
+
+        // malformed native metadata is reported verbatim, not swallowed
+        std::fs::create_dir_all(root.join("broken")).unwrap();
+        std::fs::write(root.join("broken").join("instance.json"), "{nope").unwrap();
+        let err = read_launch_meta(&root.join("broken")).await.unwrap_err();
+        assert!(
+            err.contains("malformed") && err.contains("instance.json"),
+            "{err}"
+        );
+
+        // a directory with nothing readable says what it expected
+        std::fs::create_dir_all(root.join("empty")).unwrap();
+        let err = read_launch_meta(&root.join("empty")).await.unwrap_err();
+        assert!(err.contains("no readable instance metadata"), "{err}");
     }
 
     #[tokio::test]

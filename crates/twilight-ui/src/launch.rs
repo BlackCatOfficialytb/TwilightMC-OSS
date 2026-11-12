@@ -11,6 +11,7 @@ use twilight_cli::{LaunchConfig, run_launch_with};
 use twilight_launch::LaunchEvent;
 
 use crate::accounts::{active_username, load_settings, settings_path};
+use crate::instance::resolved_instances_root;
 use crate::instances;
 
 /// One game output line. `stream` is `"stdout"` or `"stderr"`.
@@ -76,11 +77,15 @@ async fn kill_pid(pid: u32) -> Result<(), String> {
 }
 
 async fn run(app: &AppHandle, instance_id: &str) -> Result<i32, String> {
-    let shared_dir = crate::storage::shared_root(app).await?;
-    let instance_dir = shared_dir.join("instances").join(instance_id);
-    let meta = instances::read_meta(&instance_dir)
+    // the grid scans the resolved root (instances_dir override -> Prism
+    // default -> shared library); launch MUST resolve the very same root or
+    // every instance living outside the shared library is "unknown"
+    instances::validate_instance_id(instance_id)?;
+    let root = resolved_instances_root(app).await?;
+    let instance_dir = root.join(instance_id);
+    let meta = instances::read_launch_meta(&instance_dir)
         .await
-        .ok_or_else(|| format!("unknown instance {instance_id}"))?;
+        .map_err(|e| format!("cannot launch {instance_id}: {e}"))?;
     let username = active_username(app).await;
     // settings: explicit java override and the -Xms/-Xmx memory allocation
     let settings = load_settings(&settings_path(app).await?).await;
@@ -132,6 +137,9 @@ async fn run(app: &AppHandle, instance_id: &str) -> Result<i32, String> {
         })
     };
 
+    // artifacts (libraries/assets) always live in the shared library store,
+    // wherever the instance itself is scanned from
+    let shared_dir = crate::storage::shared_root(app).await?;
     let cfg = LaunchConfig {
         version_or_id: meta.version,
         username,

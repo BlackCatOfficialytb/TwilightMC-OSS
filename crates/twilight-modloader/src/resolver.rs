@@ -47,6 +47,17 @@ impl ModLoader {
         }
     }
 
+    /// Maven coordinate of the loader artifact itself. Modern `launcherMeta`
+    /// v2 library lists no longer include it (they carry only support jars
+    /// like asm/mixin), so profile resolution must synthesize this entry or
+    /// the Knot main class cannot load.
+    pub fn loader_coordinate(self, version: &str) -> String {
+        match self {
+            Self::Fabric => format!("net.fabricmc:fabric-loader:{version}"),
+            Self::Quilt => format!("org.quiltmc:quilt-loader:{version}"),
+        }
+    }
+
     /// Envelope field of the mapping jar (`intermediary` / `hashed`).
     pub const fn mapping_field(self) -> &'static str {
         match self {
@@ -260,6 +271,18 @@ mod tests {
         assert_eq!(
             ModLoader::Fabric.maven_base(),
             "https://maven.fabricmc.net/"
+        );
+    }
+
+    #[test]
+    fn loader_coordinates_match_each_maven() {
+        assert_eq!(
+            ModLoader::Fabric.loader_coordinate("0.20.1"),
+            "net.fabricmc:fabric-loader:0.20.1"
+        );
+        assert_eq!(
+            ModLoader::Quilt.loader_coordinate("0.26.4"),
+            "org.quiltmc:quilt-loader:0.26.4"
         );
     }
 

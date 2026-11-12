@@ -33,6 +33,9 @@ pub struct VersionFile {
     pub asset_index: Option<AssetIndexInfo>,
     #[serde(default, rename = "minimumLauncherVersion")]
     pub minimum_launcher_version: Option<i32>,
+    /// Mojang's `javaVersion` block (`java-runtime-<name>` + required major).
+    #[serde(default, rename = "javaVersion")]
+    pub java_version: Option<JavaVersionInfo>,
     #[serde(default)]
     pub compatible_java_majors: Vec<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -49,13 +52,35 @@ pub struct VersionFile {
     pub libraries: Vec<Library>,
 }
 
+/// Mojang's `javaVersion` manifest block: the runtime component Mojang ships
+/// and the Java major the game requires (e.g. `{ "component":
+/// "java-runtime-epsilon", "majorVersion": 25 }`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct JavaVersionInfo {
+    pub component: Option<String>,
+    pub major_version: Option<i32>,
+}
+
 /// Parses a Mojang `version.json` document.
 pub fn parse_version_file(json: &str) -> Result<VersionFile, ManifestError> {
     let value: serde_json::Value = serde_json::from_str(json)?;
     if !value.is_object() {
         return Err(ManifestError::NotObject);
     }
-    let file: VersionFile = serde_json::from_value(value)?;
+    let mut file: VersionFile = serde_json::from_value(value)?;
+    // Real Mojang manifests carry the required JVM major inside
+    // `javaVersion.majorVersion`, never as a top-level
+    // `compatibleJavaMajors` list. Without this bridge every genuine
+    // manifest deserialized to "accept any Java" and the game spawned on
+    // whatever JVM was found first — an incompatible one dying instantly
+    // with cryptic class-version / unrecognized-option errors.
+    // An explicit top-level list (custom/launcher-written manifests) wins.
+    if file.compatible_java_majors.is_empty()
+        && let Some(major) = file.java_version.as_ref().and_then(|jv| jv.major_version)
+    {
+        file.compatible_java_majors.push(major);
+    }
     Ok(file)
 }
 
@@ -185,5 +210,44 @@ mod tests {
         assert_eq!(f.id, "x");
         // ...but round-trip does not keep them (Qt behaved the same)
         assert!(!write_version_file(&f).unwrap().contains("futureField"));
+    }
+
+    #[test]
+    fn mojang_java_version_bridges_into_compatible_majors() {
+        // the genuine Mojang shape: the required major lives inside
+        // `javaVersion`, there is no top-level `compatibleJavaMajors` list
+        let mojang = r#"{ "id": "26.4-snapshot-8",
+            "javaVersion": { "component": "java-runtime-epsilon", "majorVersion": 25 } }"#;
+        let f = parse_version_file(mojang).unwrap();
+        assert_eq!(f.compatible_java_majors, vec![25]);
+        assert_eq!(
+            f.java_version.as_ref().unwrap().component.as_deref(),
+            Some("java-runtime-epsilon")
+        );
+    }
+
+    #[test]
+    fn explicit_top_level_major_list_wins_over_java_version() {
+        let both = r#"{ "id": "x",
+            "javaVersion": { "component": "java-runtime-gamma", "majorVersion": 21 },
+            "compatibleJavaMajors": [17] }"#;
+        let f = parse_version_file(both).unwrap();
+        assert_eq!(f.compatible_java_majors, vec![17], "explicit list wins");
+    }
+
+    #[test]
+    fn manifest_without_java_version_accepts_any_java() {
+        let f = parse_version_file(r#"{ "id": "x" }"#).unwrap();
+        assert!(f.compatible_java_majors.is_empty());
+        assert!(f.java_version.is_none());
+    }
+
+    #[test]
+    fn java_version_round_trips_and_rederives_stably() {
+        let mojang = r#"{ "id": "26.4-snapshot-8",
+            "javaVersion": { "component": "java-runtime-epsilon", "majorVersion": 25 } }"#;
+        let f = parse_version_file(mojang).unwrap();
+        let again = parse_version_file(&write_version_file(&f).unwrap()).unwrap();
+        assert_eq!(f, again, "bridge must not drift across a round-trip");
     }
 }
