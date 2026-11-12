@@ -3,10 +3,11 @@
   // spacious content column. Input values are $bindable so App.svelte keeps
   // owning persistence; actions bubble up as callbacks.
   import AccentPicker from './AccentPicker.svelte';
+  import { builtinAccent, THEME_PRESETS } from './theme';
 
   let {
     version = '',
-    theme = $bindable('dark'),
+    theme = $bindable('twilight-dark'),
     storage = null,
     runtimes = [],
     scanning = false,
@@ -78,31 +79,31 @@
           Theme mode and the accent that recolors the entire launcher.
         </p>
 
-        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Theme mode</h3>
-        <div class="mt-2 inline-flex rounded border border-(--border) bg-(--bg-subtle) p-1">
-          <button
-            class="h-8 rounded px-4 text-[12px] font-medium {theme === 'dark'
-              ? 'bg-(--accent) text-(--on-accent)'
-              : 'text-(--text-muted) hover:text-(--text-main)'}"
-            aria-pressed={theme === 'dark'}
-            onclick={() => (theme = 'dark')}
-          >
-            ☾ Twilight Dark
-          </button>
-          <button
-            class="h-8 rounded px-4 text-[12px] font-medium {theme === 'light'
-              ? 'bg-(--accent) text-(--on-accent)'
-              : 'text-(--text-muted) hover:text-(--text-main)'}"
-            aria-pressed={theme === 'light'}
-            onclick={() => (theme = 'light')}
-          >
-            ☀ Twilight Light
-          </button>
+        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Theme</h3>
+        <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {#each THEME_PRESETS as p (p.id)}
+            <button
+              class="flex flex-col gap-1.5 rounded border p-2.5 text-left {theme === p.id
+                ? 'border-(--accent) bg-(--brand-tint)'
+                : 'border-(--border) hover:border-(--text-muted)'}"
+              aria-pressed={theme === p.id}
+              title="{p.label}: {p.dark ? 'dark' : 'light'} ground"
+              onclick={() => (theme = p.id)}
+            >
+              <span class="flex gap-1" aria-hidden="true">
+                <span class="h-4 w-4 rounded-full border border-black/20" style="background:{p.swatch[0]}"></span>
+                <span class="h-4 w-4 rounded-full border border-black/20" style="background:{p.swatch[1]}"></span>
+                <span class="h-4 w-4 rounded-full border border-black/20" style="background:{p.swatch[2]}"></span>
+              </span>
+              <span class="text-[12px] font-medium">{p.label}</span>
+              <span class="text-[10px] text-(--text-muted)">{p.dark ? 'Dark ground' : 'Light ground'}</span>
+            </button>
+          {/each}
         </div>
 
         <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Accent color</h3>
         <div class="mt-3">
-          <AccentPicker />
+          <AccentPicker builtin={builtinAccent(theme)} />
         </div>
       {:else if section === 'java'}
         <h2 class="text-[16px] font-semibold">Java &amp; Memory</h2>

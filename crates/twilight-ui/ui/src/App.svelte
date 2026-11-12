@@ -7,22 +7,27 @@
   import InstanceContextPanel from './lib/InstanceContextPanel.svelte';
   import SettingsPage from './lib/SettingsPage.svelte';
   import { topOverlay } from './lib/overlays.js';
-  import { loadSavedAccent } from './lib/theme';
+  import { builtinAccent, isDarkTheme, loadSavedAccent, normalizeThemeId, applyTheme } from './lib/theme';
 
   let version = $state('…');
   let active = $state('instances');
 
-  // Twilight Light/Dark: persisted locally (fast first paint) and mirrored
-  // into settings.json so the backend knows the shell theme too.
+  // Theme preset: persisted locally (fast first paint) with legacy
+  // "dark"/"light" values mapped; settings.json keeps recording just the
+  // light/dark ground so the backend contract stays unchanged.
   let theme = $state(
-    localStorage.getItem('twilight-theme') ??
-      (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+    normalizeThemeId(localStorage.getItem('twilight-theme')) ??
+      (matchMedia('(prefers-color-scheme: light)').matches
+        ? 'twilight-light'
+        : 'twilight-dark')
   );
 
   $effect(() => {
-    document.documentElement.classList.toggle('dark', theme === 'dark');
+    applyTheme(theme); // dark/light ground + preset-* token classes
     localStorage.setItem('twilight-theme', theme);
-    window.__TAURI__?.core.invoke('set_theme_config', { theme }).catch(() => {});
+    window.__TAURI__?.core
+      .invoke('set_theme_config', { theme: isDarkTheme(theme) ? 'dark' : 'light' })
+      .catch(() => {});
   });
 
   // Restore the user's accent color pick before first interactive paint.
@@ -111,8 +116,10 @@
 
   // ---- theme / chrome ----
 
+  // The topbar quick-toggle is binary: it snaps to the Twilight pair,
+  // leaving palette presets to the Settings grid.
   function toggleTheme() {
-    theme = theme === 'dark' ? 'light' : 'dark';
+    theme = isDarkTheme(theme) ? 'twilight-light' : 'twilight-dark';
   }
 
   async function scanJava() {
@@ -773,10 +780,10 @@
           <span class="flex-1"></span>
           <button
             class="rounded px-2 py-1 text-sm text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-            title={theme === 'dark' ? 'Twilight Light' : 'Twilight Dark'}
+            title={isDarkTheme(theme) ? 'Twilight Light' : 'Twilight Dark'}
             onclick={toggleTheme}
           >
-            {theme === 'dark' ? '☀' : '☾'}
+            {isDarkTheme(theme) ? '☀' : '☾'}
           </button>
         </div>
 

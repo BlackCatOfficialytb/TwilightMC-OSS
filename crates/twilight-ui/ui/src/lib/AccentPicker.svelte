@@ -11,25 +11,30 @@
     normalizeHex,
   } from './theme';
 
-  // null = built-in per-theme accent (Diamond Cyan dark / its tuned light twin)
+  // The active theme's built-in accent (from its preset definition); when
+  // no user pick is saved the shell runs on it and null tracks that state.
+  let { builtin = DEFAULT_ACCENT } = $props();
   let current = $state(getSavedAccent());
-  let customHex = $state(current ?? DEFAULT_ACCENT);
+  let customHex = $state(current ?? builtin);
   let invalid = $state(false);
 
+  // switching themes while the picker is open re-grounds the hex field
+  $effect(() => {
+    if (current === null) customHex = builtin;
+  });
+
   function isActive(hex) {
-    return current === null
-      ? hex === DEFAULT_ACCENT
-      : current === hex.toLowerCase();
+    return current === null ? hex === builtin : current === hex.toLowerCase();
   }
 
   function pickPreset(preset) {
-    if (preset.hex === DEFAULT_ACCENT) {
+    if (preset.hex === builtin) {
       resetAccent();
       current = null;
     } else if (applyAccentColor(preset.hex)) {
       current = preset.hex.toLowerCase();
     }
-    customHex = current ?? DEFAULT_ACCENT;
+    customHex = current ?? builtin;
     invalid = false;
   }
 
@@ -52,7 +57,7 @@
         ? 'ring-2 ring-(--accent-1) ring-offset-2 ring-offset-(--bg-surface)'
         : 'border border-(--border) hover:opacity-80'}"
       style="background:{p.hex}"
-      title="{p.name}{p.hex === DEFAULT_ACCENT ? ' (default)' : ''}"
+      title="{p.name}{p.hex === builtin ? ' (built-in)' : ''}"
       aria-label="{p.name} accent"
       aria-pressed={isActive(p.hex)}
       onclick={() => pickPreset(p)}

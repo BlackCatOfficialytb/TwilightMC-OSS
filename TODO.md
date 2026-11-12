@@ -63,8 +63,8 @@
 
 ## Theme queue (milestone-polish backlog)
 
-- [ ] Catppuccin Latte flavor (light palette pass over `app.css` tokens)
-- [ ] Catppuccin Macchiato flavor (dark palette pass over `app.css` tokens)
+- [x] Catppuccin Latte, Frappé, Macchiato and Mocha flavors (official `palette.json` hexes from the vendored submodule; canvas = base, surface = surface0, mauve accents)
+- [x] Nord, Tokyo Night and High Contrast presets alongside Twilight Dark/Light — Settings preset grid with swatch cards, topbar quick-toggle stays binary on the Twilight pair, user accent overrides every preset accent, High Contrast adds a yellow `:focus-visible` outline
 
 ## Accessibility Suite (Chế độ Trợ Năng Chuyên Biệt)
 

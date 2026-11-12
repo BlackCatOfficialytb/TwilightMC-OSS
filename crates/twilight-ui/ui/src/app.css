@@ -83,3 +83,105 @@
   --accent-hover: var(--accent-1-hover);
   --accent-star: var(--accent-2);
 }
+
+/* ---- theme presets ----
+   Each preset re-declares the full ground token set; the aliases above
+   resolve var() at use time, so overriding the base tokens restyles every
+   component. `html.preset-<id>` (0,1,1) outranks `.dark`/`.light` (0,1,0)
+   no matter the order, and theme.ts keeps the ground class in sync with
+   the preset's `dark` flag. Preset accents are only the *defaults* — an
+   explicit --user-accent inline style always wins over them.
+   Catppuccin hexes come from upstream/catppuccin-palette/palette.json
+   (canvas = base, surface = surface0, subtle = one elevation step). */
+
+html.preset-catppuccin-latte {
+  --bg-1: #eff1f5;
+  --bg-2: #e6e9ef; /* mantle */
+  --bg-3: #dce0e8; /* crust: inset fields sit darker in light mode */
+  --border-1: #bcc0cc; /* surface1 */
+  --fg-1: #4c4f69; /* text */
+  --fg-2: #6c6f85; /* subtext0 */
+  --accent-1: var(--user-accent, #8839ef); /* mauve */
+  --accent-1-hover: color-mix(in srgb, var(--accent-1) 85%, #000000);
+  --accent-2: #df8e1d; /* yellow */
+}
+
+html.preset-catppuccin-frappe {
+  --bg-1: #303446;
+  --bg-2: #414559; /* surface0 */
+  --bg-3: #51576d; /* surface1 */
+  --border-1: #626880; /* surface2 */
+  --fg-1: #c6d0f5; /* text */
+  --fg-2: #a5adce; /* subtext0 */
+  --accent-1: var(--user-accent, #ca9ee6); /* mauve */
+  --accent-1-hover: color-mix(in srgb, var(--accent-1) 85%, #ffffff);
+  --accent-2: #ef9f76; /* peach */
+}
+
+html.preset-catppuccin-macchiato {
+  --bg-1: #24273a;
+  --bg-2: #363a4f; /* surface0 */
+  --bg-3: #494d64; /* surface1 */
+  --border-1: #5b6078; /* surface2 */
+  --fg-1: #cad3f5; /* text */
+  --fg-2: #a5adcb; /* subtext0 */
+  --accent-1: var(--user-accent, #c6a0f6); /* mauve */
+  --accent-1-hover: color-mix(in srgb, var(--accent-1) 85%, #ffffff);
+  --accent-2: #f5a97f; /* peach */
+}
+
+html.preset-catppuccin-mocha {
+  --bg-1: #1e1e2e;
+  --bg-2: #313244; /* surface0 */
+  --bg-3: #45475a; /* surface1 */
+  --border-1: #585b70; /* surface2 */
+  --fg-1: #cdd6f4; /* text */
+  --fg-2: #a6adc8; /* subtext0 */
+  --accent-1: var(--user-accent, #cba6f7); /* mauve */
+  --accent-1-hover: color-mix(in srgb, var(--accent-1) 85%, #ffffff);
+  --accent-2: #fab387; /* peach */
+}
+
+html.preset-nord {
+  --bg-1: #2e3440; /* nord0 */
+  --bg-2: #3b4252; /* nord1 */
+  --bg-3: #434c5e; /* nord2 */
+  --border-1: #4c566a; /* nord3 */
+  --fg-1: #eceff4; /* nord6 */
+  --fg-2: #d8dee9; /* nord4 */
+  --accent-1: var(--user-accent, #88c0d0); /* nord8 */
+  --accent-1-hover: color-mix(in srgb, var(--accent-1) 85%, #ffffff);
+  --accent-2: #ebcb8b; /* aurora yellow */
+}
+
+html.preset-tokyo-night {
+  --bg-1: #1a1b26;
+  --bg-2: #24283b; /* bg_highlight */
+  --bg-3: #292e42;
+  --border-1: #414868; /* terminal black */
+  --fg-1: #c0caf5; /* fg */
+  --fg-2: #a9b1d6; /* fg_dark */
+  --accent-1: var(--user-accent, #7aa2f7); /* blue */
+  --accent-1-hover: color-mix(in srgb, var(--accent-1) 85%, #ffffff);
+  --accent-2: #ff9e64; /* orange */
+}
+
+html.preset-high-contrast {
+  --bg-1: #000000;
+  --bg-2: #0a0a0a;
+  --bg-3: #141414;
+  --border-1: #ffffff; /* strong hairlines on the pure-black ground */
+  --fg-1: #ffffff;
+  --fg-2: #cccccc;
+  --accent-1: var(--user-accent, #00e5ff); /* neon cyan */
+  --accent-1-hover: color-mix(in srgb, var(--accent-1) 85%, #ffffff);
+  --accent-2: #ffee00; /* neon yellow */
+  --focus-ring: 0 0 0 2px #ffee00;
+}
+
+/* focus visibility is an accessibility contract, not decoration: the yellow
+   outline stays readable over every ground, including neon cyan fills */
+html.preset-high-contrast :focus-visible {
+  outline: 3px solid #ffee00;
+  outline-offset: 1px;
+}
