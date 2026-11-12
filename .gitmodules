@@ -7,3 +7,6 @@
 [submodule "upstream/freesm"]
 	path = upstream/freesm
 	url = https://github.com/FreesmTeam/FreesmLauncher.git
+[submodule "upstream/catppuccin-palette"]
+	path = upstream/catppuccin-palette
+	url = https://github.com/catppuccin/palette.git
