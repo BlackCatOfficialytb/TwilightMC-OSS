@@ -101,6 +101,18 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      # tauri-winres (embed-resource) embeds the Windows resource using the
+      # HOST toolchain environment: with an MSVC host it emits an MSVC-format
+      # resource.lib that GNU ld rejects ("file format not recognized",
+      # tauri-apps/tauri#12257). Building FOR windows-gnu therefore requires
+      # the gnu host toolchain, not just the target.
+      - name: Use GNU host toolchain (mingw)
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        shell: bash
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal --no-self-update --force-non-host
+          rustup default stable-x86_64-pc-windows-gnu --force-non-host
+
       - name: Cache cargo
         if: matrix.vm != 'freebsd'
         uses: Swatinem/rust-cache@v2
@@ -179,6 +191,9 @@ jobs:
             NAME="twilight-${{ github.event.release.tag_name }}-${{ matrix.suffix }}"
             DIST="dist/$NAME"
             mkdir -p "$DIST"
+            # the CLI is the guaranteed FreeBSD deliverable: build it first so
+            # the archive exists even when the GUI attempt below fails
+            cargo build --locked --release -p twilight-cli
             cp target/release/${{ matrix.bin }} "$DIST/"
             GUI_OK=0
             if pkg info -e webkit2-gtk_41 && pkg info -e gtk3; then
