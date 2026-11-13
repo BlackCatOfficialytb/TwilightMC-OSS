@@ -73,6 +73,9 @@ fn data_roots_from(
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
+        // `%APPDATA%` is meaningless on unix, but the parameter must stay
+        // part of the portable signature.
+        let _ = appdata;
         let primary = xdg_data_home
             .map(str::trim)
             .filter(|d| !d.is_empty())
