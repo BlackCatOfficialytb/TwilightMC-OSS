@@ -730,7 +730,7 @@
           </button>
           <span class="truncate text-[12px] font-medium text-(--text-muted)" title={editFor?.name}>{editFor?.name}</span>
         {:else}
-          <span class="rounded bg-(--accent)/15 px-2 py-0.5 text-xs font-medium text-(--accent)">TwilightMC Bolide alpha-v{version}</span>
+          <span class="rounded bg-(--accent)/15 px-2 py-0.5 text-xs font-medium text-(--accent)">TwilightMC Bolide (alpha-v{version})</span>
           <span class="rounded bg-(--accent-star)/15 px-1.5 py-0.5 text-[10px] font-medium text-(--accent-star)">pre-release UI</span>
         {/if}
       </div>
