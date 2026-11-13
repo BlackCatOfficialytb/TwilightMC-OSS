@@ -74,7 +74,9 @@ jobs:
             bin: twilight
             cc: clang
           - id: linux-arm64
-            runner: ubuntu-latest
+            # native ARM64 runner (free on public repos): WebKit2GTK has no
+            # usable cross sysroot, so the GUI is linked natively for SBCs
+            runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             suffix: linux-aarch64
             bin: twilight
@@ -109,6 +111,11 @@ jobs:
           NAME="twilight-snapshot-v${{ needs.verify.outputs.version }}-${{ needs.verify.outputs.date }}-${{ needs.verify.outputs.commit }}-${{ matrix.suffix }}"
           echo "NAME=$NAME" >> "$GITHUB_ENV"
           echo "ARTIFACT_NAME=$NAME" >> "$GITHUB_ENV"
+          # GUI binary name follows the OS (the crate is always twilight-ui)
+          case "${{ matrix.target }}" in
+            *windows*) echo "GUI_BIN=twilight-ui.exe" >> "$GITHUB_ENV" ;;
+            *)         echo "GUI_BIN=twilight-ui" >> "$GITHUB_ENV" ;;
+          esac
 
       - name: MinGW linker on PATH
         if: matrix.target == 'x86_64-pc-windows-gnu'
@@ -121,18 +128,39 @@ jobs:
           echo "CC=clang" >> "$GITHUB_ENV"
           echo "CXX=clang++" >> "$GITHUB_ENV"
 
-      # ARM64 SBCs (Raspberry Pi 5, Radxa Rock 5, Orange Pi, Asahi): cross-compile
-      # on the x86_64 runner; the rust target itself is installed by the
-      # toolchain action via `targets: ${{ matrix.target }}`.
-      - name: ARM64 cross linker
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+      # The Tauri GUI embeds the Svelte frontend at compile time
+      # (generate_context!), so the Vite build MUST run before cargo build.
+      - name: Set up Node.js for the frontend
+        if: matrix.vm != 'freebsd'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/twilight-ui/ui/package-lock.json
+
+      - name: Build frontend (Svelte 5 + Vite)
+        if: matrix.vm != 'freebsd'
+        working-directory: crates/twilight-ui/ui
+        run: |
+          npm ci
+          npm run build
+
+      # Tauri v2 system libraries: the GUI binary links GTK3 + WebKitGTK 4.1
+      - name: Install Linux GUI dependencies
+        if: startsWith(matrix.runner, 'ubuntu') && matrix.vm != 'freebsd'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      # ARM64 SBCs (Raspberry Pi 5, Radxa Rock 5, Orange Pi, Asahi): the rust
+      # target is installed by the toolchain action via `targets:` and built
+      # natively on the ARM64 runner — no cross linker required.
 
       # The FreeBSD build runs natively inside the VM; only the raw staging
       # folder is copied back — its single archive is built by the release job.
+      # Tauri/wry are not officially supported on FreeBSD: the GUI is attempted
+      # whenever the system libraries install cleanly, and on failure (or
+      # absence) the archive ships CLI-only with a loud PLATFORM_NOTES.txt.
       - name: Build and stage in FreeBSD VM
         if: matrix.vm == 'freebsd'
         uses: vmactions/freebsd-vm@v1
@@ -141,28 +169,121 @@ jobs:
           copyback: true
           prepare: |
             pkg install -y rust
+            # Tauri GUI attempt deps; if any of these fail, the run script
+            # below falls back to the documented CLI-only exception.
+            pkg install -y webkit2-gtk_41 gtk3 libayatana-appindicator librsvg2 node npm pkgconf
+            true
           run: |
             set -e
             NAME="twilight-snapshot-v${{ needs.verify.outputs.version }}-${{ needs.verify.outputs.date }}-${{ needs.verify.outputs.commit }}-${{ matrix.suffix }}"
-            cargo build --locked --release --bin twilight
-            mkdir -p "dist/$NAME"
-            cp target/release/${{ matrix.bin }} README.md LICENSE.md LICENSE_AGPL LICENSE_APACHE VERSION.md "dist/$NAME/"
-            # keep the copy-back small: the binary already lives in dist/
+            DIST="dist/$NAME"
+            mkdir -p "$DIST"
+            cp target/release/${{ matrix.bin }} "$DIST/"
+            GUI_OK=0
+            if pkg info -e webkit2-gtk_41 && pkg info -e gtk3; then
+              if ( cd crates/twilight-ui/ui && npm ci && npm run build ); then
+                echo "FreeBSD: frontend rebuilt"
+              else
+                echo "FreeBSD: frontend rebuild failed; embedding the committed ui/dist"
+              fi
+              if cargo build --locked --release -p twilight-cli -p twilight-ui; then
+                GUI_OK=1
+                cp target/release/twilight-ui "$DIST/"
+                for lib in target/release/*.so; do
+                  if [ -e "$lib" ]; then cp "$lib" "$DIST/"; fi
+                done
+              else
+                echo "::warning::twilight-ui (Tauri GUI) failed to build on FreeBSD - shipping CLI-only (documented exception)"
+              fi
+            else
+              echo "::warning::FreeBSD GUI system libraries unavailable - shipping CLI-only (documented exception)"
+            fi
+            for doc in README.md VERSION.md CREDITS.md LICENSE.md LICENSE_AGPL LICENSE_APACHE; do
+              if [ -f "$doc" ]; then cp "$doc" "$DIST/"; fi
+            done
+            if [ "$GUI_OK" = "1" ]; then
+              if [ ! -f "$DIST/twilight-ui" ]; then
+                echo "::error::FreeBSD: GUI binary missing from $DIST"
+                exit 1
+              fi
+            else
+              cat > "$DIST/PLATFORM_NOTES.txt" <<'EOF'
+            TwilightMC FreeBSD build is CLI-only.
+            The Tauri v2 GUI stack (wry/tao) is not officially supported on FreeBSD,
+            so this archive ships the twilight CLI without twilight-ui.
+            Run the GUI on Windows, macOS or Linux instead.
+            EOF
+            fi
+            # keep the copy-back small: the binaries already live in dist/
             rm -rf target
 
       - name: Build
         if: matrix.vm != 'freebsd'
-        run: cargo build --locked --release --bin twilight
+        run: cargo build --locked --release -p twilight-cli -p twilight-ui --target ${{ matrix.target }}
 
-      # Raw distribution staging: the four files upload flat (no folder inside
-      # the artifact); the release job archives each target folder exactly once.
+      # Raw distribution staging: the release job archives each target folder
+      # exactly once. Ships CLI + GUI binaries, any runtime libraries the build
+      # emitted and the full governance/licensing docs — flat, no subfolder.
       - name: Stage distribution
         if: matrix.vm != 'freebsd'
         shell: bash
         run: |
           set -e
-          mkdir -p "dist/${{ env.NAME }}"
-          cp target/release/${{ matrix.bin }} README.md LICENSE.md LICENSE_AGPL LICENSE_APACHE VERSION.md "dist/${{ env.NAME }}/"
+          REL="target/${{ matrix.target }}/release"
+          DIST="dist/${{ env.NAME }}"
+          mkdir -p "$DIST"
+          cp "$REL/${{ matrix.bin }}" "$DIST/"
+          cp "$REL/${{ env.GUI_BIN }}" "$DIST/"
+          # runtime libraries emitted by the build (e.g. WebView2Loader.dll on
+          # windows-gnu, any *.so/*.dylib produced by -sys crates)
+          for lib in "$REL"/*.dll "$REL"/*.so "$REL"/*.dylib; do
+            if [ -e "$lib" ]; then
+              cp "$lib" "$DIST/"
+              echo "staged runtime library: $(basename "$lib")"
+            fi
+          done
+          # MinGW-w64: bundle the WebView2 loader + GCC runtime DLLs so a
+          # portable copy never dies with "missing DLL" on a clean Windows box
+          if [ "${{ matrix.target }}" = "x86_64-pc-windows-gnu" ]; then
+            if [ ! -f "$DIST/WebView2Loader.dll" ]; then
+              loader="$(find target -name 'WebView2Loader.dll' -print -quit 2>/dev/null || true)"
+              if [ -n "$loader" ]; then
+                cp "$loader" "$DIST/"
+                echo "staged runtime library: WebView2Loader.dll"
+              fi
+            fi
+            for dll in libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll; do
+              if [ -f "/c/msys64/mingw64/bin/$dll" ]; then
+                cp "/c/msys64/mingw64/bin/$dll" "$DIST/"
+              fi
+            done
+          fi
+          for doc in README.md VERSION.md CREDITS.md LICENSE.md LICENSE_AGPL LICENSE_APACHE; do
+            if [ -f "$doc" ]; then cp "$doc" "$DIST/"; fi
+          done
+
+      # Strict staging assertion: every desktop archive MUST carry both
+      # binaries — the job fails immediately otherwise. FreeBSD is the
+      # documented CLI-only exception, asserted inside its VM script above.
+      - name: Assert staged distribution
+        if: matrix.vm != 'freebsd'
+        shell: bash
+        run: |
+          set -e
+          DIST="dist/${{ env.NAME }}"
+          if [ ! -f "$DIST/${{ matrix.bin }}" ]; then
+            echo "::error::${{ matrix.suffix }}: CLI binary ${{ matrix.bin }} missing from $DIST"
+            exit 1
+          fi
+          if [ ! -f "$DIST/${{ env.GUI_BIN }}" ]; then
+            echo "::error::${{ matrix.suffix }}: GUI binary ${{ env.GUI_BIN }} missing from $DIST"
+            exit 1
+          fi
+          if [ ! -f "$DIST/README.md" ]; then
+            echo "::error::${{ matrix.suffix }}: README.md missing from $DIST"
+            exit 1
+          fi
+          echo "staged OK: ${{ matrix.bin }} + ${{ env.GUI_BIN }} + docs in $DIST"
 
       - name: Upload staged distribution
         uses: actions/upload-artifact@v7
@@ -217,4 +338,4 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "TwilightMC Snapshot v${VERSION}-${DATE}-${COMMIT}" \
             --prerelease \
-            --notes "TwilightMC Snapshot v${VERSION}-${DATE}-${COMMIT} (commit ${COMMIT}, build date ${DATE} ddmmyyyy UTC). SHA-256 digests are listed in checksums.sha256."
+            --notes "TwilightMC Snapshot v${VERSION}-${DATE}-${COMMIT} (commit ${COMMIT}, build date ${DATE} ddmmyyyy UTC). Each archive ships the twilight CLI, the twilight-ui Tauri GUI and required runtime libraries plus full license docs; FreeBSD archives are the documented CLI-only exception (see PLATFORM_NOTES.txt). SHA-256 digests are listed in checksums.sha256."

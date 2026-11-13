@@ -9,8 +9,9 @@
 **TwilightMC** is a clean-room, Rust-bred Minecraft launcher: a Prism Launcher–style
 core rebuilt from scratch in pure Rust — Mojang manifest pipelines, metadata
 failover mirrors, parallel SHA-1-verified downloads, JVM discovery and offline
-profiles — shipped as a single dependency-free binary named `twilight`, with
-first-class Fabric/Quilt loader compositing and Modrinth `.mrpack` installation.
+profiles — shipped as a dependency-free CLI binary named `twilight` plus the
+`twilight-ui` Tauri v2 desktop GUI, with first-class Fabric/Quilt loader
+compositing and Modrinth `.mrpack` installation.
 
 No Mojang assets or launcher code is bundled or copied: everything here is
 original work (see [CONTRIBUTING.md](CONTRIBUTING.md)).
@@ -41,6 +42,38 @@ original work (see [CONTRIBUTING.md](CONTRIBUTING.md)).
   future use.
 - **Modest node requirements** — one binary, one stable Rust toolchain to
   build, and a `7z` executable on `PATH` for native-extraction days.
+
+## Download & install
+
+Grab a platform archive from the
+[releases page](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/releases)
+(or the rolling `snapshot` pre-release for the newest build). Every archive
+unpacks flat — no nested folder — and contains:
+
+| File | Purpose |
+| --- | --- |
+| `twilight` / `twilight.exe` | The **CLI**: `launch`, `modpack install`, JVM discovery. |
+| `twilight-ui` / `twilight-ui.exe` | The **desktop GUI** (Tauri v2 + Svelte 5 frontend). |
+| Runtime libraries *(when required)* | e.g. `WebView2Loader.dll` and the MinGW-w64 GCC runtime DLLs (`libgcc_s_seh-1.dll`, `libstdc++-6.dll`, `libwinpthread-1.dll`) in the Windows MinGW archive — keep them next to the executables. |
+| `README.md`, `VERSION.md`, `CREDITS.md`, `LICENSE.md`, `LICENSE_AGPL`, `LICENSE_APACHE` | Governance & licensing docs. |
+
+Run the GUI with `twilight-ui`, drive everything from scripts with `twilight`.
+
+Per-platform notes:
+
+- **Windows** — the GUI needs the WebView2 Runtime (preinstalled on Windows 11;
+  Windows 10 fetches it on first run). MSVC and Clang builds link the WebView2
+  loader statically; the MinGW-w64 build bundles `WebView2Loader.dll` plus the
+  GCC runtime DLLs beside the executables — unpack the whole archive, never
+  copy `twilight-ui.exe` out of its folder alone.
+- **Linux** — the GUI needs WebKitGTK 4.1 at runtime (Debian/Ubuntu:
+  `sudo apt install libwebkit2gtk-4.1-0`; Fedora: `webkit2gtk4.1`). The CLI
+  stays dependency-free.
+- **macOS** — both binaries run as-is; the system WebKit (WKWebView) needs
+  nothing extra. Launch the GUI with `./twilight-ui`.
+- **FreeBSD** — CLI-only build: the upstream Tauri GUI stack (wry/tao) is not
+  officially supported on FreeBSD, so the archive ships `twilight` plus a
+  `PLATFORM_NOTES.txt` documenting the exception.
 
 ## Build
 
@@ -178,14 +211,23 @@ Pushes to `main` (or manual `workflow_dispatch` runs) start the pipeline in
    snapshot identity (workspace version + UTC date + short commit).
 2. **Build** — eight-target matrix: Windows (MSVC, MinGW-GNU, and
    Clang-compiled), Linux (GCC, Clang with `CC=clang`/`CXX=clang++`, and
-   ARM64 cross-compiled for SBCs such as the Raspberry Pi 5, Radxa Rock 5,
-   Orange Pi and Asahi Linux on `aarch64-unknown-linux-gnu`), macOS on
-   Apple Silicon (`aarch64-apple-darwin`) and FreeBSD natively inside a
+   ARM64 built natively on GitHub's free `ubuntu-24.04-arm` runner for SBCs
+   such as the Raspberry Pi 5, Radxa Rock 5, Orange Pi and Asahi Linux on
+   `aarch64-unknown-linux-gnu`), macOS on Apple Silicon
+   (`aarch64-apple-darwin`) and FreeBSD natively inside a
    [`vmactions/freebsd-vm`](https://github.com/vmactions/freebsd-vm) runner.
+   Every job rebuilds the Svelte frontend first (`npm ci && npm run build`)
+   because the Tauri GUI embeds it at compile time, then compiles **both**
+   binaries in release mode — `twilight` (CLI) and `twilight-ui` (GUI) — and
+   stages them with any runtime libraries the build emits (e.g.
+   `WebView2Loader.dll` and the MinGW-w64 GCC runtime DLLs) plus the full
+   governance docs (`README.md`, `VERSION.md`, `CREDITS.md`, `LICENSE.md`,
+   `LICENSE_AGPL`, `LICENSE_APACHE`). A staging assertion fails the job
+   immediately if either binary is missing on Windows/Linux/macOS; FreeBSD is
+   a documented CLI-only exception (`PLATFORM_NOTES.txt` inside its archive).
     Each result is packaged as
    `twilight-snapshot-vX.Y.Z-ddmmyyyy-<commit>-<platform-toolchain>.zip/.tar.gz`
-   together with `README.md`, the license texts (`LICENSE.md`, `LICENSE_AGPL`,
-   `LICENSE_APACHE`), `VERSION.md`, and a `checksums.sha256` of all archives.
+   and a `checksums.sha256` of all archives is regenerated per build.
 3. **Release** — push-hosted only: the rolling `snapshot` **pre-release** is
    refreshed on GitHub Releases, titled
    `TwilightMC Snapshot vX.Y.Z-ddmmyyyy-<commit>`, each build superseding the
