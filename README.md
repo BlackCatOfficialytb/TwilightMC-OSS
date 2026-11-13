@@ -63,17 +63,19 @@ Per-platform notes:
 
 - **Windows** — the GUI needs the WebView2 Runtime (preinstalled on Windows 11;
   Windows 10 fetches it on first run). MSVC and Clang builds link the WebView2
-  loader statically; the MinGW-w64 build bundles `WebView2Loader.dll` plus the
-  GCC runtime DLLs beside the executables — unpack the whole archive, never
-  copy `twilight-ui.exe` out of its folder alone.
+  loader statically; the MinGW-w64 build bundles `WebView2Loader.dll` beside
+  the executables (its GCC runtime is linked statically) — unpack the whole
+  archive, never copy `twilight-ui.exe` out of its folder alone.
 - **Linux** — the GUI needs WebKitGTK 4.1 at runtime (Debian/Ubuntu:
   `sudo apt install libwebkit2gtk-4.1-0`; Fedora: `webkit2gtk4.1`). The CLI
   stays dependency-free.
 - **macOS** — both binaries run as-is; the system WebKit (WKWebView) needs
   nothing extra. Launch the GUI with `./twilight-ui`.
-- **FreeBSD** — CLI-only build: the upstream Tauri GUI stack (wry/tao) is not
-  officially supported on FreeBSD, so the archive ships `twilight` plus a
-  `PLATFORM_NOTES.txt` documenting the exception.
+- **FreeBSD** — both binaries are built natively inside the CI VM against
+  WebKitGTK 4.1; at runtime install the matching packages first
+  (`pkg install webkit2-gtk_41 gtk3`). Should the GUI stack ever fail to
+  build, the archive falls back to CLI-only with a `PLATFORM_NOTES.txt`
+  documenting it.
 
 ## Build
 
@@ -220,11 +222,13 @@ Pushes to `main` (or manual `workflow_dispatch` runs) start the pipeline in
    because the Tauri GUI embeds it at compile time, then compiles **both**
    binaries in release mode — `twilight` (CLI) and `twilight-ui` (GUI) — and
    stages them with any runtime libraries the build emits (e.g.
-   `WebView2Loader.dll` and the MinGW-w64 GCC runtime DLLs) plus the full
+   `WebView2Loader.dll` on the MinGW target, whose GCC runtime is statically
+   linked) plus the full
    governance docs (`README.md`, `VERSION.md`, `CREDITS.md`, `LICENSE.md`,
    `LICENSE_AGPL`, `LICENSE_APACHE`). A staging assertion fails the job
-   immediately if either binary is missing on Windows/Linux/macOS; FreeBSD is
-   a documented CLI-only exception (`PLATFORM_NOTES.txt` inside its archive).
+   immediately if either binary is missing on Windows/Linux/macOS; FreeBSD
+   builds both binaries natively against WebKitGTK 4.1 and only falls back to
+   CLI-only (`PLATFORM_NOTES.txt` inside its archive) if the GUI stack breaks.
     Each result is packaged as
    `twilight-snapshot-vX.Y.Z-ddmmyyyy-<commit>-<platform-toolchain>.zip/.tar.gz`
    and a `checksums.sha256` of all archives is regenerated per build.
