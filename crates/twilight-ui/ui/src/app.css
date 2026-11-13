@@ -7,7 +7,10 @@
 
 /* ---- type + fixed chrome ---- */
 :root {
-  --user-accent: #06b6d4; /* Cosmic Cyan; overridden inline by the picker */
+  /* --user-accent is intentionally NOT declared here: each theme preset
+     below carries its own default through var(--user-accent, default), and
+     an inline style from the picker (or a theme re-home) wins whenever one
+     is set. */
   --on-accent: #0f172a; /* dark ink wins on cyan in both modes */
 
   --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
@@ -102,6 +105,7 @@ html.preset-catppuccin-latte {
   --fg-1: #4c4f69; /* text */
   --fg-2: #6c6f85; /* subtext0 */
   --accent-1: var(--user-accent, #8839ef); /* mauve */
+  --on-accent: #ffffff; /* the dark latte mauve reads with white ink */
   --accent-1-hover: color-mix(in srgb, var(--accent-1) 85%, #000000);
   --accent-2: #df8e1d; /* yellow */
 }
@@ -173,7 +177,7 @@ html.preset-high-contrast {
   --border-1: #ffffff; /* strong hairlines on the pure-black ground */
   --fg-1: #ffffff;
   --fg-2: #cccccc;
-  --accent-1: var(--user-accent, #00e5ff); /* neon cyan */
+  --accent-1: var(--user-accent, #00ffff); /* neon cyan */
   --accent-1-hover: color-mix(in srgb, var(--accent-1) 85%, #ffffff);
   --accent-2: #ffee00; /* neon yellow */
   --focus-ring: 0 0 0 2px #ffee00;

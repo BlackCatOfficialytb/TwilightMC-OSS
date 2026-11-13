@@ -157,7 +157,7 @@ fn now_secs() -> u64 {
 }
 
 pub(crate) async fn instances_root(app: &AppHandle) -> Result<PathBuf, String> {
-    // resolved root: settings override -> Windows Prism default -> our library
+    // resolved root: settings override -> Prism/Freesm store -> our library
     let root = resolved_instances_root(app).await?;
     tokio::fs::create_dir_all(&root)
         .await

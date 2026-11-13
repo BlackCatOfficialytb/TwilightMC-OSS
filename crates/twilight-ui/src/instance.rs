@@ -1,8 +1,8 @@
 // Instance discovery & metadata engine. One unified grid row per directory
 // with either TwilightMC metadata (`instance.json`, legacy `twilight.json`)
 // or foreign Prism/MultiMC metadata (`instance.cfg` + `mmc-pack.json`), so
-// an existing Prism library (`%APPDATA%\PrismLauncher\instances`, or a
-// configured path like `D:\ins\instances`) is recognized in place.
+// an existing Prism or FreesmLauncher library (or a configured path like
+// `D:\ins\instances`) is recognized in place on every OS.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -12,7 +12,7 @@ use tauri::AppHandle;
 
 use crate::accounts::{load_settings, settings_path};
 use crate::instances::{instances_root, read_meta, validate_instance_id};
-use crate::storage::shared_root;
+use crate::storage::{discovered_vendor_dirs, first_existing_dir, shared_root};
 
 /// One row of the instance grid; the superset of our own and Prism metadata.
 #[derive(Debug, Clone, Serialize)]
@@ -469,9 +469,10 @@ fn prism_info(dir: &Path, id: &str, root: &Path, group: Option<String>) -> Optio
 // ---- root resolution --------------------------------------------------------
 
 /// The instances root: `settings.json` `instances_dir` override first, then
-/// `%APPDATA%\PrismLauncher\instances` on Windows when it exists, then the
-/// shared library's `instances` directory. Read-only side effects: missing
-/// defaults are reported but never created from here.
+/// an existing Prism or FreesmLauncher store's `instances` directory (Prism
+/// first, every OS), then the shared library's `instances` directory.
+/// Read-only side effects: missing defaults are reported but never created
+/// from here.
 pub(crate) async fn resolved_instances_root(app: &AppHandle) -> Result<PathBuf, String> {
     let settings = load_settings(&settings_path(app).await?).await;
     if let Some(dir) = settings
@@ -482,16 +483,16 @@ pub(crate) async fn resolved_instances_root(app: &AppHandle) -> Result<PathBuf, 
     {
         return Ok(PathBuf::from(dir));
     }
-    #[cfg(windows)]
-    if let Ok(appdata) = std::env::var("APPDATA") {
-        let prism = PathBuf::from(appdata)
-            .join("PrismLauncher")
-            .join("instances");
-        if prism.is_dir() {
-            return Ok(prism);
-        }
+    if let Some(dir) = first_vendor_instances_in(&discovered_vendor_dirs()) {
+        return Ok(dir);
     }
     Ok(shared_root(app).await?.join("instances"))
+}
+
+/// First existing `instances` directory among the discovered vendor stores,
+/// Prism before Freesm. Pure core so the fallback order is unit-testable.
+fn first_vendor_instances_in(dirs: &[PathBuf]) -> Option<PathBuf> {
+    first_existing_dir(dirs.iter().map(|dir| dir.join("instances")))
 }
 
 /// Scans the resolved root (or an explicit `instances_dir`) for the grid.
@@ -558,6 +559,37 @@ mod tests {
         let instances = root.join("instances");
         std::fs::create_dir_all(&instances).unwrap();
         (root, instances)
+    }
+
+    #[test]
+    fn vendor_instances_fallback_is_ordered() {
+        let base = std::env::temp_dir().join(format!(
+            "twi-vendor-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos()
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        let prism = base.join("PrismLauncher");
+        let freesm = base.join("FreesmLauncher");
+        // neither store carries an instances dir yet: fall through
+        assert_eq!(
+            first_vendor_instances_in(&[prism.clone(), freesm.clone()]),
+            None
+        );
+        std::fs::create_dir_all(prism.join("instances")).unwrap();
+        assert_eq!(
+            first_vendor_instances_in(&[prism.clone(), freesm.clone()]),
+            Some(prism.join("instances"))
+        );
+        // Freesm is only consulted when earlier candidates lack the dir
+        std::fs::create_dir_all(freesm.join("instances")).unwrap();
+        assert_eq!(
+            first_vendor_instances_in(&[base.join("missing"), freesm.clone()]),
+            Some(freesm.join("instances"))
+        );
     }
 
     #[test]

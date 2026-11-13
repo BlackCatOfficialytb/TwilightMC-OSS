@@ -3,7 +3,15 @@
   // spacious content column. Input values are $bindable so App.svelte keeps
   // owning persistence; actions bubble up as callbacks.
   import AccentPicker from './AccentPicker.svelte';
-  import { builtinAccent, THEME_PRESETS } from './theme';
+  import {
+    DEFAULT_THEME,
+    THEME_PRESETS,
+    TOKEN_FIELDS,
+    currentTokens,
+    deleteCustomTheme,
+    listCustomThemes,
+    saveCustomTheme,
+  } from './theme';
 
   let {
     version = '',
@@ -16,6 +24,7 @@
     minMem = $bindable(0),
     maxMem = $bindable(0),
     sharedInput = $bindable(''),
+    instancesInput = $bindable(''),
     storageBusy = false,
     storageMsg = '',
     javaMsg = '',
@@ -25,6 +34,8 @@
     onsaveprefs,
     onsaveshared,
     onresetshared,
+    onsaveinstances,
+    onresetinstances,
     oncleanstaging,
     onopenurl,
   } = $props();
@@ -36,6 +47,87 @@
     { id: 'about', label: 'About & Updates', icon: 'ℹ️' },
   ];
   let section = $state('appearance');
+
+  // ---- custom themes (localStorage-backed) ----
+  let customs = $state(listCustomThemes());
+  let builderName = $state('');
+  let builderDark = $state(true);
+  let builderTokens = $state(currentTokens());
+  let themeJson = $state('');
+  let customMsg = $state('');
+
+  function cloneCurrentTheme() {
+    builderTokens = currentTokens();
+    customMsg = 'Loaded the active theme’s tokens — tweak and save.';
+  }
+
+  function saveTheme() {
+    try {
+      const saved = saveCustomTheme({
+        name: builderName,
+        dark: builderDark,
+        tokens: builderTokens,
+      });
+      customs = listCustomThemes();
+      theme = saved.id;
+      customMsg = `Saved “${saved.name}”.`;
+    } catch (e) {
+      customMsg = String(e);
+    }
+  }
+
+  function removeTheme(id) {
+    deleteCustomTheme(id);
+    customs = listCustomThemes();
+    if (theme === id) theme = DEFAULT_THEME;
+    customMsg = 'Theme deleted.';
+  }
+
+  function exportTheme() {
+    themeJson = JSON.stringify(
+      {
+        name: builderName.trim() || 'My theme',
+        dark: builderDark,
+        tokens: builderTokens,
+      },
+      null,
+      2,
+    );
+    customMsg = 'Theme JSON written below — copy it to share.';
+  }
+
+  function importTheme() {
+    try {
+      const raw = JSON.parse(themeJson);
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+        throw new Error('Expected a theme object.');
+      }
+      const saved = saveCustomTheme(raw);
+      customs = listCustomThemes();
+      theme = saved.id;
+      customMsg = `Imported “${saved.name}”.`;
+      themeJson = '';
+    } catch (e) {
+      customMsg = `Import failed: ${e}`;
+    }
+  }
+
+  // Native directory picker; the chosen path lands in the bound input and
+  // the Save button persists it.
+  async function browseDir(current) {
+    const open = window.__TAURI__?.dialog?.open;
+    if (!open) return null;
+    try {
+      const picked = await open({
+        directory: true,
+        multiple: false,
+        defaultPath: current && current.trim() ? current.trim() : undefined,
+      });
+      return typeof picked === 'string' ? picked : null;
+    } catch {
+      return null;
+    }
+  }
 
   const REPO = 'https://github.com/BlackCatOfficialytb/TwilightMC-OSS';
 </script>
@@ -99,12 +191,156 @@
               <span class="text-[10px] text-(--text-muted)">{p.dark ? 'Dark ground' : 'Light ground'}</span>
             </button>
           {/each}
+          {#each customs as c (c.id)}
+            <!-- card is a div (a real button would nest the delete button) -->
+            <div
+              class="relative flex flex-col gap-1.5 rounded border p-2.5 text-left {theme === c.id
+                ? 'border-(--accent) bg-(--brand-tint)'
+                : 'border-(--border) hover:border-(--text-muted)'}"
+              role="button"
+              tabindex="0"
+              title="{c.name}: {c.dark ? 'dark' : 'light'} ground"
+              onclick={() => (theme = c.id)}
+              onkeydown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  theme = c.id;
+                }
+              }}
+            >
+              <span class="flex gap-1" aria-hidden="true">
+                <span class="h-4 w-4 rounded-full border border-black/20" style="background:{c.tokens.bg1}"></span>
+                <span class="h-4 w-4 rounded-full border border-black/20" style="background:{c.tokens.bg3}"></span>
+                <span class="h-4 w-4 rounded-full border border-black/20" style="background:{c.tokens.accent1}"></span>
+              </span>
+              <span class="truncate pr-4 text-[12px] font-medium">{c.name}</span>
+              <span class="text-[10px] text-(--text-muted)">Custom · {c.dark ? 'Dark' : 'Light'} ground</span>
+              <button
+                class="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded text-[10px] text-(--text-muted) hover:bg-rose-500/15 hover:text-rose-400"
+                title="Delete {c.name}"
+                aria-label="Delete {c.name}"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  removeTheme(c.id);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          {/each}
         </div>
 
         <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Accent color</h3>
         <div class="mt-3">
-          <AccentPicker builtin={builtinAccent(theme)} />
+          <AccentPicker {theme} />
         </div>
+
+        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Create a custom theme</h3>
+        <p class="mt-1 text-[12px] text-(--text-muted)">
+          Build your own palette; it lives in this browser and joins the grid above.
+        </p>
+        <div class="mt-3 rounded border border-(--border) bg-(--bg-subtle) p-4">
+          <div class="flex flex-wrap items-center gap-2">
+            <input
+              class="h-8 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-canvas) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+              placeholder="Theme name"
+              bind:value={builderName}
+              aria-label="Theme name"
+            />
+            <div class="flex overflow-hidden rounded border border-(--border)" role="group" aria-label="Ground type">
+              <button
+                type="button"
+                class="px-3 py-1.5 text-[12px] {builderDark
+                  ? 'bg-(--accent) font-medium text-(--on-accent)'
+                  : 'text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main)'}"
+                aria-pressed={builderDark}
+                onclick={() => (builderDark = true)}
+              >
+                Dark
+              </button>
+              <button
+                type="button"
+                class="px-3 py-1.5 text-[12px] {!builderDark
+                  ? 'bg-(--accent) font-medium text-(--on-accent)'
+                  : 'text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main)'}"
+                aria-pressed={!builderDark}
+                onclick={() => (builderDark = false)}
+              >
+                Light
+              </button>
+            </div>
+          </div>
+          <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {#each TOKEN_FIELDS as f (f.key)}
+              <label class="flex flex-col gap-1">
+                <span class="text-[10px] uppercase tracking-wide text-(--text-muted)">{f.label}</span>
+                <span class="flex items-center gap-1">
+                  <input
+                    type="color"
+                    value={builderTokens[f.key]}
+                    oninput={(e) => (builderTokens = { ...builderTokens, [f.key]: e.currentTarget.value })}
+                    class="h-7 w-8 shrink-0 cursor-pointer rounded border border-(--border) bg-(--bg-canvas) p-0.5"
+                    title="{f.label} color"
+                    aria-label="{f.label} color"
+                  />
+                  <input
+                    value={builderTokens[f.key]}
+                    oninput={(e) => (builderTokens = { ...builderTokens, [f.key]: e.currentTarget.value })}
+                    class="h-7 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-canvas) px-1.5 font-mono text-[11px] uppercase outline-none focus:border-(--accent)"
+                    spellcheck="false"
+                    aria-label="{f.label} hex"
+                  />
+                </span>
+              </label>
+            {/each}
+          </div>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button
+              class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
+              title="Copy the active theme's colors into the builder"
+              onclick={cloneCurrentTheme}
+            >
+              Clone active theme
+            </button>
+            <button
+              class="rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
+              onclick={saveTheme}
+            >
+              Save theme
+            </button>
+          </div>
+        </div>
+
+        <h3 class="mt-6 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Import / export</h3>
+        <div class="mt-2">
+          <textarea
+            bind:value={themeJson}
+            rows="5"
+            spellcheck="false"
+            class="w-full rounded border border-(--border) bg-(--bg-canvas) p-2 font-mono text-[11px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+            placeholder="Paste an exported theme JSON here"
+            aria-label="Theme JSON"
+          ></textarea>
+          <div class="mt-2 flex gap-2">
+            <button
+              class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
+              title="Writes the builder draft into the field"
+              onclick={exportTheme}
+            >
+              ⤒ Export draft
+            </button>
+            <button
+              class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
+              title="Saves the JSON in the field as a custom theme and applies it"
+              onclick={importTheme}
+            >
+              ⤓ Import from JSON
+            </button>
+          </div>
+        </div>
+        {#if customMsg}
+          <p class="mt-2 text-[12px] text-(--text-muted)">{customMsg}</p>
+        {/if}
       {:else if section === 'java'}
         <h2 class="text-[16px] font-semibold">Java &amp; Memory</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">
@@ -183,10 +419,20 @@
             <div class="text-[12px] font-medium">Shared library <span class="font-normal text-(--text-muted)">{storage.is_default_shared ? '(default)' : '(custom)'}</span></div>
             <div class="mt-3 flex gap-2">
               <input
-                class="h-9 flex-1 rounded border border-(--border) bg-(--bg-canvas) px-2.5 font-mono text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+                class="h-9 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-canvas) px-2.5 font-mono text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
                 placeholder={storage.shared_dir}
                 bind:value={sharedInput}
               />
+              <button
+                class="rounded border border-(--border) px-3 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
+                title="Pick the shared libraries directory"
+                onclick={async () => {
+                  const picked = await browseDir(sharedInput);
+                  if (picked) sharedInput = picked;
+                }}
+              >
+                Browse…
+              </button>
               <button
                 class="rounded bg-(--accent) px-4 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
                 disabled={storageBusy}
@@ -208,9 +454,43 @@
 
           <div class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-4">
             <div class="text-[12px] font-medium">Instances library <span class="font-normal text-(--text-muted)">{storage.is_default_instances ? '(default)' : '(override)'}</span></div>
-            <div class="mt-2 truncate font-mono text-[12px] text-(--text-muted)" title={storage.instances_dir}>
-              {storage.instances_dir}
+            <div class="mt-3 flex gap-2">
+              <input
+                class="h-9 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-canvas) px-2.5 font-mono text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+                placeholder={storage.instances_dir}
+                bind:value={instancesInput}
+              />
+              <button
+                class="rounded border border-(--border) px-3 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
+                title="Pick the instances directory"
+                onclick={async () => {
+                  const picked = await browseDir(instancesInput);
+                  if (picked) instancesInput = picked;
+                }}
+              >
+                Browse…
+              </button>
+              <button
+                class="rounded bg-(--accent) px-4 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
+                disabled={storageBusy}
+                title="Rescans the grid from this directory"
+                onclick={onsaveinstances}
+              >
+                Save
+              </button>
+              {#if !storage.is_default_instances}
+                <button
+                  class="rounded px-4 text-[12px] text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main) disabled:opacity-40"
+                  disabled={storageBusy}
+                  onclick={onresetinstances}
+                >
+                  Reset
+                </button>
+              {/if}
             </div>
+            <p class="mt-2 text-[11px] text-(--text-muted)">
+              Without an override the grid adopts an existing Prism or FreesmLauncher library when one is present.
+            </p>
           </div>
 
           <div class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-4">

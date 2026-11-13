@@ -7,7 +7,7 @@
   import InstanceContextPanel from './lib/InstanceContextPanel.svelte';
   import SettingsPage from './lib/SettingsPage.svelte';
   import { topOverlay } from './lib/overlays.js';
-  import { builtinAccent, isDarkTheme, loadSavedAccent, normalizeThemeId, applyTheme } from './lib/theme';
+  import { isDarkTheme, loadSavedAccent, normalizeThemeId, applyTheme } from './lib/theme';
 
   let version = $state('…');
   let active = $state('instances');
@@ -83,6 +83,7 @@
   // ---- settings page state (full-page view on the `settings` nav route) ----
   let storage = $state(null);
   let sharedInput = $state('');
+  let instancesInput = $state('');
   let storageBusy = $state(false);
   let storageMsg = $state('');
   let javaPrefs = $state(null);
@@ -422,6 +423,7 @@
     try {
       storage = await api('get_storage');
       sharedInput = storage.is_default_shared ? '' : storage.shared_dir;
+      instancesInput = storage.is_default_instances ? '' : storage.instances_dir;
     } catch (e) {
       storageMsg = String(e);
     } finally {
@@ -436,7 +438,10 @@
       await api('set_shared_dir', { path: sharedInput.trim() || null });
       storage = await api('get_storage');
       sharedInput = storage.is_default_shared ? '' : storage.shared_dir;
+      instancesInput = storage.is_default_instances ? '' : storage.instances_dir;
       storageMsg = 'Storage updated.';
+      // the instances root falls back to <shared>/instances, so the grid may move
+      await loadInstances();
     } catch (e) {
       storageMsg = String(e);
     } finally {
@@ -447,6 +452,30 @@
   async function resetShared() {
     sharedInput = '';
     await saveShared();
+  }
+
+  // Instances root changes move the grid: save, refresh the scan, and drop
+  // a selection that no longer exists.
+  async function saveInstances() {
+    storageBusy = true;
+    storageMsg = '';
+    try {
+      await api('set_instances_dir', { path: instancesInput.trim() || null });
+      storage = await api('get_storage');
+      instancesInput = storage.is_default_instances ? '' : storage.instances_dir;
+      storageMsg = 'Storage updated.';
+      await loadInstances();
+      if (selectedId && !instances.some((i) => i.id === selectedId)) selectedId = null;
+    } catch (e) {
+      storageMsg = String(e);
+    } finally {
+      storageBusy = false;
+    }
+  }
+
+  async function resetInstances() {
+    instancesInput = '';
+    await saveInstances();
   }
 
   async function cleanStaging() {
@@ -707,6 +736,7 @@
           bind:minMem
           bind:maxMem
           bind:sharedInput
+          bind:instancesInput
           {storageBusy}
           {storageMsg}
           {javaMsg}
@@ -716,6 +746,8 @@
           onsaveprefs={savePrefs}
           onsaveshared={saveShared}
           onresetshared={resetShared}
+          onsaveinstances={saveInstances}
+          onresetinstances={resetInstances}
           oncleanstaging={cleanStaging}
           onopenurl={(url) => api('open_path', { path: url }).catch((e) => (status = String(e)))}
         />
