@@ -303,6 +303,6 @@ mod tests {
     #[test]
     fn desktop_exec_args_escape_quotes() {
         assert_eq!(exec_arg("/opt/app"), "\"/opt/app\"");
-        assert_eq!(exec_arg(r#"we"ird\path"#), "\"we\\\\\\\"ird\\\\path\"");
+        assert_eq!(exec_arg(r#"we"ird\path"#), "\"we\\\"ird\\\\path\"");
     }
 }
