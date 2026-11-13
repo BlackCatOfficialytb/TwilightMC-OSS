@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
   import InstanceGrid from './lib/InstanceGrid.svelte';
-  import EditInstanceModal from './lib/EditInstanceModal.svelte';
+  import EditInstancePage from './lib/EditInstancePage.svelte';
   import MrpackInstallModal from './lib/MrpackInstallModal.svelte';
   import NewInstanceModal from './lib/NewInstanceModal.svelte';
   import InstanceContextPanel from './lib/InstanceContextPanel.svelte';
@@ -74,8 +74,12 @@
   let modpackBusy = $state(false);
   let modpackError = $state('');
 
-  // ---- edit instance modal ----
+  // ---- edit instance (full-page view on the `edit` route) ----
   let editFor = $state(null);
+
+  // View routing: the sidebar nav selects a surface; an open editor takes
+  // over the whole main column ('instances' | 'settings' | 'edit').
+  let currentView = $derived(editFor ? 'edit' : active);
 
   // ---- global .mrpack drag-and-drop ----
   let mrpackFor = $state(null);
@@ -366,7 +370,6 @@
   function openEdit(inst) {
     editFor = inst;
   }
-
   // ---- right context panel (Yardarm grammar: selection drives it) ----
 
   const selectedInst = $derived(instances.find((i) => i.id === selectedId) ?? null);
@@ -547,10 +550,10 @@
         }
         if (menuFor) menuFor = null;
         else if (deleteFor) (deleteFor = null), (deleteError = '');
+        else if (editFor) editFor = null;
         else if (selectedId) selectedId = null;
         else if (modalOpen) modalOpen = false;
         else if (modpackOpen) modpackOpen = false;
-        else if (editFor) editFor = null;
         else if (drawerOpen) drawerOpen = false;
         return;
       }
@@ -655,6 +658,7 @@
           title={item.label}
           onclick={() => {
             active = item.id;
+            editFor = null;
             if (item.id === 'settings') {
               loadPrefs();
               if (!storage) loadStorage();
@@ -715,15 +719,34 @@
   <!-- ==================== RIGHT COLUMN ==================== -->
   <div class="flex min-w-0 flex-1 flex-col">
     <header class="flex h-11 shrink-0 items-center justify-between border-b border-(--border) bg-(--bg-subtle) px-4">
-      <div class="flex items-center gap-2.5">
-        <span class="rounded bg-(--accent)/15 px-2 py-0.5 text-xs font-medium text-(--accent)">TwilightMC v{version}</span>
-        <span class="rounded bg-(--accent-star)/15 px-1.5 py-0.5 text-[10px] font-medium text-(--accent-star)">pre-release UI</span>
+      <div class="flex min-w-0 items-center gap-2.5">
+        {#if currentView === 'edit'}
+          <button
+            class="rounded px-2.5 py-1 text-[12px] font-medium text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main)"
+            title="Back to the instance library"
+            onclick={() => (editFor = null)}
+          >
+            ← Back to Instances
+          </button>
+          <span class="truncate text-[12px] font-medium text-(--text-muted)" title={editFor?.name}>{editFor?.name}</span>
+        {:else}
+          <span class="rounded bg-(--accent)/15 px-2 py-0.5 text-xs font-medium text-(--accent)">TwilightMC Bolide alpha-v{version}</span>
+          <span class="rounded bg-(--accent-star)/15 px-1.5 py-0.5 text-[10px] font-medium text-(--accent-star)">pre-release UI</span>
+        {/if}
       </div>
       <span class="text-xs text-(--text-muted)">{status}</span>
     </header>
 
     <main class="min-w-0 flex-1 overflow-y-auto p-6">
-      {#if active === 'settings'}
+      {#if currentView === 'edit' && editFor}
+        <!-- full-page instance editor: grid and context panel stay behind -->
+        <EditInstancePage
+          instance={editFor}
+          {storage}
+          onback={() => (editFor = null)}
+          onopenconsole={() => (drawerOpen = true)}
+        />
+      {:else if active === 'settings'}
         <!-- full-page settings: the grid and context panel stay behind -->
         <SettingsPage
           {version}
@@ -900,7 +923,7 @@
   </div>
 
   <!-- Yardarm-style right context panel: selection drives it, Escape clears -->
-  {#if active === 'instances' && selectedInst}
+  {#if currentView === 'instances' && selectedInst}
     <InstanceContextPanel
       instance={selectedInst}
       {storage}
@@ -1075,16 +1098,6 @@
         </div>
       </div>
     </div>
-  {/if}
-
-  {#if editFor}
-    <!-- Edit Instance modal (custom + foreign instances) -->
-    <EditInstanceModal
-      instance={editFor}
-      {storage}
-      onclose={() => (editFor = null)}
-      onopenconsole={() => (drawerOpen = true)}
-    />
   {/if}
 
   {#if deleteFor}

@@ -319,6 +319,82 @@ pub fn dry_run_report(
     lines.join("\n") + "\n"
 }
 
+/// Assembles the Prism/Freesm-style diagnostic header from the resolved
+/// launch inputs. Pure: the environment snapshot (DNS/GPU/OS/CPU/RAM) is
+/// collected by the caller and passed in.
+#[allow(clippy::too_many_arguments)]
+fn build_diagnostics(
+    account: &Account,
+    paths: &LaunchPaths,
+    version: &VersionFile,
+    java: &JavaSelection,
+    loader: Option<&LoaderProfile>,
+    plan: &LaunchPlan,
+    vanilla_entries: &[PathBuf],
+    native_jars: &[PathBuf],
+    dns: Vec<(String, String)>,
+    hardware: twilight_launch::Hardware,
+) -> twilight_launch::DiagnosticInfo {
+    let mut components = Vec::new();
+    if let Some(profile) = loader {
+        let (display, uid) = match profile.loader {
+            ModLoader::Fabric => ("Fabric Loader", "net.fabricmc.fabric-loader"),
+            ModLoader::Quilt => ("Quilt Loader", "net.quiltmc.quilt-loader"),
+        };
+        components.push(format!("{display} ({uid}) {}", profile.loader_version));
+    }
+    components.push(format!("Minecraft (net.minecraft) {}", version.id));
+
+    // the full probed version string wins ("21.0.2"); unprobed runtimes
+    // degrade to the major, then to "unknown"
+    let java_version = java
+        .version
+        .as_ref()
+        .map(|found| found.full.clone())
+        .filter(|full| !full.trim().is_empty())
+        .or_else(|| java.version.as_ref().map(|found| found.major.to_string()))
+        .unwrap_or_else(|| "unknown".to_owned());
+
+    // loader jars, then the active vanilla entries, then the client jar —
+    // the exact classpath order
+    let mut libraries = match loader {
+        Some(profile) => profile
+            .libraries
+            .iter()
+            .map(|lib| paths.library_root.join(&lib.storage).display().to_string())
+            .collect::<Vec<_>>(),
+        None => Vec::new(),
+    };
+    libraries.extend(
+        vanilla_entries
+            .iter()
+            .map(|path| path.display().to_string()),
+    );
+    libraries.push(paths.main_jar.display().to_string());
+
+    twilight_launch::DiagnosticInfo {
+        version: twilight_launch::VERSION_LABEL.to_owned(),
+        auth_mode: twilight_launch::auth_mode_name(account).to_owned(),
+        dns,
+        game_dir: paths.work_dir.display().to_string(),
+        java_path: java.executable.display().to_string(),
+        java_version,
+        hardware,
+        components,
+        main_class: plan.main_class.clone(),
+        // assemble_command runs with no trait set today
+        traits: Vec::new(),
+        libraries,
+        native_libraries: native_jars
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect(),
+        natives_dir: paths.natives_dir.display().to_string(),
+        game_args: plan.game_args.clone(),
+        jvm_args: plan.jvm_args.clone(),
+    }
+}
+
 /// Runs the `launch` subcommand: metadata failover, JVM selection, artifact
 /// downloads, horizon assets, natives extraction, spawn. `--dry-run` stops
 /// after the (network-read-only) plan assembly, prints and exits 0.
@@ -367,6 +443,16 @@ pub async fn run_launch_with(
         None => None,
     };
 
+    // ---- pre-launch diagnostics: service DNS answers, GPU/OS/CPU/RAM and
+    //      the classpath layout, collected once for both output branches
+    let (dns, hardware) = tokio::join!(
+        twilight_launch::resolve_service_hosts(),
+        twilight_launch::collect_hardware(),
+    );
+    let none = BTreeSet::<String>::new();
+    let (vanilla_entries, native_jars) =
+        active_paths(&version.libraries, &ctx, &paths.library_root, &none);
+
     if cfg.dry_run {
         let plan = assemble_command(
             &java,
@@ -378,6 +464,19 @@ pub async fn run_launch_with(
         )?;
         let mut plan = plan;
         plan.jvm_args.extend(cfg.jvm_args.clone());
+        let diag = build_diagnostics(
+            &account,
+            &paths,
+            &version,
+            &java,
+            loader_profile.as_ref(),
+            &plan,
+            &vanilla_entries,
+            &native_jars,
+            dns,
+            hardware,
+        );
+        println!("{}", twilight_launch::render(&diag));
         println!(
             "{}",
             dry_run_report(
@@ -403,7 +502,6 @@ pub async fn run_launch_with(
 
     // ---- libraries + client jar (parallel, sha1-verified)
     let downloader = ParallelDownloader::new(client.clone(), 8);
-    let none = BTreeSet::<String>::new();
     let mut requests = Vec::new();
     if let Some(client_info) = version.client() {
         requests.push(DownloadRequest {
@@ -458,8 +556,6 @@ pub async fn run_launch_with(
 
     // ---- natives: fresh scratchpad; extraction via 7-Zip or the fallback
     twilight_launch::clean_natives_dir(&paths.natives_dir).await?;
-    let (_classpath, native_jars) =
-        active_paths(&version.libraries, &ctx, &paths.library_root, &none);
     let mut excludes = BTreeSet::new();
     for library in &version.libraries {
         if library.is_active(&ctx, &none) && library.is_native() {
@@ -485,6 +581,7 @@ pub async fn run_launch_with(
         while let Some(event) = rx.recv().await {
             match event {
                 LaunchEvent::Started(pid) => {
+                    println!("Minecraft process ID: {pid}");
                     if let Some(sink) = &sink {
                         let _ = sink.send(LaunchEvent::Started(pid)).await;
                     }
@@ -504,6 +601,23 @@ pub async fn run_launch_with(
             }
         }
     });
+    // ---- diagnostics header straight through the same pump, so CLI stdout
+    //      and the GUI console drawer print the identical block
+    let diag = build_diagnostics(
+        &account,
+        &paths,
+        &version,
+        &java,
+        loader_profile.as_ref(),
+        &plan,
+        &vanilla_entries,
+        &native_jars,
+        dns,
+        hardware,
+    );
+    for line in twilight_launch::header_lines(&diag) {
+        let _ = tx.send(LaunchEvent::Stdout(line)).await;
+    }
     let status = twilight_launch::run(plan, tx).await?;
     // the pump can only fail by panicking (e.g. a broken console pipe)
     if let Err(join_error) = printer.await {
@@ -782,6 +896,62 @@ mod tests {
             ),
             "{report}"
         );
+    }
+
+    #[test]
+    fn diagnostic_header_lists_components_libraries_and_paths() {
+        let (plan, paths) = assemble_for(MODERN);
+        let version = twilight_manifest::parse_version_file(MODERN).unwrap();
+        let dns = vec![(
+            "api.mojang.com".to_owned(),
+            "skipped/unreachable".to_owned(),
+        )];
+        let hardware = twilight_launch::Hardware {
+            os: "Test OS".into(),
+            cpu: "Test CPU".into(),
+            ram_total_mib: 1024,
+            ram_available_mib: 512,
+            arch: "64-bit",
+            gpu: "Unknown".into(),
+        };
+        let diag = build_diagnostics(
+            &account(),
+            &paths,
+            &version,
+            &java(),
+            None,
+            &plan,
+            &[PathBuf::from("S/libraries/vanilla.jar")],
+            &[PathBuf::from("S/libraries/native.jar")],
+            dns,
+            hardware,
+        );
+        let text = twilight_launch::render(&diag).replace('\\', "/");
+        assert!(
+            text.starts_with("TwilightMC Bolide version: alpha-v"),
+            "{text}"
+        );
+        assert!(text.contains("Launched instance in offline mode"), "{text}");
+        assert!(
+            text.contains("Components:\n  1) Minecraft (net.minecraft) 26.3"),
+            "{text}"
+        );
+        // classpath order: vanilla entries first, the client jar last
+        assert!(text.contains("  S/libraries/vanilla.jar"), "{text}");
+        assert!(
+            text.contains("S/instances/26.3/minecraft/versions/26.3/26.3.jar"),
+            "{text}"
+        );
+        assert!(
+            text.contains("Native libraries:\n  S/libraries/native.jar"),
+            "{text}"
+        );
+        assert!(
+            text.contains("RAM: 1024 MiB (available: 512 MiB)"),
+            "{text}"
+        );
+        // the pid line is appended by the spawn pump, not the header
+        assert!(!text.contains("Minecraft process ID"), "{text}");
     }
 
     #[test]

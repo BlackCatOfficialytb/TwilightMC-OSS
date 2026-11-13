@@ -4,6 +4,7 @@
 
 mod args;
 mod classpath;
+mod diagnostics;
 mod error;
 mod natives;
 mod process;
@@ -13,6 +14,10 @@ pub use args::{
     replace_tokens_in,
 };
 pub use classpath::{active_paths, classpath_string, profile_classpath, separator};
+pub use diagnostics::{
+    DiagnosticInfo, Hardware, SERVICE_HOSTS, VERSION_LABEL, auth_mode_name, collect_hardware,
+    header_lines, mask_access_token, render, resolve_service_hosts,
+};
 pub use error::LaunchError;
 pub use natives::{
     clean_natives_dir, extract_natives, extract_natives_with_7z, extract_natives_with_fallback,

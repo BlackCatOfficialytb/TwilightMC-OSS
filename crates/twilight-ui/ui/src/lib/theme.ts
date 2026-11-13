@@ -26,6 +26,84 @@ const ORE_ACCENTS = [
 const DARK_INK = '#0F172A';
 const WHITE_INK = '#FFFFFF';
 
+/**
+ * All 14 official Catppuccin accent colors per flavor, transcribed from
+ * `upstream/catppuccin-palette/palette.json` (v1.8.0) in the palette's own
+ * accent order: rosewater, flamingo, pink, mauve, red, maroon, peach,
+ * yellow, green, teal, sky, sapphire, blue, lavender.
+ */
+const CATPPUCCIN_ACCENTS = {
+  latte: [
+    { name: 'Rosewater', hex: '#dc8a78' },
+    { name: 'Flamingo', hex: '#dd7878' },
+    { name: 'Pink', hex: '#ea76cb' },
+    { name: 'Mauve', hex: '#8839ef' },
+    { name: 'Red', hex: '#d20f39' },
+    { name: 'Maroon', hex: '#e64553' },
+    { name: 'Peach', hex: '#fe640b' },
+    { name: 'Yellow', hex: '#df8e1d' },
+    { name: 'Green', hex: '#40a02b' },
+    { name: 'Teal', hex: '#179299' },
+    { name: 'Sky', hex: '#04a5e5' },
+    { name: 'Sapphire', hex: '#209fb5' },
+    { name: 'Blue', hex: '#1e66f5' },
+    { name: 'Lavender', hex: '#7287fd' },
+  ],
+  frappe: [
+    { name: 'Rosewater', hex: '#f2d5cf' },
+    { name: 'Flamingo', hex: '#eebebe' },
+    { name: 'Pink', hex: '#f4b8e4' },
+    { name: 'Mauve', hex: '#ca9ee6' },
+    { name: 'Red', hex: '#e78284' },
+    { name: 'Maroon', hex: '#ea999c' },
+    { name: 'Peach', hex: '#ef9f76' },
+    { name: 'Yellow', hex: '#e5c890' },
+    { name: 'Green', hex: '#a6d189' },
+    { name: 'Teal', hex: '#81c8be' },
+    { name: 'Sky', hex: '#99d1db' },
+    { name: 'Sapphire', hex: '#85c1dc' },
+    { name: 'Blue', hex: '#8caaee' },
+    { name: 'Lavender', hex: '#babbf1' },
+  ],
+  macchiato: [
+    { name: 'Rosewater', hex: '#f4dbd6' },
+    { name: 'Flamingo', hex: '#f0c6c6' },
+    { name: 'Pink', hex: '#f5bde6' },
+    { name: 'Mauve', hex: '#c6a0f6' },
+    { name: 'Red', hex: '#ed8796' },
+    { name: 'Maroon', hex: '#ee99a0' },
+    { name: 'Peach', hex: '#f5a97f' },
+    { name: 'Yellow', hex: '#eed49f' },
+    { name: 'Green', hex: '#a6da95' },
+    { name: 'Teal', hex: '#8bd5ca' },
+    { name: 'Sky', hex: '#91d7e3' },
+    { name: 'Sapphire', hex: '#7dc4e4' },
+    { name: 'Blue', hex: '#8aadf4' },
+    { name: 'Lavender', hex: '#b7bdf8' },
+  ],
+  mocha: [
+    { name: 'Rosewater', hex: '#f5e0dc' },
+    { name: 'Flamingo', hex: '#f2cdcd' },
+    { name: 'Pink', hex: '#f5c2e7' },
+    { name: 'Mauve', hex: '#cba6f7' },
+    { name: 'Red', hex: '#f38ba8' },
+    { name: 'Maroon', hex: '#eba0ac' },
+    { name: 'Peach', hex: '#fab387' },
+    { name: 'Yellow', hex: '#f9e2af' },
+    { name: 'Green', hex: '#a6e3a1' },
+    { name: 'Teal', hex: '#94e2d5' },
+    { name: 'Sky', hex: '#89dceb' },
+    { name: 'Sapphire', hex: '#74c7ec' },
+    { name: 'Blue', hex: '#89b4fa' },
+    { name: 'Lavender', hex: '#b4befe' },
+  ],
+};
+
+/** The 14-accent suggested palette for a Catppuccin flavor id. */
+function catppuccinAccents(flavor) {
+  return CATPPUCCIN_ACCENTS[flavor] ?? [];
+}
+
 /** Normalizes `#rgb` / `#rrggbb` to lowercase `#rrggbb`; null when invalid. */
 export function normalizeHex(input) {
   let hex = input.trim().replace(/^#/, '');
@@ -129,15 +207,7 @@ export const THEME_PRESETS = [
     cls: 'preset-catppuccin-latte',
     swatch: ['#eff1f5', '#e6e9ef', '#8839ef'],
     accent: '#8839ef',
-    suggested: [
-      { name: 'Mauve', hex: '#8839ef' },
-      { name: 'Lavender', hex: '#7287fd' },
-      { name: 'Sapphire', hex: '#209fb5' },
-      { name: 'Teal', hex: '#179299' },
-      { name: 'Peach', hex: '#fe640b' },
-      { name: 'Red', hex: '#d20f39' },
-      { name: 'Flamingo', hex: '#dd7878' },
-    ],
+    suggested: catppuccinAccents('latte'),
   },
   {
     id: 'catppuccin-frappe',
@@ -146,15 +216,7 @@ export const THEME_PRESETS = [
     cls: 'preset-catppuccin-frappe',
     swatch: ['#303446', '#414559', '#ca9ee6'],
     accent: '#ca9ee6',
-    suggested: [
-      { name: 'Mauve', hex: '#ca9ee6' },
-      { name: 'Lavender', hex: '#babbf1' },
-      { name: 'Sapphire', hex: '#85c1dc' },
-      { name: 'Teal', hex: '#81c8be' },
-      { name: 'Peach', hex: '#ef9f76' },
-      { name: 'Red', hex: '#e78284' },
-      { name: 'Flamingo', hex: '#eebebe' },
-    ],
+    suggested: catppuccinAccents('frappe'),
   },
   {
     id: 'catppuccin-macchiato',
@@ -163,15 +225,7 @@ export const THEME_PRESETS = [
     cls: 'preset-catppuccin-macchiato',
     swatch: ['#24273a', '#363a4f', '#c6a0f6'],
     accent: '#c6a0f6',
-    suggested: [
-      { name: 'Mauve', hex: '#c6a0f6' },
-      { name: 'Lavender', hex: '#b7bdf8' },
-      { name: 'Sapphire', hex: '#7dc4e4' },
-      { name: 'Teal', hex: '#8bd5ca' },
-      { name: 'Peach', hex: '#f5a97f' },
-      { name: 'Red', hex: '#ed8796' },
-      { name: 'Flamingo', hex: '#f0c6c6' },
-    ],
+    suggested: catppuccinAccents('macchiato'),
   },
   {
     id: 'catppuccin-mocha',
@@ -180,15 +234,7 @@ export const THEME_PRESETS = [
     cls: 'preset-catppuccin-mocha',
     swatch: ['#1e1e2e', '#313244', '#cba6f7'],
     accent: '#cba6f7',
-    suggested: [
-      { name: 'Mauve', hex: '#cba6f7' },
-      { name: 'Lavender', hex: '#b4befe' },
-      { name: 'Sapphire', hex: '#74c7ec' },
-      { name: 'Teal', hex: '#94e2d5' },
-      { name: 'Peach', hex: '#fab387' },
-      { name: 'Red', hex: '#f38ba8' },
-      { name: 'Flamingo', hex: '#f2cdcd' },
-    ],
+    suggested: catppuccinAccents('mocha'),
   },
   {
     id: 'nord',

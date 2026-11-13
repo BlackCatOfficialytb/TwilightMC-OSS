@@ -8,6 +8,8 @@ description = "JVM/game argument template resolution, classpath building and asy
 [dependencies]
 tokio = { workspace = true }
 thiserror = { workspace = true }
+sysinfo = "0.40.3"
+futures = { workspace = true }
 
 twilight-manifest = { path = "../twilight-manifest" }
 twilight-auth = { path = "../twilight-auth" }

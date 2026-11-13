@@ -110,7 +110,7 @@ async fn run(app: &AppHandle, instance_id: &str) -> Result<i32, String> {
                             "launch-log",
                             LaunchLine {
                                 stream: "stdout",
-                                line: format!("game started (pid {pid})"),
+                                line: format!("Minecraft process ID: {pid}"),
                             },
                         );
                     }

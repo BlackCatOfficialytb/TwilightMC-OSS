@@ -520,9 +520,9 @@
           <div class="flex items-center gap-2">
             <img src="/logo.png" alt="" draggable="false" class="h-10 w-10" />
             <div>
-              <div class="text-[13px] font-semibold">TwilightMC <span class="font-normal text-(--text-muted)">v{version}</span></div>
+              <div class="text-[13px] font-semibold">TwilightMC Bolide <span class="font-normal text-(--text-muted)">alpha-v{version}</span></div>
               <div class="mt-0.5 text-[12px] text-(--text-muted)">
-                pre-release UI · snapshot channel (built from every push)
+                pre-release UI · Bolide channel (alpha builds, may crash and rewrite formats)
               </div>
             </div>
           </div>

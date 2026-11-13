@@ -76,6 +76,8 @@ fn main() {
             instance::scan_instances,
             instance::set_instance_group,
             instances::delete_instance,
+            instances::list_screenshots,
+            instances::list_logs,
             shortcut::create_desktop_shortcut,
             shortcut::get_startup_launch,
             export::export_instance_zip,

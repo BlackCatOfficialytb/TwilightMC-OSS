@@ -508,6 +508,84 @@ pub async fn set_instance_icon(
     Ok(dest.display().to_string())
 }
 
+/// One file of a browsable instance directory (screenshots, logs).
+#[derive(Debug, Clone, Serialize)]
+pub struct FileEntry {
+    /// File name inside the directory.
+    pub name: String,
+    /// Byte size.
+    pub size: u64,
+    /// Unix seconds of last modification.
+    pub modified: u64,
+}
+
+/// Lists the image/log files of one instance sub-directory newest-first. A
+/// missing directory is an empty list, not an error (fresh instances have
+/// neither yet).
+pub(crate) async fn list_dir_files(
+    dir: &Path,
+    extensions: &[&str],
+) -> Result<Vec<FileEntry>, String> {
+    let mut files = Vec::new();
+    let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
+        return Ok(files);
+    };
+    while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
+        let path = entry.path();
+        let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+            continue;
+        };
+        if !extensions.contains(&ext.to_ascii_lowercase().as_str()) || !path.is_file() {
+            continue;
+        }
+        let meta = entry.metadata().await.map_err(|e| e.to_string())?;
+        let modified = meta
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|delta| delta.as_secs())
+            .unwrap_or_default();
+        files.push(FileEntry {
+            name: entry.file_name().to_string_lossy().to_string(),
+            size: meta.len(),
+            modified,
+        });
+    }
+    files.sort_by(|a, b| {
+        b.modified
+            .cmp(&a.modified)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    Ok(files)
+}
+
+/// Screenshot browser data: every PNG in the instance's `minecraft/screenshots`.
+#[tauri::command]
+pub async fn list_screenshots(
+    app: AppHandle,
+    instance_id: String,
+) -> Result<Vec<FileEntry>, String> {
+    validate_instance_id(&instance_id)?;
+    let dir = instances_root(&app)
+        .await?
+        .join(&instance_id)
+        .join("minecraft")
+        .join("screenshots");
+    list_dir_files(&dir, &["png"]).await
+}
+
+/// Log browser data: every `.log` / `.txt` in the instance's `minecraft/logs`.
+#[tauri::command]
+pub async fn list_logs(app: AppHandle, instance_id: String) -> Result<Vec<FileEntry>, String> {
+    validate_instance_id(&instance_id)?;
+    let dir = instances_root(&app)
+        .await?
+        .join(&instance_id)
+        .join("minecraft")
+        .join("logs");
+    list_dir_files(&dir, &["log", "txt"]).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -734,6 +812,34 @@ mod tests {
         std::fs::create_dir_all(root.join("empty")).unwrap();
         let err = read_launch_meta(&root.join("empty")).await.unwrap_err();
         assert!(err.contains("no readable instance metadata"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn screenshot_and_log_listing_filters_and_sorts() {
+        let root = temp_root();
+        let shots = root.join("inst").join("minecraft").join("screenshots");
+        std::fs::create_dir_all(&shots).unwrap();
+        std::fs::write(shots.join("2026-01-01_1.png"), b"x").unwrap();
+        std::fs::write(shots.join("note.txt"), b"y").unwrap();
+        let logs = root.join("inst").join("minecraft").join("logs");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::write(logs.join("latest.log"), b"abc").unwrap();
+        std::fs::write(logs.join("debug.txt"), b"de").unwrap();
+
+        let listed = list_dir_files(&shots, &["png"]).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "2026-01-01_1.png");
+        assert_eq!(listed[0].size, 1);
+
+        let listed = list_dir_files(&logs, &["log", "txt"]).await.unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(listed.iter().any(|f| f.name == "latest.log" && f.size == 3));
+
+        // a missing directory lists empty instead of erroring
+        let ghost = list_dir_files(&root.join("inst/minecraft/crash-reports"), &["txt"])
+            .await
+            .unwrap();
+        assert!(ghost.is_empty());
     }
 
     #[tokio::test]
