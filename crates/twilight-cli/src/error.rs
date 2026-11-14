@@ -39,6 +39,8 @@ pub enum CliError {
     UnknownLoader { given: String },
     #[error("the modpack declares both fabric-loader and quilt-loader; pass a loader explicitly")]
     ModpackAmbiguousLoaders,
+    #[error("account authentication failed")]
+    Auth(#[from] twilight_auth::AuthError),
     #[error("io failure")]
     Io(#[from] std::io::Error),
     #[error("game process failed with status {status}")]

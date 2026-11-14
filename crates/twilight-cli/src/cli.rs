@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+use twilight_auth::Account;
+
 use crate::error::CliError;
 
 /// TwilightMC launcher CLI.
@@ -104,6 +106,10 @@ pub struct LaunchConfig {
     pub loader_version: Option<String>,
     /// Extra JVM arguments appended after the manifest's own (`-Xms`/`-Xmx`).
     pub jvm_args: Vec<String>,
+    /// Full account profile to launch with. `None` = offline account from
+    /// `username` (the CLI default); the desktop UI passes the active account
+    /// so Microsoft tokens and custom Yggdrasil servers reach the pipeline.
+    pub account: Option<Account>,
     pub dry_run: bool,
 }
 
@@ -129,6 +135,7 @@ impl LaunchArgs {
             loader: self.loader.clone(),
             loader_version: self.loader_version.clone(),
             jvm_args: Vec::new(),
+            account: None,
             dry_run: self.dry_run,
         })
     }

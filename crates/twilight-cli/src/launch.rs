@@ -244,6 +244,18 @@ pub fn assemble_command(
     })
 }
 
+/// Appends the authlib-injector `-javaagent` flags when a custom Yggdrasil
+/// account launched with a resolved agent jar.
+fn inject_authlib(plan: &mut LaunchPlan, authlib_jar: &Option<(PathBuf, String)>) {
+    if let Some((jar, url)) = authlib_jar {
+        plan.jvm_args
+            .extend(twilight_auth::authlib_injector_jvm_args(
+                &jar.display().to_string(),
+                url,
+            ));
+    }
+}
+
 /// Human-readable `--dry-run` summary. Ends with a newline.
 pub fn dry_run_report(
     plan: &LaunchPlan,
@@ -408,7 +420,10 @@ pub async fn run_launch_with(
     cfg: LaunchConfig,
     sink: Option<mpsc::Sender<LaunchEvent>>,
 ) -> Result<i32, CliError> {
-    let account = Account::offline(cfg.username.clone());
+    let account = cfg
+        .account
+        .clone()
+        .unwrap_or_else(|| Account::offline(cfg.username.clone()));
     let client = reqwest::Client::new();
 
     // ---- metadata first: required majors and paths depend on the manifest
@@ -443,6 +458,16 @@ pub async fn run_launch_with(
         None => None,
     };
 
+    // ---- authlib-injector: custom Yggdrasil accounts launch through the
+    //      agent jar, auto-fetched + SHA-256 verified into <shared>/libraries
+    let authlib_jar = match &account.account_type {
+        twilight_auth::AccountType::CustomYggdrasil { auth_server_url } => Some((
+            twilight_auth::ensure_authlib_injector(&client, &paths.shared_dir).await?,
+            auth_server_url.clone(),
+        )),
+        _ => None,
+    };
+
     // ---- pre-launch diagnostics: service DNS answers, GPU/OS/CPU/RAM and
     //      the classpath layout, collected once for both output branches
     let (dns, hardware) = tokio::join!(
@@ -464,6 +489,7 @@ pub async fn run_launch_with(
         )?;
         let mut plan = plan;
         plan.jvm_args.extend(cfg.jvm_args.clone());
+        inject_authlib(&mut plan, &authlib_jar);
         let diag = build_diagnostics(
             &account,
             &paths,
@@ -576,6 +602,7 @@ pub async fn run_launch_with(
     )?;
     let mut plan = plan;
     plan.jvm_args.extend(cfg.jvm_args);
+    inject_authlib(&mut plan, &authlib_jar);
     let (tx, mut rx) = mpsc::channel::<LaunchEvent>(512);
     let printer = tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
@@ -679,6 +706,7 @@ mod tests {
             loader: None,
             loader_version: None,
             jvm_args: Vec::new(),
+            account: None,
             dry_run: true,
         }
     }

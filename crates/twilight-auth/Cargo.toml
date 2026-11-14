@@ -12,3 +12,6 @@ uuid = { workspace = true }
 md-5 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+reqwest = { workspace = true }
+sha2 = { workspace = true }
+twilight-downloader = { path = "../twilight-downloader" }

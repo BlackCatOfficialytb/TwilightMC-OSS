@@ -24,6 +24,9 @@ pub struct Account {
     pub uuid: uuid::Uuid,
     pub account_type: AccountType,
     pub access_token: Option<String>,
+    /// MSA refresh token for Microsoft accounts (`None` = re-run device flow).
+    #[serde(default)]
+    pub refresh_token: Option<String>,
 }
 
 impl Account {
@@ -36,6 +39,7 @@ impl Account {
             uuid: generate_offline_uuid(&username),
             account_type: AccountType::Offline,
             access_token: None,
+            refresh_token: None,
         }
     }
 
@@ -56,6 +60,26 @@ impl Account {
                 auth_server_url: server_url,
             },
             access_token,
+            refresh_token: None,
+        }
+    }
+
+    /// Signed-in Microsoft account (device-flow result); `refresh_token`
+    /// keeps the account renewable without re-running the flow.
+    pub fn microsoft(
+        username: impl Into<String>,
+        uuid: uuid::Uuid,
+        access_token: Option<String>,
+        refresh_token: Option<String>,
+    ) -> Self {
+        let username = username.into();
+        Account {
+            id: username.clone(),
+            username,
+            uuid,
+            account_type: AccountType::Microsoft,
+            access_token,
+            refresh_token,
         }
     }
 
@@ -142,6 +166,22 @@ mod tests {
             ygg.account_type,
             AccountType::CustomYggdrasil { ref auth_server_url } if auth_server_url.contains("ely.by")
         ));
+        // Microsoft accounts keep the MSA refresh token for later renewal
+        let ms = Account::microsoft(
+            "Notch",
+            uuid::Uuid::nil(),
+            Some("mc-access".into()),
+            Some("msa-refresh".into()),
+        );
+        assert!(ms.requires_online_validation());
+        assert_eq!(ms.user_type(), "mojang");
+        assert_eq!(ms.refresh_token.as_deref(), Some("msa-refresh"));
+        // serialized form carries it, and older stores without it load fine
+        let json = serde_json::to_string(&ms).unwrap();
+        assert!(json.contains("msa-refresh"));
+        let legacy: Account =
+            serde_json::from_str(&json.replace(r#","refresh_token":"msa-refresh""#, "")).unwrap();
+        assert_eq!(legacy.refresh_token, None);
     }
 
     #[tokio::test]

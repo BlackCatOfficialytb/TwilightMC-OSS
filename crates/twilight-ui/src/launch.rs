@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use twilight_cli::{LaunchConfig, run_launch_with};
 use twilight_launch::LaunchEvent;
 
-use crate::accounts::{active_username, load_settings, settings_path};
+use crate::accounts::{active_account, load_settings, settings_path};
 use crate::instance::resolved_instances_root;
 use crate::instances;
 
@@ -86,7 +86,13 @@ async fn run(app: &AppHandle, instance_id: &str) -> Result<i32, String> {
     let meta = instances::read_launch_meta(&instance_dir)
         .await
         .map_err(|e| format!("cannot launch {instance_id}: {e}"))?;
-    let username = active_username(app).await;
+    // full profile: Microsoft tokens and custom Yggdrasil server URLs must
+    // reach the pipeline (offline fallback keeps the CLI default username)
+    let account = active_account(app).await;
+    let username = account
+        .as_ref()
+        .map(|a| a.username.clone())
+        .unwrap_or_else(|| "Player".to_owned());
     // settings: explicit java override and the -Xms/-Xmx memory allocation
     let settings = load_settings(&settings_path(app).await?).await;
     let mut jvm_args = Vec::new();
@@ -153,6 +159,7 @@ async fn run(app: &AppHandle, instance_id: &str) -> Result<i32, String> {
         loader: meta.loader,
         loader_version: meta.loader_version,
         jvm_args,
+        account,
         dry_run: false,
     };
 
