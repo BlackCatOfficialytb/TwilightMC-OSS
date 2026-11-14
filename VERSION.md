@@ -117,14 +117,15 @@ validators — so precedence is defined here:
 ## 6. Current version
 
 - Latest Stable: `v0.2.0`.
-- Bolide line: `v0.4.0` — the workspace `version` carries `0.4.0` since the
-  Milestone-3 design-pass & modding desktop UI (Bolide tags `alpha-v0.3.2` …
-  `alpha-v0.4.0`: edit-instance/mods manager, accent engine, context panel,
-  card grammar, the launch-pipeline repair verified with a real
-  26.4-snapshot-8 Fabric launch, the Modrinth browser and the global
-  `.mrpack` drop installer); Bolide builds carry no API-stability
-  promises (§2).
-- Snapshot line: `v0.4.0-ddmmyyyy-<commit>`, built as rolling works land on
+- Bolide line: `v0.5.0` — the workspace `version` carries `0.5.0` since the
+  Milestone-4 auth, skins & client-mode UI (Bolide tags `alpha-v0.4.1` …
+  `alpha-v0.5.0`: the README security/unsigned-binaries guide, the Microsoft
+  OAuth2 device-flow token chain with sha256-verified authlib-injector
+  auto-fetch for custom Yggdrasil accounts, the account manager modal with a
+  skinview3d 3D character viewer and skin/cape editors, the Launcher/Client
+  mode toggle with the minimal client dashboard and `--server` quick-play
+  joining); Bolide builds carry no API-stability promises (§2).
+- Snapshot line: `v0.5.0-ddmmyyyy-<commit>`, built as rolling works land on
   `main`.
 
 ## 7. Supported build targets
