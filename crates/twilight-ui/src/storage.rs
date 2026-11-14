@@ -25,8 +25,32 @@ pub struct StoragePaths {
     pub instances_dir: String,
     /// True while no explicit instances override is configured.
     pub is_default_instances: bool,
-    /// Transient staging root (`%TEMP%\twilightmc_staging`).
+    /// Transient staging root (`%TEMP%\twilightmc_staging` by default).
     pub staging_root: String,
+    /// Base app data dir every default folder roots under —
+    /// `%APPDATA%\io.github.blackcatofficialytb.twilightmc` on Windows,
+    /// `~/.local/share/…` on Linux, `~/Library/Application Support/…` on
+    /// macOS.
+    pub app_data: String,
+    /// Version metadata & jars folder.
+    pub versions_dir: String,
+    pub is_default_versions: bool,
+    /// Central mods folder / cache.
+    pub mods_dir: String,
+    pub is_default_mods: bool,
+    /// Custom instance icons.
+    pub icons_dir: String,
+    pub is_default_icons: bool,
+    /// Auto-downloaded Java runtimes.
+    pub java_dir: String,
+    pub is_default_java: bool,
+    /// Local skins & cape store.
+    pub skins_dir: String,
+    pub is_default_skins: bool,
+    /// Downloads folder override (staging/temp root); empty = the OS temp.
+    pub downloads_dir: String,
+    /// True while staging uses the OS temp default.
+    pub is_default_staging: bool,
 }
 
 // ---- vendor launchers -------------------------------------------------------
@@ -155,6 +179,28 @@ fn vendor_store_in(dirs: &[PathBuf]) -> Option<PathBuf> {
 
 // ---- roots ------------------------------------------------------------------
 
+/// Resolves one Folders-page entry: the user override when set, else the
+/// default `<app_data>/<name>` subdirectory. Returns `(path, is_default)`.
+fn folder(app_data: &Path, configured: Option<&str>, name: &str) -> (PathBuf, bool) {
+    match configured.map(str::trim).filter(|d| !d.is_empty()) {
+        Some(dir) => (PathBuf::from(dir), false),
+        None => (app_data.join(name), true),
+    }
+}
+
+/// Effective staging root: `<downloads>\twilightmc_staging` when a downloads
+/// folder is configured, else `%TEMP%\twilightmc_staging`.
+pub(crate) fn staging_root_for(downloads_dir: Option<&str>) -> PathBuf {
+    ArtifactStaging::new(
+        downloads_dir
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from),
+    )
+    .root()
+    .to_path_buf()
+}
+
 /// Shared library root for launches: the user-configured dir when set, else
 /// a complete vendor store — adopted in place only while the instances root
 /// is not pinned elsewhere, so libraries and instances stay together — else
@@ -186,59 +232,123 @@ pub(crate) async fn shared_root(app: &AppHandle) -> Result<PathBuf, String> {
         .join("shared"))
 }
 
-/// Storage paths for the Settings page. Both roots go through the same
-/// resolution the scanner and launcher use, so what is shown is what runs.
+/// Storage paths for the Settings page. Every root goes through the same
+/// resolution the scanners and the launcher use, so what is shown is what
+/// runs. Default subfolders under the app data dir are created lazily here;
+/// user overrides are never auto-created.
 #[tauri::command]
 pub async fn get_storage(app: AppHandle) -> Result<StoragePaths, String> {
     let settings = load_settings(&settings_path(&app).await?).await;
-    let shared_configured = settings
-        .shared_dir
-        .as_deref()
-        .map(str::trim)
-        .filter(|d| !d.is_empty())
-        .is_some();
-    let instances_configured = settings
-        .instances_dir
-        .as_deref()
-        .map(str::trim)
-        .filter(|d| !d.is_empty())
-        .is_some();
+    let configured = |value: &Option<String>| {
+        value
+            .as_deref()
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+            .is_some()
+    };
+    let app_data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+
     let shared = shared_root(&app).await?;
     let instances = resolved_instances_root(&app).await?;
+    let (versions, versions_default) =
+        folder(&app_data, settings.versions_dir.as_deref(), "versions");
+    let (mods, mods_default) = folder(&app_data, settings.mods_dir.as_deref(), "mods");
+    let (icons, icons_default) = folder(&app_data, settings.icons_dir.as_deref(), "icons");
+    let (java, java_default) = folder(&app_data, settings.java_dir.as_deref(), "java");
+    let (skins, skins_default) = folder(&app_data, settings.skins_dir.as_deref(), "skins");
+    let downloads_configured = configured(&settings.downloads_dir);
+
+    // lazy creation: only the app-data defaults materialize on demand; a
+    // configured override (e.g. an existing Prism `D:\instances`) is never
+    // touched, so foreign stores stay exactly as they are
+    if versions_default {
+        let _ = tokio::fs::create_dir_all(&versions).await;
+    }
+    if mods_default {
+        let _ = tokio::fs::create_dir_all(&mods).await;
+    }
+    if icons_default {
+        let _ = tokio::fs::create_dir_all(&icons).await;
+    }
+    if java_default {
+        let _ = tokio::fs::create_dir_all(&java).await;
+    }
+    if skins_default {
+        let _ = tokio::fs::create_dir_all(&skins).await;
+    }
+    let _ = tokio::fs::create_dir_all(&app_data).await;
+
     Ok(StoragePaths {
         shared_dir: shared.display().to_string(),
-        is_default_shared: !shared_configured,
+        is_default_shared: !configured(&settings.shared_dir),
         instances_dir: instances.display().to_string(),
-        is_default_instances: !instances_configured,
-        staging_root: ArtifactStaging::new(None).root().display().to_string(),
+        is_default_instances: !configured(&settings.instances_dir),
+        staging_root: staging_root_for(settings.downloads_dir.as_deref())
+            .display()
+            .to_string(),
+        app_data: app_data.display().to_string(),
+        versions_dir: versions.display().to_string(),
+        is_default_versions: versions_default,
+        mods_dir: mods.display().to_string(),
+        is_default_mods: mods_default,
+        icons_dir: icons.display().to_string(),
+        is_default_icons: icons_default,
+        java_dir: java.display().to_string(),
+        is_default_java: java_default,
+        skins_dir: skins.display().to_string(),
+        is_default_skins: skins_default,
+        downloads_dir: settings
+            .downloads_dir
+            .clone()
+            .map(|d| d.trim().to_owned())
+            .filter(|d| !d.is_empty())
+            .unwrap_or_default(),
+        is_default_staging: !downloads_configured,
     })
 }
 
-/// Persists a custom shared library dir; `None`/empty resets to the default.
+/// Persists one Folders-page directory. `kind` is one of `shared`,
+/// `instances`, `versions`, `mods`, `icons`, `java`, `skins`, `downloads`;
+/// `None`/empty resets that folder to its default.
 #[tauri::command]
-pub async fn set_shared_dir(app: AppHandle, path: Option<String>) -> Result<(), String> {
+pub async fn set_folder_dir(
+    app: AppHandle,
+    kind: String,
+    path: Option<String>,
+) -> Result<(), String> {
     let mut settings = load_settings(&settings_path(&app).await?).await;
-    settings.shared_dir = path.map(|p| p.trim().to_owned()).filter(|p| !p.is_empty());
+    let value = path.map(|p| p.trim().to_owned()).filter(|p| !p.is_empty());
+    match kind.as_str() {
+        "shared" => settings.shared_dir = value,
+        "instances" => settings.instances_dir = value,
+        "versions" => settings.versions_dir = value,
+        "mods" => settings.mods_dir = value,
+        "icons" => settings.icons_dir = value,
+        "java" => settings.java_dir = value,
+        "skins" => settings.skins_dir = value,
+        "downloads" => settings.downloads_dir = value,
+        _ => return Err(format!("unknown folder {kind}")),
+    }
     save_settings(&settings_path(&app).await?, &settings).await
 }
 
-/// Persists a custom instances root (e.g. `D:\ins\instances`); `None`/empty
-/// resolves back to the defaults (an existing Prism/Freesm store, else our
-/// library).
+/// Purges the staging area (`%TEMP%\twilightmc_staging`, or
+/// `<downloads>\twilightmc_staging` when a downloads folder is configured);
+/// idempotent.
 #[tauri::command]
-pub async fn set_instances_dir(app: AppHandle, path: Option<String>) -> Result<(), String> {
-    let mut settings = load_settings(&settings_path(&app).await?).await;
-    settings.instances_dir = path.map(|p| p.trim().to_owned()).filter(|p| !p.is_empty());
-    save_settings(&settings_path(&app).await?, &settings).await
-}
-
-/// Purges the staging area (`%TEMP%\twilightmc_staging`); idempotent.
-#[tauri::command]
-pub async fn clean_staging() -> Result<(), String> {
-    ArtifactStaging::new(None)
-        .clean()
-        .await
-        .map_err(|e| e.to_string())
+pub async fn clean_staging(app: AppHandle) -> Result<(), String> {
+    let settings = load_settings(&settings_path(&app).await?).await;
+    ArtifactStaging::new(
+        settings
+            .downloads_dir
+            .as_deref()
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from),
+    )
+    .clean()
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -264,6 +374,57 @@ mod tests {
         assert_eq!(dirs.len(), 2);
         assert!(dirs[0].ends_with("PrismLauncher"));
         assert!(dirs[1].ends_with("FreesmLauncher"));
+    }
+
+    #[test]
+    fn folders_resolve_override_first_else_app_data() {
+        let base = Path::new("/base");
+        // configured override wins and is not default
+        assert_eq!(
+            folder(base, Some(r"D:\ins"), "instances"),
+            (PathBuf::from(r"D:\ins"), false)
+        );
+        // blank/whitespace overrides fall back to the app-data default
+        assert_eq!(
+            folder(base, Some("   "), "skins"),
+            (base.join("skins"), true)
+        );
+        assert_eq!(folder(base, None, "mods"), (base.join("mods"), true));
+        // the whole Folders catalog defaults under the app data dir
+        for name in [
+            "shared",
+            "instances",
+            "versions",
+            "mods",
+            "icons",
+            "java",
+            "skins",
+        ] {
+            assert_eq!(
+                folder(base, None, name),
+                (base.join(name), true),
+                "default for {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn staging_root_follows_the_downloads_override() {
+        // default: the OS temp root
+        assert_eq!(
+            staging_root_for(None),
+            std::env::temp_dir().join("twilightmc_staging")
+        );
+        // blank strings are no override
+        assert_eq!(
+            staging_root_for(Some("   ")),
+            std::env::temp_dir().join("twilightmc_staging")
+        );
+        // configured downloads folder becomes the staging parent
+        assert_eq!(
+            staging_root_for(Some("D:/downloads")),
+            PathBuf::from("D:/downloads").join("twilightmc_staging")
+        );
     }
 
     #[test]

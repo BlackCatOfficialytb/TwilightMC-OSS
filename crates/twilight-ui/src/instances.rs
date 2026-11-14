@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
-use crate::instance::{display_loader, parse_cfg, parse_mmc_pack, resolved_instances_root};
+use crate::instance::{
+    display_loader, normalize_epoch, parse_cfg, parse_mmc_pack, resolved_instances_root,
+};
 
 /// Instance metadata persisted as `twilight.json` inside the instance dir.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,12 +68,15 @@ pub(crate) fn slugify(name: &str) -> String {
 }
 
 /// Reads the instance metadata, accepting both the canonical `instance.json`
-/// and the legacy `twilight.json`.
+/// and the legacy `twilight.json`. `last_played` is normalized to seconds on
+/// the way in — hand-edited or foreign files may carry a 13-digit
+/// millisecond stamp, which would otherwise render as year 58739.
 pub(crate) async fn read_meta(instance_dir: &Path) -> Option<InstanceMeta> {
     for file in ["instance.json", "twilight.json"] {
         if let Ok(data) = tokio::fs::read_to_string(instance_dir.join(file)).await
-            && let Ok(meta) = serde_json::from_str::<InstanceMeta>(&data)
+            && let Ok(mut meta) = serde_json::from_str::<InstanceMeta>(&data)
         {
+            meta.last_played = normalize_epoch(meta.last_played);
             return Some(meta);
         }
     }
@@ -660,6 +665,33 @@ mod tests {
         touch_last_played(&root, "sky-factory", 0).await;
         let rows = get_instances_in(&root).await.unwrap();
         assert!(rows[0].last_played > 0);
+    }
+
+    #[tokio::test]
+    async fn read_meta_normalizes_millisecond_last_played() {
+        let root = temp_root();
+        let dir = root.join("hand-edited");
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        // a hand-edited (or foreign) metadata file with a 13-digit ms stamp
+        tokio::fs::write(
+            dir.join("instance.json"),
+            r#"{"version":"1.21.4","name":"Hand Edited","last_played":1794642000000,"total_time_played":300}"#,
+        )
+        .await
+        .unwrap();
+        let meta = read_meta(&dir).await.unwrap();
+        assert_eq!(meta.last_played, 1_794_642_000, "ms stamp read as seconds");
+        assert_eq!(meta.total_time_played, 300);
+        // plain seconds values stay untouched
+        let legacy = root.join("legacy-secs");
+        tokio::fs::create_dir_all(&legacy).await.unwrap();
+        tokio::fs::write(
+            legacy.join("twilight.json"),
+            r#"{"version":"1.21.4","last_played":1699999999}"#,
+        )
+        .await
+        .unwrap();
+        assert_eq!(read_meta(&legacy).await.unwrap().last_played, 1_699_999_999);
     }
 
     #[tokio::test]

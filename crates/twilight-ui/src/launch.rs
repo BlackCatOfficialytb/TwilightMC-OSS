@@ -81,6 +81,18 @@ async fn kill_pid(pid: u32) -> Result<(), String> {
 }
 
 async fn run(app: &AppHandle, instance_id: &str, server: Option<String>) -> Result<i32, String> {
+    // Prism/Freesm-style diagnostic header: the console drawer starts with the
+    // launcher identity line, exactly like "Prism Launcher 8.0 (official)".
+    let _ = app.emit(
+        "launch-log",
+        LaunchLine {
+            stream: "stdout",
+            line: format!(
+                "TwilightMC Bolide version: alpha-v{} (official)",
+                env!("CARGO_PKG_VERSION")
+            ),
+        },
+    );
     // the grid scans the resolved root (instances_dir override -> Prism
     // default -> shared library); launch MUST resolve the very same root or
     // every instance living outside the shared library is "unknown"
@@ -155,7 +167,13 @@ async fn run(app: &AppHandle, instance_id: &str, server: Option<String>) -> Resu
         username,
         instance_dir: Some(instance_dir),
         shared_dir,
-        temp_dir: None,
+        // the Folders page's Downloads entry overrides the staging/temp root
+        temp_dir: settings
+            .downloads_dir
+            .as_deref()
+            .map(str::trim)
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from),
         java: settings
             .java_path
             .filter(|p| !p.trim().is_empty())

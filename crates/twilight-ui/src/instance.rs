@@ -69,7 +69,8 @@ pub(crate) fn parse_cfg(text: &str) -> BTreeMap<String, String> {
     map
 }
 
-/// Parses a `lastLaunchTime` into epoch seconds: plain numbers pass through,
+/// Parses a `lastLaunchTime` into epoch seconds: plain numbers are
+/// normalized (Prism/MultiMC write milliseconds — see [`normalize_epoch`]),
 /// otherwise a tolerant ISO read (`T`/space separator, optional fraction,
 /// optional `Z`/`±HH:MM`/`±HHMM` zone).
 pub(crate) fn epoch_secs(text: &str) -> Option<u64> {
@@ -77,8 +78,8 @@ pub(crate) fn epoch_secs(text: &str) -> Option<u64> {
     if text.is_empty() {
         return None;
     }
-    if let Ok(secs) = text.parse::<u64>() {
-        return Some(secs);
+    if let Ok(raw) = text.parse::<u64>() {
+        return Some(normalize_epoch(raw));
     }
 
     // digit groups in order: y, m, d, then optionally h, m, s
@@ -106,6 +107,19 @@ pub(crate) fn epoch_secs(text: &str) -> Option<u64> {
     let secs =
         days_from_civil(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second - offset;
     u64::try_from(secs).ok()
+}
+
+/// Normalizes a raw epoch value into seconds. Prism/MultiMC's `instance.cfg`
+/// stores `lastLaunchTime` in **milliseconds** while `totalTimePlayed` counts
+/// seconds; a value above `10_000_000_000` (past year 2286 in seconds, yet
+/// still 1970+ in milliseconds) is therefore milliseconds and divides down —
+/// otherwise a 13-digit stamp renders as the year 58739.
+pub(crate) fn normalize_epoch(raw: u64) -> u64 {
+    if raw > 10_000_000_000 {
+        raw / 1000
+    } else {
+        raw
+    }
 }
 
 /// Seconds east of UTC from the trailing zone of an ISO timestamp. Only
@@ -547,6 +561,50 @@ mod tests {
         assert_eq!(epoch_secs("not-a-time"), None);
     }
 
+    #[test]
+    fn plain_millisecond_stamps_normalize_to_seconds() {
+        // a real 13-digit Prism stamp: 1_794_642_000_000 ms = 2026-11-14T07:40Z.
+        // Read as seconds this used to render as the year 58739.
+        assert_eq!(epoch_secs("1794642000000"), Some(1_794_642_000));
+        // plain seconds (Prism <1.x era and our own instance.json) pass through
+        assert_eq!(epoch_secs("1699999999"), Some(1_699_999_999));
+        assert_eq!(epoch_secs("0"), Some(0));
+        assert_eq!(epoch_secs("42"), Some(42));
+    }
+
+    #[test]
+    fn prism_millisecond_last_launch_lands_in_the_202x_decade() {
+        let secs = epoch_secs("1794642000000").unwrap();
+        let (year, month, day) = civil_from_days((secs / 86_400) as i64);
+        assert!(
+            (2020..=2030).contains(&year),
+            "13-digit ms stamp must be a 202x date, got {year}"
+        );
+        assert_eq!((year, month, day), (2026, 11, 14));
+        // sanity: an unnormalized value read as seconds lands in the far
+        // future — the same overflow that rendered year 58739 in the UI
+        let (broken_year, ..) = civil_from_days(1_794_642_000_000_i64 / 86_400);
+        assert!(
+            broken_year > 50_000,
+            "an unnormalized 13-digit stamp must be absurd, got {broken_year}"
+        );
+    }
+
+    /// Howard Hinnant's `civil_from_days` — inverse of [`days_from_civil`],
+    /// test-only calendar check.
+    fn civil_from_days(z: i64) -> (i64, u32, u32) {
+        let z = z + 719_468;
+        let era = z.div_euclid(146_097);
+        let doe = z - era * 146_097; // [0, 146096]
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+        let y = yoe + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+        let mp = (5 * doy + 2) / 153; // [0, 11]
+        let d = (doy - (153 * mp + 2) / 5 + 1) as u32; // [1, 31]
+        let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32; // [1, 12]
+        (y + (m <= 2) as i64, m, d)
+    }
+
     fn lib() -> (PathBuf, PathBuf) {
         let root = std::env::temp_dir().join(format!(
             "twi-scan-test-{}-{}",
@@ -635,6 +693,37 @@ mod tests {
                 .unwrap();
         assert_eq!(parse_mmc_pack(&neoforge).1.unwrap().0, "neoforge");
         assert_eq!(display_loader(Some("neoforge")), "NeoForge");
+    }
+
+    #[tokio::test]
+    async fn scan_normalizes_prism_millisecond_last_launch() {
+        let (lib_root, root) = lib();
+        let prism = root.join("ms-stamp-pack");
+        std::fs::create_dir_all(&prism).unwrap();
+        // real Prism shape: 13-digit millisecond lastLaunchTime, seconds count
+        std::fs::write(
+            prism.join("instance.cfg"),
+            "InstanceType=OneSix\nname=MS Stamp Pack\nlastLaunchTime=1794642000000\ntotalTimePlayed=5400\n",
+        )
+        .unwrap();
+        std::fs::write(
+            prism.join("mmc-pack.json"),
+            r#"{"formatVersion":1,"components":[{"uid":"net.minecraft","version":"1.21.4"}]}"#,
+        )
+        .unwrap();
+        let _ = &lib_root;
+
+        let scanned = scan_instances_in(&root).await.unwrap();
+        assert_eq!(scanned.len(), 1, "{scanned:?}");
+        let row = &scanned[0];
+        // 1_794_642_000_000 ms → 1_794_642_000 s (2026-11-14), NOT year 58739
+        assert_eq!(row.last_played, 1_794_642_000);
+        let (year, ..) = civil_from_days((row.last_played / 86_400) as i64);
+        assert!(
+            (2020..=2030).contains(&year),
+            "scanned stamp must be a 202x date, got {year}"
+        );
+        assert_eq!(row.total_time_played, 5400, "seconds field stays seconds");
     }
 
     #[tokio::test]

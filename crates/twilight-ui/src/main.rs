@@ -101,8 +101,7 @@ fn main() {
             prefs::get_mode_config,
             prefs::set_mode_config,
             storage::get_storage,
-            storage::set_shared_dir,
-            storage::set_instances_dir,
+            storage::set_folder_dir,
             storage::clean_staging
         ])
         .run(tauri::generate_context!())

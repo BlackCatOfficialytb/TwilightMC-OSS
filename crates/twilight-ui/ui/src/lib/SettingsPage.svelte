@@ -32,10 +32,8 @@
     onback,
     onscanjava,
     onsaveprefs,
-    onsaveshared,
-    onresetshared,
-    onsaveinstances,
-    onresetinstances,
+    onsavefolder,
+    onopenfolder,
     oncleanstaging,
     onopenurl,
   } = $props();
@@ -43,7 +41,7 @@
   const sections = [
     { id: 'appearance', label: 'Appearance', icon: '🎨' },
     { id: 'java', label: 'Java & Memory', icon: '☕' },
-    { id: 'storage', label: 'Storage & Staging', icon: '📁' },
+    { id: 'storage', label: 'Folders', icon: '📁' },
     { id: 'about', label: 'About & Updates', icon: 'ℹ️' },
   ];
   let section = $state('appearance');
@@ -127,6 +125,51 @@
     } catch {
       return null;
     }
+  }
+
+  // ---- folders (the former Storage & Staging page) ----
+  // Eight configurable roots; blank inputs keep the default subdirectory
+  // under the app data folder (`io.github.blackcatofficialytb.twilightmc`).
+  const FOLDERS = [
+    { key: 'instances', label: 'Instances', hint: 'Instance library; adopts an existing Prism or FreesmLauncher store when present' },
+    { key: 'shared', label: 'Shared Libraries & Assets', hint: 'The artifact library launches draw from' },
+    { key: 'versions', label: 'Versions', hint: 'Version metadata & jars' },
+    { key: 'mods', label: 'Mods', hint: 'Central mods folder / cache' },
+    { key: 'icons', label: 'Icons', hint: 'Custom instance icons' },
+    { key: 'java', label: 'Java Runtimes', hint: 'Auto-downloaded Java' },
+    { key: 'skins', label: 'Skins', hint: 'Local skins & free capes store' },
+    { key: 'downloads', label: 'Downloads', hint: 'Downloads & temporary staging' },
+  ];
+
+  // Per-row editable text; blank = default. Re-seeded from the backend
+  // whenever fresh storage paths arrive (open, save, reset).
+  let folderInputs = $state({});
+
+  $effect(() => {
+    if (!storage) return;
+    folderInputs = {
+      instances: storage.is_default_instances ? '' : storage.instances_dir,
+      shared: storage.is_default_shared ? '' : storage.shared_dir,
+      versions: storage.is_default_versions ? '' : storage.versions_dir,
+      mods: storage.is_default_mods ? '' : storage.mods_dir,
+      icons: storage.is_default_icons ? '' : storage.icons_dir,
+      java: storage.is_default_java ? '' : storage.java_dir,
+      skins: storage.is_default_skins ? '' : storage.skins_dir,
+      // the backend only reports the configured override here (empty = default)
+      downloads: storage.downloads_dir || '',
+    };
+  });
+
+  // The path that actually runs for a row; downloads shows the effective
+  // staging root rather than the raw override.
+  function resolvedPath(key) {
+    if (!storage) return '';
+    return key === 'downloads' ? storage.staging_root : storage[`${key}_dir`];
+  }
+
+  function isDefault(key) {
+    if (!storage) return true;
+    return key === 'downloads' ? storage.is_default_staging : storage[`is_default_${key}`];
   }
 
   const REPO = 'https://github.com/BlackCatOfficialytb/TwilightMC-OSS';
@@ -409,108 +452,97 @@
           Save Java settings
         </button>
       {:else if section === 'storage'}
-        <h2 class="text-[16px] font-semibold">Storage &amp; Staging</h2>
+        <h2 class="text-[16px] font-semibold">Folders</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">
-          Where the shared artifact library lives and where launch scratch files stage.
+          Where instances, libraries, mods and downloads live. Blank inputs keep the default under the app data folder.
         </p>
 
         {#if storage}
           <div class="mt-6 rounded border border-(--border) bg-(--bg-subtle) p-4">
-            <div class="text-[12px] font-medium">Shared library <span class="font-normal text-(--text-muted)">{storage.is_default_shared ? '(default)' : '(custom)'}</span></div>
-            <div class="mt-3 flex gap-2">
-              <input
-                class="h-9 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-canvas) px-2.5 font-mono text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-                placeholder={storage.shared_dir}
-                bind:value={sharedInput}
-              />
-              <button
-                class="rounded border border-(--border) px-3 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
-                title="Pick the shared libraries directory"
-                onclick={async () => {
-                  const picked = await browseDir(sharedInput);
-                  if (picked) sharedInput = picked;
-                }}
-              >
-                Browse…
-              </button>
-              <button
-                class="rounded bg-(--accent) px-4 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
-                disabled={storageBusy}
-                onclick={onsaveshared}
-              >
-                Save
-              </button>
-              {#if !storage.is_default_shared}
-                <button
-                  class="rounded px-4 text-[12px] text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main) disabled:opacity-40"
-                  disabled={storageBusy}
-                  onclick={onresetshared}
-                >
-                  Reset
-                </button>
-              {/if}
-            </div>
-          </div>
-
-          <div class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-4">
-            <div class="text-[12px] font-medium">Instances library <span class="font-normal text-(--text-muted)">{storage.is_default_instances ? '(default)' : '(override)'}</span></div>
-            <div class="mt-3 flex gap-2">
-              <input
-                class="h-9 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-canvas) px-2.5 font-mono text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-                placeholder={storage.instances_dir}
-                bind:value={instancesInput}
-              />
-              <button
-                class="rounded border border-(--border) px-3 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
-                title="Pick the instances directory"
-                onclick={async () => {
-                  const picked = await browseDir(instancesInput);
-                  if (picked) instancesInput = picked;
-                }}
-              >
-                Browse…
-              </button>
-              <button
-                class="rounded bg-(--accent) px-4 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
-                disabled={storageBusy}
-                title="Rescans the grid from this directory"
-                onclick={onsaveinstances}
-              >
-                Save
-              </button>
-              {#if !storage.is_default_instances}
-                <button
-                  class="rounded px-4 text-[12px] text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main) disabled:opacity-40"
-                  disabled={storageBusy}
-                  onclick={onresetinstances}
-                >
-                  Reset
-                </button>
-              {/if}
-            </div>
-            <p class="mt-2 text-[11px] text-(--text-muted)">
-              Without an override the grid adopts an existing Prism or FreesmLauncher library when one is present.
-            </p>
-          </div>
-
-          <div class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-4">
             <div class="flex items-center justify-between gap-3">
               <div class="min-w-0">
-                <div class="text-[12px] font-medium">Staging area</div>
-                <div class="mt-2 truncate font-mono text-[12px] text-(--text-muted)" title={storage.staging_root}>
-                  {storage.staging_root}
+                <div class="text-[12px] font-medium">App data folder</div>
+                <div class="mt-2 truncate font-mono text-[12px] text-(--text-muted)" title={storage.app_data}>
+                  {storage.app_data}
                 </div>
               </div>
               <button
-                class="shrink-0 rounded px-4 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main) disabled:opacity-40"
-                disabled={storageBusy || gameRunning}
-                title={gameRunning ? 'Unavailable while a game is running' : 'Purges the staging area'}
-                onclick={oncleanstaging}
+                class="shrink-0 rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
+                title="Open the app data folder in the file explorer"
+                onclick={() => onopenfolder?.(storage.app_data)}
               >
-                Purge staging
+                Open
               </button>
             </div>
           </div>
+
+          {#each FOLDERS as f (f.key)}
+            <div class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-4">
+              <div class="flex items-center justify-between gap-3">
+                <div class="text-[12px] font-medium">
+                  {f.label}
+                  <span class="font-normal text-(--text-muted)">{isDefault(f.key) ? '(default)' : '(custom)'}</span>
+                </div>
+                {#if !isDefault(f.key)}
+                  <button
+                    class="rounded px-4 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main) disabled:opacity-40"
+                    disabled={storageBusy}
+                    title="Back to the default app-data subdirectory"
+                    onclick={() => onsavefolder?.(f.key, '')}
+                  >
+                    Reset
+                  </button>
+                {/if}
+              </div>
+              <p class="mt-0.5 text-[11px] text-(--text-muted)">{f.hint}</p>
+              <div class="mt-3 flex gap-2">
+                <input
+                  class="h-9 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-canvas) px-2.5 font-mono text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+                  placeholder={resolvedPath(f.key)}
+                  bind:value={folderInputs[f.key]}
+                />
+                <button
+                  class="rounded border border-(--border) px-3 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
+                  title="Pick a directory"
+                  onclick={async () => {
+                    const picked = await browseDir(folderInputs[f.key]);
+                    if (picked) folderInputs[f.key] = picked;
+                  }}
+                >
+                  Browse…
+                </button>
+                <button
+                  class="rounded border border-(--border) px-3 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
+                  title="Open this folder in the file explorer"
+                  onclick={() => onopenfolder?.(resolvedPath(f.key))}
+                >
+                  Open
+                </button>
+                <button
+                  class="rounded bg-(--accent) px-4 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
+                  disabled={storageBusy}
+                  onclick={() => onsavefolder?.(f.key, folderInputs[f.key])}
+                >
+                  Save
+                </button>
+              </div>
+              {#if f.key === 'downloads'}
+                <div class="mt-2 flex items-center justify-between gap-3">
+                  <div class="min-w-0 truncate font-mono text-[11px] text-(--text-muted)" title={storage.staging_root}>
+                    Staging: {storage.staging_root}
+                  </div>
+                  <button
+                    class="shrink-0 rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main) disabled:opacity-40"
+                    disabled={storageBusy || gameRunning}
+                    title={gameRunning ? 'Unavailable while a game is running' : 'Purges the staging area'}
+                    onclick={oncleanstaging}
+                  >
+                    Purge staging
+                  </button>
+                </div>
+              {/if}
+            </div>
+          {/each}
         {/if}
       {:else}
         <h2 class="text-[16px] font-semibold">About &amp; Updates</h2>

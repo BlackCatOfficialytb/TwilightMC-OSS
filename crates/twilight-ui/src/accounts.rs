@@ -39,6 +39,23 @@ pub(crate) struct Settings {
     /// UI mode: `launcher` (full library) or `client` (minimal dashboard).
     #[serde(default)]
     pub(crate) mode: Option<String>,
+    /// Folder overrides from the Folders settings page; `None`/empty =
+    /// the default subdirectory under the app data dir
+    /// (`io.github.blackcatofficialytb.twilightmc`).
+    #[serde(default)]
+    pub(crate) versions_dir: Option<String>,
+    #[serde(default)]
+    pub(crate) mods_dir: Option<String>,
+    #[serde(default)]
+    pub(crate) icons_dir: Option<String>,
+    #[serde(default)]
+    pub(crate) java_dir: Option<String>,
+    #[serde(default)]
+    pub(crate) skins_dir: Option<String>,
+    /// Overrides the staging/temp root: staging becomes
+    /// `<downloads_dir>\twilightmc_staging` instead of `%TEMP%\…`.
+    #[serde(default)]
+    pub(crate) downloads_dir: Option<String>,
 }
 
 async fn app_dir(app: &AppHandle) -> Result<PathBuf, String> {
