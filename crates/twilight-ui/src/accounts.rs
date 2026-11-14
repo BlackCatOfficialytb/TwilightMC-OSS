@@ -36,6 +36,9 @@ pub(crate) struct Settings {
     /// the default public client id.
     #[serde(default)]
     pub(crate) msa_client_id: Option<String>,
+    /// UI mode: `launcher` (full library) or `client` (minimal dashboard).
+    #[serde(default)]
+    pub(crate) mode: Option<String>,
 }
 
 async fn app_dir(app: &AppHandle) -> Result<PathBuf, String> {

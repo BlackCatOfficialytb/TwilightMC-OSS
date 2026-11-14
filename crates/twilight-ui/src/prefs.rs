@@ -60,3 +60,20 @@ pub async fn set_theme_config(app: AppHandle, theme: String) -> Result<(), Strin
     settings.theme = Some(theme);
     save_settings(&settings_path(&app).await?, &settings).await
 }
+
+#[tauri::command]
+pub async fn get_mode_config(app: AppHandle) -> Result<String, String> {
+    let settings = load_settings(&settings_path(&app).await?).await;
+    Ok(settings.mode.unwrap_or_else(|| "launcher".to_owned()))
+}
+
+/// Persists the Launcher/Client mode toggle (`launcher` | `client`).
+#[tauri::command]
+pub async fn set_mode_config(app: AppHandle, mode: String) -> Result<(), String> {
+    if mode != "launcher" && mode != "client" {
+        return Err("mode must be 'launcher' or 'client'".into());
+    }
+    let mut settings = load_settings(&settings_path(&app).await?).await;
+    settings.mode = Some(mode);
+    save_settings(&settings_path(&app).await?, &settings).await
+}

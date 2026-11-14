@@ -7,6 +7,7 @@
   import InstanceContextPanel from './lib/InstanceContextPanel.svelte';
   import SettingsPage from './lib/SettingsPage.svelte';
   import AccountManagerModal from './lib/AccountManagerModal.svelte';
+  import ClientModePage from './lib/ClientModePage.svelte';
   import { topOverlay } from './lib/overlays.js';
   import { isDarkTheme, loadSavedAccent, normalizeThemeId, applyTheme } from './lib/theme';
 
@@ -39,6 +40,17 @@
 
   // ---- sidebar / navigation ----
   let sidebarExpanded = $state(false);
+
+  // Launcher (full library) vs Client (minimal dashboard) mode; persisted in
+  // localStorage for fast first paint and mirrored into settings.json.
+  let mode = $state(
+    localStorage.getItem('twilight-mode') === 'client' ? 'client' : 'launcher'
+  );
+
+  $effect(() => {
+    localStorage.setItem('twilight-mode', mode);
+    window.__TAURI__?.core.invoke('set_mode_config', { mode }).catch(() => {});
+  });
 
   const nav = [
     { id: 'instances', label: 'Instances', icon: '▦' },
@@ -231,16 +243,16 @@
     selectedId = id;
   }
 
-  async function launchInstance(id) {
+  async function launchInstance(id, server = null) {
     if (gameRunning) return;
     const inst = instances.find((i) => i.id === id);
     const label = inst ? inst.name : id;
     gameRunning = true;
-    status = `Running ${label}…`;
+    status = server ? `Running ${label} → ${server}…` : `Running ${label}…`;
     drawerOpen = true;
     logLine({ stream: 'stdout', line: `launching ${label}…` });
     try {
-      const code = await api('launch_instance', { instanceId: id });
+      const code = await api('launch_instance', { instanceId: id, server });
       logLine({ stream: 'stdout', line: `launcher reports exit code ${code}` });
       await loadInstances();
       status = 'Ready';
@@ -627,6 +639,7 @@
           onclick={() => {
             active = item.id;
             editFor = null;
+            mode = 'launcher'; // navigation lives in the launcher dashboard
             if (item.id === 'settings') {
               loadPrefs();
               if (!storage) loadStorage();
@@ -700,13 +713,40 @@
         {:else}
           <span class="rounded bg-(--accent)/15 px-2 py-0.5 text-xs font-medium text-(--accent)">TwilightMC Bolide (alpha-v{version})</span>
           <span class="rounded bg-(--accent-star)/15 px-1.5 py-0.5 text-[10px] font-medium text-(--accent-star)">pre-release UI</span>
+          <!-- Launcher | Client mode toggle -->
+          <div class="ml-2 flex overflow-hidden rounded border border-(--border)" role="tablist">
+            {#each [['launcher', 'Launcher'], ['client', 'Client']] as [id, label]}
+              <button
+                class="px-3 py-1 text-[11px] font-semibold tracking-wide {mode === id
+                  ? 'bg-(--accent) text-(--on-accent)'
+                  : 'text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)'}"
+                role="tab"
+                aria-selected={mode === id}
+                onclick={() => (mode = id)}
+              >
+                {label}
+              </button>
+            {/each}
+          </div>
         {/if}
       </div>
       <span class="text-xs text-(--text-muted)">{status}</span>
     </header>
 
     <main class="min-w-0 flex-1 overflow-y-auto p-6">
-      {#if currentView === 'edit' && editFor}
+      {#if mode === 'client'}
+        <!-- client dashboard: minimal quick-launch hub -->
+        <ClientModePage
+          instances={instances}
+          active={activeAccount}
+          {gameRunning}
+          {status}
+          onlaunch={launchInstance}
+          onopenconsole={() => (drawerOpen = true)}
+          onrefresh={refreshAccounts}
+          onopenaccounts={() => (modalOpen = true)}
+        />
+      {:else if currentView === 'edit' && editFor}
         <!-- full-page instance editor: grid and context panel stay behind -->
         <EditInstancePage
           instance={editFor}

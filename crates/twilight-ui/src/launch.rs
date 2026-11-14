@@ -29,9 +29,13 @@ static GAME_PID: AtomicU32 = AtomicU32::new(0);
 
 /// Launches the instance `instance_id` from the shared instance library with
 /// the UI storage layout: shared artifacts live under the app data dir,
-/// staging stays in the OS temp.
+/// staging stays in the OS temp. `server` quick-joins an address (`--server`).
 #[tauri::command]
-pub async fn launch_instance(app: AppHandle, instance_id: String) -> Result<i32, String> {
+pub async fn launch_instance(
+    app: AppHandle,
+    instance_id: String,
+    server: Option<String>,
+) -> Result<i32, String> {
     if RUNNING
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
         .is_err()
@@ -39,7 +43,7 @@ pub async fn launch_instance(app: AppHandle, instance_id: String) -> Result<i32,
         return Err("a game is already running".to_owned());
     }
 
-    let result = run(&app, &instance_id).await;
+    let result = run(&app, &instance_id, server).await;
     GAME_PID.store(0, Ordering::SeqCst);
     RUNNING.store(false, Ordering::SeqCst);
     result
@@ -76,7 +80,7 @@ async fn kill_pid(pid: u32) -> Result<(), String> {
     }
 }
 
-async fn run(app: &AppHandle, instance_id: &str) -> Result<i32, String> {
+async fn run(app: &AppHandle, instance_id: &str, server: Option<String>) -> Result<i32, String> {
     // the grid scans the resolved root (instances_dir override -> Prism
     // default -> shared library); launch MUST resolve the very same root or
     // every instance living outside the shared library is "unknown"
@@ -160,6 +164,7 @@ async fn run(app: &AppHandle, instance_id: &str) -> Result<i32, String> {
         loader_version: meta.loader_version,
         jvm_args,
         account,
+        server,
         dry_run: false,
     };
 

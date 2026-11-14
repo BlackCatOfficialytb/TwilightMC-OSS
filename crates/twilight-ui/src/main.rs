@@ -98,6 +98,8 @@ fn main() {
             prefs::set_java_prefs,
             prefs::get_theme_config,
             prefs::set_theme_config,
+            prefs::get_mode_config,
+            prefs::set_mode_config,
             storage::get_storage,
             storage::set_shared_dir,
             storage::set_instances_dir,

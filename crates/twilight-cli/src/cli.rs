@@ -91,6 +91,9 @@ pub struct LaunchArgs {
     /// Print the assembled command and exit; no downloads, no natives writes, no spawn.
     #[arg(long)]
     pub dry_run: bool,
+    /// Join this server right after the game starts (`--server` quick play).
+    #[arg(long, value_name = "ADDRESS")]
+    pub server: Option<String>,
 }
 
 /// Fully resolved launch configuration (clap types do not leak further).
@@ -106,6 +109,8 @@ pub struct LaunchConfig {
     pub loader_version: Option<String>,
     /// Extra JVM arguments appended after the manifest's own (`-Xms`/`-Xmx`).
     pub jvm_args: Vec<String>,
+    /// Quick-play: join this server address right after the game starts.
+    pub server: Option<String>,
     /// Full account profile to launch with. `None` = offline account from
     /// `username` (the CLI default); the desktop UI passes the active account
     /// so Microsoft tokens and custom Yggdrasil servers reach the pipeline.
@@ -136,6 +141,7 @@ impl LaunchArgs {
             loader_version: self.loader_version.clone(),
             jvm_args: Vec::new(),
             account: None,
+            server: self.server.clone(),
             dry_run: self.dry_run,
         })
     }

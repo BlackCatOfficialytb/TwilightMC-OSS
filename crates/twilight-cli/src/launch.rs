@@ -16,7 +16,7 @@ use twilight_downloader::{
 };
 use twilight_horizon::AssetStore;
 use twilight_launch::{
-    GameOptions, LaunchEvent, LaunchPlan, ProfileVars, active_paths, classpath_string,
+    GameOptions, LaunchEvent, LaunchPlan, ProfileVars, QuickPlay, active_paths, classpath_string,
     game_arguments, inject_account_vars, jvm_arguments, separator,
 };
 use twilight_manifest::{RuntimeContext, VersionFile};
@@ -169,6 +169,7 @@ pub fn assemble_command(
     paths: &LaunchPaths,
     account: &Account,
     loader: Option<&LoaderProfile>,
+    game_options: &GameOptions,
 ) -> Result<LaunchPlan, CliError> {
     let none = BTreeSet::<String>::new();
     let (vanilla_entries, _native_jars) =
@@ -211,7 +212,7 @@ pub fn assemble_command(
     let manifest_supplies_classpath = jvm_args
         .iter()
         .any(|arg| arg == "-cp" || arg == "-classpath");
-    let game_args = game_arguments(version, ctx, &none, &none, &vars, &GameOptions::default());
+    let game_args = game_arguments(version, ctx, &none, &none, &vars, game_options);
 
     // the Knot main class takes over whenever a loader profile was resolved;
     // without one the manifest's own main class is mandatory
@@ -424,6 +425,14 @@ pub async fn run_launch_with(
         .account
         .clone()
         .unwrap_or_else(|| Account::offline(cfg.username.clone()));
+    let game_options = GameOptions {
+        quick_play: QuickPlay {
+            server_address: cfg.server.clone(),
+            server_port: None,
+            world: None,
+        },
+        ..Default::default()
+    };
     let client = reqwest::Client::new();
 
     // ---- metadata first: required majors and paths depend on the manifest
@@ -486,6 +495,7 @@ pub async fn run_launch_with(
             &paths,
             &account,
             loader_profile.as_ref(),
+            &game_options,
         )?;
         let mut plan = plan;
         plan.jvm_args.extend(cfg.jvm_args.clone());
@@ -599,6 +609,7 @@ pub async fn run_launch_with(
         &paths,
         &account,
         loader_profile.as_ref(),
+        &game_options,
     )?;
     let mut plan = plan;
     plan.jvm_args.extend(cfg.jvm_args);
@@ -707,6 +718,7 @@ mod tests {
             loader_version: None,
             jvm_args: Vec::new(),
             account: None,
+            server: None,
             dry_run: true,
         }
     }
@@ -728,7 +740,16 @@ mod tests {
     fn assemble_for(json: &str) -> (LaunchPlan, LaunchPaths) {
         let version = twilight_manifest::parse_version_file(json).unwrap();
         let paths = resolve_paths(&cfg(), &version);
-        let plan = assemble_command(&java(), &ctx(), &version, &paths, &account(), None).unwrap();
+        let plan = assemble_command(
+            &java(),
+            &ctx(),
+            &version,
+            &paths,
+            &account(),
+            None,
+            &GameOptions::default(),
+        )
+        .unwrap();
         (plan, paths)
     }
 
@@ -815,8 +836,16 @@ mod tests {
     fn manifest_without_main_class_is_rejected() {
         let version = twilight_manifest::parse_version_file(r#"{ "id": "x" }"#).unwrap();
         let paths = resolve_paths(&cfg(), &version);
-        let err =
-            assemble_command(&java(), &ctx(), &version, &paths, &account(), None).unwrap_err();
+        let err = assemble_command(
+            &java(),
+            &ctx(),
+            &version,
+            &paths,
+            &account(),
+            None,
+            &GameOptions::default(),
+        )
+        .unwrap_err();
         assert!(
             matches!(err, CliError::NoMainClass { ref id } if id == "x"),
             "{err:?}"
@@ -830,6 +859,39 @@ mod tests {
         assert!(paths.natives_dir.ends_with("staging/natives/26.3"));
         assert!(paths.library_root.ends_with("libraries"));
         assert!(paths.assets_root.ends_with("assets"));
+    }
+
+    #[test]
+    fn quick_play_server_lands_in_the_game_args() {
+        let version = twilight_manifest::parse_version_file(MODERN).unwrap();
+        let paths = resolve_paths(&cfg(), &version);
+        let options = GameOptions {
+            quick_play: QuickPlay {
+                server_address: Some("mc.example.net".into()),
+                server_port: None,
+                world: None,
+            },
+            ..Default::default()
+        };
+        let plan = assemble_command(
+            &java(),
+            &ctx(),
+            &version,
+            &paths,
+            &account(),
+            None,
+            &options,
+        )
+        .unwrap();
+        // without the multiplayer trait the legacy --server/--port form fires
+        let at = plan
+            .game_args
+            .iter()
+            .position(|a| a == "--server")
+            .expect("quick play target present");
+        assert_eq!(plan.game_args[at + 1], "mc.example.net");
+        assert_eq!(plan.game_args[at + 2], "--port");
+        assert_eq!(plan.game_args[at + 3], "25565");
     }
 
     #[test]
@@ -881,6 +943,7 @@ mod tests {
             &paths,
             &account(),
             Some(&profile),
+            &GameOptions::default(),
         )
         .unwrap();
 
