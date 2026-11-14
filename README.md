@@ -245,6 +245,60 @@ gates run, then the same eight-target matrix generates
 `twilight-<tag>-<target>.zip/.tar.gz` archives and attaches them to the
 release — except the `snapshot` tag, whose files snapshot.yml supplies itself.
 
+## Security & unsigned binaries
+
+Every TwilightMC build — all four channels (`Stable`, `Star`, `Bolide` and
+`Snapshot`) — is currently **unsigned**: we do not yet ship a commercial
+code-signing certificate, so Windows SmartScreen and macOS Gatekeeper will
+warn the first time you run a downloaded binary. Nothing is wrong with the
+archive; it simply has no third-party signature attached yet.
+
+There is no trust gap to bridge, because every binary is compiled
+reproducibly, straight from public open-source commits, by the public GitHub
+Actions workflows in [`.github/workflows/`](.github/workflows/) — the exact
+artifacts the runners produce are attached to the releases, and the workflow
+source is auditable commit by commit.
+
+### Verify the archive you downloaded
+
+Each release ships a `checksums.sha256` covering every archive. Compare your
+download before opening it:
+
+Windows (PowerShell, run inside the download folder):
+
+```powershell
+# check one archive against the published digest
+Get-FileHash .\twilight-alpha-v0.4.0-windows-msvc-x86_64.zip -Algorithm SHA256
+
+# or verify every archive against checksums.sha256 at once
+Get-Content .\checksums.sha256 | ForEach-Object {
+    $parts = $_ -split '  ', 2
+    $hash = (Get-FileHash $parts[1].Trim() -Algorithm SHA256).Hash.ToLower()
+    "$($hash -eq $parts[0]) $($parts[1].Trim())"
+}
+```
+
+Linux, macOS and FreeBSD (run inside the download folder):
+
+```sh
+sha256sum -c checksums.sha256      # GNU coreutils (Linux), BusyBox, or `shasum -a 256 -c` on macOS
+```
+
+### Bypass the "unknown publisher" warnings
+
+Windows SmartScreen: when the *Windows protected your PC* dialog appears,
+click **More info**, then **Run anyway**.
+
+macOS Gatekeeper: if macOS refuses to open the binary, open
+**System Settings → Privacy & Security** and click **Open Anyway** next to
+the blocked app, or from a terminal:
+
+```sh
+xattr -cr /path/to/twilight       # strips the quarantine attribute
+```
+
+On Linux and FreeBSD nothing intervenes; just `chmod +x twilight` if needed.
+
 ## License
 
 TwilightMC uses a multi-tier model: the core utility crates are **Apache-2.0**,

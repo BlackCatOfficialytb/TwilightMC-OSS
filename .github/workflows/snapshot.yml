@@ -353,4 +353,4 @@ jobs:
             --target "$GITHUB_SHA" \
             --title "TwilightMC Snapshot v${VERSION}-${DATE}-${COMMIT}" \
             --prerelease \
-            --notes "TwilightMC Snapshot v${VERSION}-${DATE}-${COMMIT} (commit ${COMMIT}, build date ${DATE} ddmmyyyy UTC). Each archive ships the twilight CLI, the twilight-ui Tauri GUI and required runtime libraries plus full license docs; FreeBSD archives are the documented CLI-only exception (see PLATFORM_NOTES.txt). SHA-256 digests are listed in checksums.sha256."
+            --notes "TwilightMC Snapshot v${VERSION}-${DATE}-${COMMIT} (commit ${COMMIT}, build date ${DATE} ddmmyyyy UTC). Each archive ships the twilight CLI, the twilight-ui Tauri GUI and required runtime libraries plus full license docs; FreeBSD archives are the documented CLI-only exception (see PLATFORM_NOTES.txt). SHA-256 digests are listed in checksums.sha256 — verify your download against it before running (binaries are unsigned; see README 'Security & unsigned binaries')."
