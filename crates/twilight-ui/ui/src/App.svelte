@@ -6,6 +6,7 @@
   import NewInstanceModal from './lib/NewInstanceModal.svelte';
   import InstanceContextPanel from './lib/InstanceContextPanel.svelte';
   import SettingsPage from './lib/SettingsPage.svelte';
+  import AccountManagerModal from './lib/AccountManagerModal.svelte';
   import { topOverlay } from './lib/overlays.js';
   import { isDarkTheme, loadSavedAccent, normalizeThemeId, applyTheme } from './lib/theme';
 
@@ -57,8 +58,6 @@
   let accounts = $state([]);
   let activeAccount = $state(null);
   let modalOpen = $state(false);
-  let accountError = $state('');
-  let newUsername = $state('');
 
   // ---- java discovery state ----
   let runtimes = $state([]);
@@ -503,37 +502,6 @@
     }
   }
 
-  async function addAccount() {
-    accountError = '';
-    try {
-      await api('add_offline_account', { username: newUsername });
-      newUsername = '';
-      await refreshAccounts();
-    } catch (e) {
-      accountError = String(e);
-    }
-  }
-
-  async function setActive(id) {
-    accountError = '';
-    try {
-      await api('set_active_account', { id });
-      await refreshAccounts();
-    } catch (e) {
-      accountError = String(e);
-    }
-  }
-
-  async function removeAccount(id) {
-    accountError = '';
-    try {
-      await api('remove_account', { id });
-      await refreshAccounts();
-    } catch (e) {
-      accountError = String(e);
-    }
-  }
-
   function typeLabel(account) {
     return { offline: 'Offline', microsoft: 'Microsoft' }[account.account_type.type] ?? 'Yggdrasil';
   }
@@ -956,82 +924,12 @@
   {/if}
 
   {#if modalOpen}
-    <!-- backdrop click closes; panel click does not -->
-    <div
-      class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-      onclick={(e) => {
-        if (e.target === e.currentTarget) modalOpen = false;
-      }}
-    >
-      <div class="w-[440px] rounded-lg border border-(--border) bg-(--bg-surface) shadow-2xl">
-        <div class="flex items-center justify-between border-b border-(--border) px-4 py-3">
-          <h3 class="text-sm font-semibold">Accounts</h3>
-          <button class="text-(--text-muted) hover:text-(--text-main)" onclick={() => (modalOpen = false)}>✕</button>
-        </div>
-
-        <div class="max-h-72 overflow-y-auto">
-          {#each accounts as account (account.id)}
-            <div
-              class="flex items-center gap-3 border-b border-(--border) px-4 py-2.5 {activeAccount?.id === account.id
-                ? 'bg-(--accent)/10'
-                : ''}"
-            >
-              <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-(--accent)/20 text-sm font-bold text-(--accent)">
-                {account.username[0]?.toUpperCase()}
-              </span>
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-2">
-                  <span class="truncate text-[13px] font-medium">{account.username}</span>
-                  <span class="rounded bg-(--bg-subtle) px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-(--text-muted)">
-                    {typeLabel(account)}
-                  </span>
-                  {#if activeAccount?.id === account.id}
-                    <span class="text-[10px] font-semibold tracking-wide text-(--accent)">ACTIVE</span>
-                  {/if}
-                </div>
-                <div class="truncate text-[11px] text-(--text-muted)">{account.uuid}</div>
-              </div>
-              <div class="flex shrink-0 gap-1">
-                {#if activeAccount?.id !== account.id}
-                  <button
-                    class="rounded px-2 py-1 text-[11px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-                    onclick={() => setActive(account.id)}>Set active</button
-                  >
-                {/if}
-                <button
-                  class="rounded px-2 py-1 text-[11px] text-(--text-muted) hover:bg-red-500/10 hover:text-red-400"
-                  onclick={() => removeAccount(account.id)}>Remove</button
-                >
-              </div>
-            </div>
-          {:else}
-            <p class="px-4 py-3 text-[12px] text-(--text-muted)">No accounts yet — add an offline profile below.</p>
-          {/each}
-        </div>
-
-        <form
-          class="flex items-center gap-2 border-t border-(--border) p-3"
-          onsubmit={(e) => {
-            e.preventDefault();
-            addAccount();
-          }}
-        >
-          <input
-            class="h-8 flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-            placeholder="Offline username (3-16 letters, digits, _)"
-            bind:value={newUsername}
-          />
-          <button
-            type="submit"
-            class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
-            disabled={!newUsername}>Add</button
-          >
-        </form>
-        {#if accountError}
-          <p class="border-t border-(--border) px-4 py-2 text-[12px] text-red-400">{accountError}</p>
-        {/if}
-      </div>
-    </div>
+    <AccountManagerModal
+      accounts={accounts}
+      active={activeAccount}
+      onclose={() => (modalOpen = false)}
+      onrefresh={refreshAccounts}
+    />
   {/if}
 
   {#if wizardOpen}

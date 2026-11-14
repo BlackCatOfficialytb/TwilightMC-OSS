@@ -27,6 +27,12 @@ pub struct Account {
     /// MSA refresh token for Microsoft accounts (`None` = re-run device flow).
     #[serde(default)]
     pub refresh_token: Option<String>,
+    /// Optional skin texture: local PNG path or https URL (for the 3D viewer).
+    #[serde(default)]
+    pub skin: Option<String>,
+    /// Optional cape texture: local PNG path or https URL.
+    #[serde(default)]
+    pub cape: Option<String>,
 }
 
 impl Account {
@@ -40,6 +46,8 @@ impl Account {
             account_type: AccountType::Offline,
             access_token: None,
             refresh_token: None,
+            skin: None,
+            cape: None,
         }
     }
 
@@ -61,6 +69,8 @@ impl Account {
             },
             access_token,
             refresh_token: None,
+            skin: None,
+            cape: None,
         }
     }
 
@@ -80,7 +90,16 @@ impl Account {
             account_type: AccountType::Microsoft,
             access_token,
             refresh_token,
+            skin: None,
+            cape: None,
         }
+    }
+
+    /// Builder-style cosmetics attach: local PNG path or https URL each.
+    pub fn with_textures(mut self, skin: Option<String>, cape: Option<String>) -> Self {
+        self.skin = skin.filter(|s| !s.trim().is_empty());
+        self.cape = cape.filter(|c| !c.trim().is_empty());
+        self
     }
 
     /// Online validation required (Microsoft) = true; offline/custom = false.

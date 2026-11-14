@@ -418,7 +418,7 @@ impl MicrosoftAuth {
         self.finish_login(msa).await
     }
 
-    async fn finish_login(&self, msa: MsaToken) -> Result<MicrosoftSession, AuthError> {
+    pub async fn finish_login(&self, msa: MsaToken) -> Result<MicrosoftSession, AuthError> {
         let xbl = self.xbl_authenticate(&msa.access_token).await?;
         let xsts = self.xsts_authorize(&xbl.token).await?;
         let mc = self.login_with_minecraft(&xbl, &xsts.token).await?;

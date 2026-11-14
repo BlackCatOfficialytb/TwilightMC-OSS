@@ -240,6 +240,8 @@ mod tests {
             account_type: twilight_auth::AccountType::Microsoft,
             access_token: Some("real-token".into()),
             refresh_token: None,
+            skin: None,
+            cape: None,
         };
         inject_account_vars(&mut v, &ms);
         assert_eq!(v["auth_access_token"], "real-token");
