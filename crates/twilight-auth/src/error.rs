@@ -19,6 +19,10 @@ pub enum AuthError {
     /// Fatal device-flow terminations (denied, expired token, invalid client…).
     #[error("device flow: {0}")]
     DeviceFlow(String),
+    /// Ely.by rejected the credentials exchange or returned a broken session
+    /// (`errorMessage` from the Yggdrasil endpoint).
+    #[error("Ely.by: {0}")]
+    Elyby(String),
     /// XSTS rejects with an `XErr` code; each maps to a human explanation.
     #[error("Xbox authorization error {code}: {message}")]
     Xerr { code: u64, message: String },

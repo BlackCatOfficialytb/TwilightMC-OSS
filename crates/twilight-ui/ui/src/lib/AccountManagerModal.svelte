@@ -1,15 +1,16 @@
 <script>
-  // Account manager: three sign-in tabs (offline with live UUID preview,
-  // Microsoft device-code flow, custom Yggdrasil / Ely.by) plus the saved
-  // account list with activate/remove and an inline skin/cape editor with a
-  // live 3D preview.
+  // Account manager: four sign-in tabs (offline with live UUID preview,
+  // first-class Ely.by credentials sign-in, Microsoft device-code flow, and
+  // any other custom Yggdrasil server) plus the saved account list with
+  // activate/remove and an inline skin/cape editor with a live 3D preview.
   import { onMount, onDestroy } from 'svelte';
   import { pushOverlay, popOverlay } from './overlays.js';
+  import Twemoji from './Twemoji.svelte';
   import SkinViewer3D from './SkinViewer3D.svelte';
 
   let { accounts = [], active = null, onclose, onrefresh } = $props();
 
-  let tab = $state('offline'); // offline | microsoft | custom
+  let tab = $state('offline'); // offline | elyby | microsoft | custom
   let error = $state('');
   let busy = $state(false);
 
@@ -24,7 +25,13 @@
   let copied = $state(false);
   let pollTimer = null;
 
-  // ---- custom / ely.by tab ----
+  // ---- ely.by tab (first-class: no server URL to type) ----
+  let elyUser = $state('');
+  let elyPassword = $state('');
+  let elyBusy = $state(false);
+  let elyDone = $state(false);
+
+  // ---- custom tab (any other authlib-injector server) ----
   let customName = $state('');
   let customUrl = $state('');
   let customSkin = $state('');
@@ -142,7 +149,29 @@
     }
   }
 
-  // ---- custom / ely.by ----
+  // ---- ely.by ----
+  async function addElyby(e) {
+    e.preventDefault();
+    error = '';
+    elyBusy = true;
+    elyDone = false;
+    try {
+      await invoke('add_elyby_account', {
+        username: elyUser.trim(),
+        password: elyPassword,
+      });
+      elyUser = '';
+      elyPassword = '';
+      elyDone = true;
+      await onrefresh?.();
+    } catch (err) {
+      error = String(err);
+    } finally {
+      elyBusy = false;
+    }
+  }
+
+  // ---- custom ----
   async function addCustom(e) {
     e.preventDefault();
     error = '';
@@ -170,8 +199,6 @@
       busy = false;
     }
   }
-
-  const ELYBY_URL = 'https://authserver.ely.by/api/authlib-injector';
 
   async function pickTexture(target) {
     const open = window.__TAURI__?.dialog?.open;
@@ -274,7 +301,8 @@
 
   function typeLabel(account) {
     return (
-      { offline: 'Offline', microsoft: 'Microsoft' }[account.account_type.type] ?? 'Yggdrasil'
+      { offline: 'Offline', microsoft: 'Microsoft', ely_by: 'Ely.by' }[account.account_type.type] ??
+      'Yggdrasil'
     );
   }
 
@@ -296,7 +324,7 @@
 
     <!-- tab bar -->
     <div class="flex gap-1 border-b border-(--border) px-3 pt-2.5">
-      {#each [['offline', 'Offline'], ['microsoft', 'Microsoft'], ['custom', 'Custom / Ely.by']] as [id, label]}
+      {#each [['offline', 'Offline'], ['elyby', 'Ely.by'], ['microsoft', 'Microsoft'], ['custom', 'Custom']] as [id, label]}
         <button
           class="rounded-t px-3 py-1.5 text-[12px] font-medium {tab === id
             ? 'bg-(--bg-subtle) text-(--text-main)'
@@ -384,21 +412,50 @@
             <p class="mt-3 rounded bg-red-500/10 px-3 py-2 text-[12px] text-red-400">{msError}</p>
           {/if}
         </div>
+      {:else if tab === 'elyby'}
+        <form class="flex flex-col gap-3 p-4" onsubmit={addElyby}>
+          <div class="flex items-center gap-2">
+            <span class="flex h-6 w-6 items-center justify-center rounded bg-[#3a7bd5]/15 text-[11px] font-bold text-[#3a7bd5]">e</span>
+            <span class="text-[12px] font-medium">Sign in with Ely.by</span>
+          </div>
+          <input
+            class="h-8 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+            placeholder="Ely.by username or email"
+            autocomplete="username"
+            bind:value={elyUser}
+          />
+          <input
+            type="password"
+            class="h-8 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+            placeholder="Password"
+            autocomplete="current-password"
+            bind:value={elyPassword}
+          />
+          <button
+            type="submit"
+            class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
+            disabled={!elyUser.trim() || !elyPassword || elyBusy}
+          >
+            {elyBusy ? 'Signing in…' : 'Sign in'}
+          </button>
+          {#if elyDone}
+            <p class="rounded bg-(--accent)/10 px-3 py-2 text-[12px] font-medium text-(--accent)">
+              Signed in — the Ely.by account is saved and active.
+            </p>
+          {/if}
+          <p class="text-[11px] text-(--text-muted)">
+            Your skin, cape and UUID come straight from Ely.by. Launches inject the SHA-256 verified
+            authlib-injector agent aimed at
+            <code class="text-(--accent)">authserver.ely.by</code> — no URL to configure.
+          </p>
+        </form>
       {:else if tab === 'custom'}
         <form class="flex flex-col gap-3 p-4" onsubmit={addCustom}>
-          <div class="flex gap-2">
-            <input
-              class="h-8 flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-              placeholder="Server URL (authlib-injector)"
-              bind:value={customUrl}
-            />
-            <button
-              type="button"
-              class="shrink-0 rounded border border-(--border) px-2.5 text-[11px] hover:bg-(--bg-subtle)"
-              title="Use the Ely.by authlib-injector endpoint"
-              onclick={() => (customUrl = ELYBY_URL)}>Ely.by</button
-            >
-          </div>
+          <input
+            class="h-8 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+            placeholder="Server URL (authlib-injector)"
+            bind:value={customUrl}
+          />
           <input
             class="h-8 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
             placeholder="Username (3-16 letters, digits, _)"
@@ -452,7 +509,7 @@
                 <button
                   class="rounded px-2 py-1 text-[11px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
                   title="Skin & cape"
-                  onclick={() => toggleEditor(account)}>🎨</button
+                  onclick={() => toggleEditor(account)}><Twemoji emoji="🎨" /></button
                 >
                 {#if active?.id !== account.id}
                   <button

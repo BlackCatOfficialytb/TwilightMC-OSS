@@ -3,6 +3,8 @@
   // the selected instance's identity, path and actions in Prism's order,
   // plus a playtime/version footer. The parent owns selection; actions
   // bubble up as callbacks.
+  import Twemoji from './Twemoji.svelte';
+
   let {
     instance,
     storage = null,
@@ -145,7 +147,7 @@
       class="w-full rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
       onclick={onedit}
     >
-      ⚙ Edit
+      <Twemoji emoji="⚙" /> Edit
     </button>
 
     <button
@@ -202,7 +204,7 @@
       title={storage ? 'Opens the instance folder' : 'Storage unknown'}
       onclick={onopenfolder}
     >
-      📂 Folder
+      <Twemoji emoji="📂" /> Folder
     </button>
     <button
       class="w-full rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"

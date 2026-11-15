@@ -196,6 +196,37 @@ async fn add_custom(path: &Path, username: &str, server_url: &str) -> Result<Acc
     upsert(path, account).await
 }
 
+/// Ely.by first-class sign-in: exchanges the username/email + password for a
+/// Yggdrasil session token, persists the account (server-assigned name and
+/// UUID), and activates it. Users never type a server URL — the canonical
+/// endpoint lives in `twilight-auth`.
+async fn add_elyby(
+    accounts: &Path,
+    settings: &Path,
+    auth: &twilight_auth::ElybyAuth,
+    username: &str,
+    password: &str,
+) -> Result<Account, String> {
+    let username = username.trim();
+    if username.is_empty() {
+        return Err("enter your Ely.by username or email".into());
+    }
+    if password.is_empty() {
+        return Err("enter your Ely.by password".into());
+    }
+    let session = auth
+        .authenticate(username, password)
+        .await
+        .map_err(|e| e.to_string())?;
+    let account = session.into_account(username);
+    if account.uuid.is_nil() {
+        return Err("signed in, but Ely.by returned no profile for this account".into());
+    }
+    let account = upsert(accounts, account).await?;
+    set_active(accounts, settings, &account.id).await?;
+    Ok(account)
+}
+
 /// The active skin/cape texture URLs of a Microsoft profile.
 fn textures_from_profile(
     profile: &twilight_auth::MinecraftProfile,
@@ -308,6 +339,25 @@ pub async fn add_custom_yggdrasil_account(
 ) -> Result<Account, String> {
     let path = accounts_path(&app).await?;
     add_custom(&path, &username, &server_url).await
+}
+
+/// Ely.by sign-in (first-class account type; no URL to type).
+#[tauri::command]
+pub async fn add_elyby_account(
+    app: AppHandle,
+    username: String,
+    password: String,
+) -> Result<Account, String> {
+    let accounts = accounts_path(&app).await?;
+    let settings = settings_path(&app).await?;
+    add_elyby(
+        &accounts,
+        &settings,
+        &twilight_auth::ElybyAuth::new(),
+        &username,
+        &password,
+    )
+    .await
 }
 
 /// Device-flow step 1: request the code the user must enter.
@@ -520,6 +570,41 @@ mod tests {
         assert_eq!(cleared.skin, None);
         assert_eq!(cleared.cape, None);
         assert!(set_textures(&accounts, "Ghost", None, None).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn elyby_sign_in_validates_inputs_before_touching_the_network() {
+        let (accounts, settings) = test_dir().await;
+        let auth = twilight_auth::ElybyAuth::new();
+        // both fields are required; these fail before any HTTP request
+        assert!(
+            add_elyby(&accounts, &settings, &auth, "   ", "pw")
+                .await
+                .is_err()
+        );
+        assert!(
+            add_elyby(&accounts, &settings, &auth, "steve@example.com", "")
+                .await
+                .is_err()
+        );
+        // nothing was persisted by the rejected attempts
+        assert!(load_accounts(&accounts).await.accounts.is_empty());
+    }
+
+    #[test]
+    fn elyby_account_type_is_serialized_first_class() {
+        // the webview keys off `account_type.type === 'ely_by'`
+        let account = Account::elyby(
+            "Steve",
+            twilight_auth::generate_offline_uuid("Steve"),
+            Some("tok".into()),
+        );
+        let json = serde_json::to_value(&account).unwrap();
+        assert_eq!(json["account_type"]["type"], "ely_by");
+        assert_eq!(json["id"], "Steve@ely.by");
+        // and round-trips back into the same variant (existing stores load)
+        let back: Account = serde_json::from_value(json).unwrap();
+        assert_eq!(back.account_type, twilight_auth::AccountType::ElyBy);
     }
 
     #[test]

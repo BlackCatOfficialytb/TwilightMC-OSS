@@ -64,6 +64,7 @@ fn main() {
             accounts::get_active_account,
             accounts::offline_uuid,
             accounts::add_custom_yggdrasil_account,
+            accounts::add_elyby_account,
             accounts::start_microsoft_device_code,
             accounts::poll_microsoft_device_code,
             accounts::refresh_microsoft_account,

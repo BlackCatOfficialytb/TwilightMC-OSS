@@ -8,6 +8,7 @@
   import SettingsPage from './lib/SettingsPage.svelte';
   import AccountManagerModal from './lib/AccountManagerModal.svelte';
   import ClientModePage from './lib/ClientModePage.svelte';
+  import Twemoji from './lib/Twemoji.svelte';
   import { topOverlay } from './lib/overlays.js';
   import { isDarkTheme, loadSavedAccent, normalizeThemeId, applyTheme } from './lib/theme';
 
@@ -618,7 +619,13 @@
             }
           }}
         >
-          <span class="w-5 shrink-0 text-center text-[15px] leading-none">{item.icon}</span>
+          <span class="flex w-5 shrink-0 items-center justify-center text-[15px] leading-none">
+            {#if item.id === 'settings'}
+              <Twemoji emoji={item.icon} size={15} />
+            {:else}
+              {item.icon}
+            {/if}
+          </span>
           {#if sidebarExpanded}
             <span class="truncate text-[13px]">{item.label}</span>
           {/if}
@@ -765,7 +772,7 @@
             title={storage ? storage.instances_dir : ''}
             onclick={openInstanceDir}
           >
-            📂 Instance Folder
+            <Twemoji emoji="📂" /> Instance Folder
           </button>
           <button
             class="rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
@@ -782,7 +789,7 @@
               if (!storage) loadStorage();
             }}
           >
-            ⚙ Settings
+            <Twemoji emoji="⚙" /> Settings
           </button>
           <input
             class="h-8 w-64 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
@@ -795,7 +802,11 @@
             title={isDarkTheme(theme) ? 'Twilight Light' : 'Twilight Dark'}
             onclick={toggleTheme}
           >
-            {isDarkTheme(theme) ? '☀' : '☾'}
+            {#if isDarkTheme(theme)}
+              <Twemoji emoji="☀" alt="Light theme" />
+            {:else}
+              <Twemoji emoji="🌙" alt="Dark theme" />
+            {/if}
           </button>
         </div>
 
@@ -1036,7 +1047,7 @@
             title="Moves the folder into .twilight-trash next to the instances root"
             onclick={() => confirmDelete(true)}
           >
-            ♻ Move to Trash
+            <Twemoji emoji="♻" /> Move to Trash
           </button>
           <button
             class="rounded bg-rose-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-rose-500 disabled:opacity-40"

@@ -467,14 +467,16 @@ pub async fn run_launch_with(
         None => None,
     };
 
-    // ---- authlib-injector: custom Yggdrasil accounts launch through the
-    //      agent jar, auto-fetched + SHA-256 verified into <shared>/libraries
-    let authlib_jar = match &account.account_type {
-        twilight_auth::AccountType::CustomYggdrasil { auth_server_url } => Some((
+    // ---- authlib-injector: Ely.by (first-class) and custom Yggdrasil
+    //      accounts launch through the agent jar, auto-fetched + SHA-256
+    //      verified into <shared>/libraries; Ely.by always targets its
+    //      canonical endpoint
+    let authlib_jar = match account.authlib_server() {
+        Some(server_url) => Some((
             twilight_auth::ensure_authlib_injector(&client, &paths.shared_dir).await?,
-            auth_server_url.clone(),
+            server_url.to_owned(),
         )),
-        _ => None,
+        None => None,
     };
 
     // ---- pre-launch diagnostics: service DNS answers, GPU/OS/CPU/RAM and

@@ -2,7 +2,9 @@
   // One instance card: icon, custom title, version + loader pills, last
   // played and the context menu. Single click selects (drives the right
   // context panel), double click or Enter/Space launches; interactions
-  // bubble up as callbacks.
+  // bubbles up as callbacks.
+  import Twemoji from './Twemoji.svelte';
+
   let {
     instance,
     selected = false,
@@ -130,7 +132,7 @@
           onopenfolder();
         }}
       >
-        📂 Open Folder
+        <Twemoji emoji="📂" /> Open Folder
       </button>
       <button
         class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--bg-subtle)"

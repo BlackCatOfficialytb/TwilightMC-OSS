@@ -3,6 +3,7 @@
   // spacious content column. Input values are $bindable so App.svelte keeps
   // owning persistence; actions bubble up as callbacks.
   import AccentPicker from './AccentPicker.svelte';
+  import Twemoji from './Twemoji.svelte';
   import {
     DEFAULT_THEME,
     THEME_PRESETS,
@@ -42,7 +43,7 @@
     { id: 'appearance', label: 'Appearance', icon: '🎨' },
     { id: 'java', label: 'Java & Memory', icon: '☕' },
     { id: 'storage', label: 'Folders', icon: '📁' },
-    { id: 'about', label: 'About & Updates', icon: 'ℹ️' },
+    { id: 'about', label: 'About & Updates', icon: 'ℹ' },
   ];
   let section = $state('appearance');
 
@@ -198,7 +199,9 @@
           aria-current={section === s.id ? 'true' : undefined}
           onclick={() => (section = s.id)}
         >
-          <span class="w-5 shrink-0 text-center text-[15px]">{s.icon}</span>
+          <span class="flex w-5 shrink-0 items-center justify-center text-[15px]">
+            <Twemoji emoji={s.icon} size={15} />
+          </span>
           <span class="truncate">{s.label}</span>
         </button>
       {/each}

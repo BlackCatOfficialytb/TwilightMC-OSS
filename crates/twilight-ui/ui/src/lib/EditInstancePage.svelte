@@ -5,6 +5,7 @@
   // logs browse the instance's game folders through the new listing
   // commands; components and settings keep their milestone placeholders.
   import { onMount } from 'svelte';
+  import Twemoji from './Twemoji.svelte';
   import { pushOverlay, popOverlay } from './overlays.js';
   import ModrinthBrowserModal from './ModrinthBrowserModal.svelte';
 
@@ -202,7 +203,9 @@
           aria-current={section === s.id ? 'true' : undefined}
           onclick={() => (section = s.id)}
         >
-          <span class="w-5 shrink-0 text-center text-[15px]">{s.icon}</span>
+          <span class="flex w-5 shrink-0 items-center justify-center text-[15px]">
+            <Twemoji emoji={s.icon} size={15} />
+          </span>
           <span class="truncate">{s.label}</span>
         </button>
       {/each}
@@ -311,7 +314,7 @@
             title={storage ? 'Opens the instance mods folder' : 'Storage unknown'}
             onclick={() => openFolder(gamePath('mods'))}
           >
-            📂 Open Mods Folder
+            <Twemoji emoji="📂" /> Open Mods Folder
           </button>
         </div>
       {:else if section === 'screenshots'}
@@ -364,7 +367,7 @@
           title="Opens the screenshots folder"
           onclick={() => openFolder(gamePath('screenshots'))}
         >
-          📂 Open Screenshots Folder
+          <Twemoji emoji="📂" /> Open Screenshots Folder
         </button>
       {:else if section === 'logs'}
         <h2 class="text-[16px] font-semibold">Logs</h2>
@@ -418,7 +421,7 @@
             title="Opens the logs folder"
             onclick={() => openFolder(gamePath('logs'))}
           >
-            📂 Open Logs Folder
+            <Twemoji emoji="📂" /> Open Logs Folder
           </button>
         </div>
       {:else}

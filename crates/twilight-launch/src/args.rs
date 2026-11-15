@@ -248,6 +248,35 @@ mod tests {
         assert_eq!(v["user_type"], "mojang");
     }
 
+    #[test]
+    fn elyby_account_injects_session_token_and_mojang_user_type() {
+        // Ely.by is a real session-token account: the game must see
+        // `--userType mojang` and the Yggdrasil token, never the "0" sentinel
+        let uuid = Account::offline("Steve").uuid;
+        let account = Account::elyby("Steve", uuid, Some("elyby-access-token".into()));
+        let mut v = vars();
+        inject_account_vars(&mut v, &account);
+        assert_eq!(v["auth_player_name"], "Steve");
+        assert_eq!(v["auth_uuid"], uuid.to_string());
+        assert_eq!(v["auth_access_token"], "elyby-access-token");
+        assert_eq!(v["auth_session"], "elyby-access-token");
+        assert_eq!(v["user_type"], "mojang");
+
+        // the agent jar is aimed at the canonical Ely.by endpoint
+        let jvm = twilight_auth::authlib_injector_jvm_args(
+            "/shared/libraries/authlib-injector.jar",
+            account.authlib_server().unwrap(),
+        );
+        assert_eq!(
+            jvm[0],
+            format!(
+                "-javaagent:/shared/libraries/authlib-injector.jar={}",
+                twilight_auth::ELYBY_AUTH_SERVER
+            )
+        );
+        assert_eq!(jvm[1], "-Dauthlibinjector.side=client");
+    }
+
     use std::collections::BTreeSet;
     use twilight_manifest::RuntimeContext;
 

@@ -5,6 +5,7 @@
   // and a fast skin/cape switcher. Fully theme-adaptive through the standard
   // tokens, so it follows Twilight/Catppuccin/Nord/High-Contrast alike.
   import SkinViewer3D from './SkinViewer3D.svelte';
+  import Twemoji from './Twemoji.svelte';
 
   let {
     instances = [],
@@ -135,7 +136,7 @@
 <div class="mx-auto flex w-full max-w-4xl flex-col gap-6">
   {#if !active}
     <div class="flex flex-col items-center gap-3 rounded-lg border border-(--border) bg-(--bg-surface) px-6 py-12 text-center">
-      <span class="text-3xl">👤</span>
+      <Twemoji emoji="👤" size={30} />
       <p class="text-sm font-medium">No account selected</p>
       <p class="max-w-sm text-[12px] text-(--text-muted)">
         Pick or create an account to see your character here.

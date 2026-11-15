@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 use crate::error::AuthError;
 use crate::off_uuid::generate_offline_uuid;
 
+/// The canonical Ely.by authlib-injector endpoint. Ely.by is a first-class
+/// account type (never a hand-typed "custom" server), so the URL lives here.
+pub const ELYBY_AUTH_SERVER: &str = "https://authserver.ely.by/api/authlib-injector";
+
 /// Which backend an account authenticates against.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -13,8 +17,22 @@ pub enum AccountType {
     Offline,
     /// Microsoft (MSA) account; token refresh is handled by the auth flow crate.
     Microsoft,
-    /// authlib-injector backed custom Yggdrasil server (Ely.by and friends).
+    /// Ely.by account: Yggdrasil credentials exchange, always launched with
+    /// authlib-injector aimed at [`ELYBY_AUTH_SERVER`].
+    ElyBy,
+    /// authlib-injector backed custom Yggdrasil server (anything but Ely.by).
     CustomYggdrasil { auth_server_url: String },
+}
+
+impl AccountType {
+    /// The authlib-injector server this account must launch through, when any.
+    pub fn authlib_server(&self) -> Option<&str> {
+        match self {
+            AccountType::ElyBy => Some(ELYBY_AUTH_SERVER),
+            AccountType::CustomYggdrasil { auth_server_url } => Some(auth_server_url),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -74,6 +92,26 @@ impl Account {
         }
     }
 
+    /// Signed-in Ely.by account: the server-assigned profile UUID and the
+    /// Yggdrasil `accessToken` come straight from the authenticate response.
+    pub fn elyby(
+        username: impl Into<String>,
+        uuid: uuid::Uuid,
+        access_token: Option<String>,
+    ) -> Self {
+        let username = username.into();
+        Account {
+            id: format!("{username}@ely.by"),
+            username,
+            uuid,
+            account_type: AccountType::ElyBy,
+            access_token,
+            refresh_token: None,
+            skin: None,
+            cape: None,
+        }
+    }
+
     /// Signed-in Microsoft account (device-flow result); `refresh_token`
     /// keeps the account renewable without re-running the flow.
     pub fn microsoft(
@@ -102,19 +140,30 @@ impl Account {
         self
     }
 
-    /// Online validation required (Microsoft) = true; offline/custom = false.
-    /// Freesm's launcher skips the Microsoft login steps for these account types.
+    /// Online validation required (Microsoft, Ely.by) = true; offline/custom
+    /// = false. Freesm's launcher skips the Microsoft login steps for these
+    /// account types; Ely.by is validated by authlib-injector at runtime.
     pub fn requires_online_validation(&self) -> bool {
-        matches!(self.account_type, AccountType::Microsoft)
+        matches!(
+            self.account_type,
+            AccountType::Microsoft | AccountType::ElyBy
+        )
     }
 
-    /// `--userType` for the game process (Mojang for real accounts, legacy otherwise).
+    /// `--userType` for the game process: `mojang` for real session-token
+    /// accounts (Microsoft, Ely.by), `legacy` for offline/custom.
     pub fn user_type(&self) -> &'static str {
         if self.requires_online_validation() {
             "mojang"
         } else {
             "legacy"
         }
+    }
+
+    /// authlib-injector server URL for launch injection, if this account needs
+    /// one (Ely.by always, custom Yggdrasil servers when configured).
+    pub fn authlib_server(&self) -> Option<&str> {
+        self.account_type.authlib_server()
     }
 }
 

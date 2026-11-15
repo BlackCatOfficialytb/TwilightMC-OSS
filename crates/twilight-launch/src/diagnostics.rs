@@ -85,6 +85,7 @@ pub fn auth_mode_name(account: &Account) -> &'static str {
     match &account.account_type {
         AccountType::Offline => "offline",
         AccountType::Microsoft => "online",
+        AccountType::ElyBy => "ely.by",
         AccountType::CustomYggdrasil { .. } => "custom",
     }
 }
