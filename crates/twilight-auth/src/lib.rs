@@ -19,12 +19,14 @@ pub use authlib::{
     ensure_authlib_injector_with, fetch_latest_artifact, jar_path,
 };
 pub use elyby::{
-    Agent, AuthenticateRequest, ELYBY_API_BASE, ElybyAuth, ElybySession, SelectedProfile,
-    parse_profile_uuid,
+    Agent, AuthenticateRequest, DEFAULT_ELYBY_CLIENT_ID, ELYBY_ACCOUNT_BASE, ELYBY_API_BASE,
+    ELYBY_OAUTH2_SCOPE, ELYBY_SKINSYSTEM_BASE, ElybyAuth, ElybyDeviceCode, ElybyDevicePoll,
+    ElybySession, ElybyTextures, ElybyToken, PkcePair, SelectedProfile, extract_authorization_code,
+    parse_profile_uuid, pkce_pair, skin_png_url, spawn_loopback_redirect,
 };
 pub use error::AuthError;
 pub use microsoft::{
     DEFAULT_CLIENT_ID, DeviceCode, DeviceFlowState, McToken, MicrosoftAuth, MicrosoftSession,
-    MinecraftProfile, MsaToken, ProfileTexture, XboxToken, xerr_message,
+    MinecraftProfile, MsaToken, ProfileTexture, ProfileTextureMetadata, XboxToken, xerr_message,
 };
 pub use off_uuid::generate_offline_uuid;

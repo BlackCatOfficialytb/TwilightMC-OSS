@@ -1,8 +1,10 @@
 <script>
   // Account manager: four sign-in tabs (offline with live UUID preview,
-  // first-class Ely.by credentials sign-in, Microsoft device-code flow, and
-  // any other custom Yggdrasil server) plus the saved account list with
-  // activate/remove and an inline skin/cape editor with a live 3D preview.
+  // first-class Ely.by OAuth2 — direct browser or device code — with a
+  // collapsed classic username/password fallback, Microsoft device-code
+  // flow, and any other custom Yggdrasil server) plus the saved account
+  // list with activate/remove and an inline skin/cape editor with a live
+  // 3D preview.
   import { onMount, onDestroy } from 'svelte';
   import { pushOverlay, popOverlay } from './overlays.js';
   import Twemoji from './Twemoji.svelte';
@@ -26,10 +28,19 @@
   let pollTimer = null;
 
   // ---- ely.by tab (first-class: no server URL to type) ----
+  // OAuth2 (primary): direct browser sign-in or the RFC 8628 device code,
+  // mirroring the Microsoft machine; the username/password form stays as the
+  // collapsed classic fallback.
+  let elyMode = $state('idle'); // idle | requesting | code | signedin
+  let elyError = $state('');
+  let elyDone = $state(false);
+  let elyBrowserBusy = $state(false);
+  let elyDevice = $state(null);
+  let elyCopied = $state(false);
+  let elyPollTimer = null;
   let elyUser = $state('');
   let elyPassword = $state('');
   let elyBusy = $state(false);
-  let elyDone = $state(false);
 
   // ---- custom tab (any other authlib-injector server) ----
   let customName = $state('');
@@ -53,12 +64,22 @@
     return () => popOverlay(closer);
   });
 
-  onDestroy(() => stopPolling());
+  onDestroy(() => {
+    stopPolling();
+    stopElyPolling();
+  });
 
   function stopPolling() {
     if (pollTimer) {
       clearInterval(pollTimer);
       pollTimer = null;
+    }
+  }
+
+  function stopElyPolling() {
+    if (elyPollTimer) {
+      clearInterval(elyPollTimer);
+      elyPollTimer = null;
     }
   }
 
@@ -149,7 +170,85 @@
     }
   }
 
-  // ---- ely.by ----
+  // ---- ely.by: OAuth2 (primary) ----
+  async function elyBrowser() {
+    elyError = '';
+    elyDone = false;
+    elyBrowserBusy = true;
+    try {
+      // long-running: opens the browser, waits for the loopback redirect,
+      // then persists the account (backend caps the wait at 5 minutes)
+      await invoke('elyby_browser_login');
+      elyDone = true;
+      await onrefresh?.();
+    } catch (e) {
+      elyError = String(e);
+    } finally {
+      elyBrowserBusy = false;
+    }
+  }
+
+  async function startElyDevice() {
+    elyError = '';
+    elyCopied = false;
+    elyMode = 'requesting';
+    try {
+      elyDevice = await invoke('start_elyby_device_code');
+      elyMode = 'code';
+      stopElyPolling();
+      elyPollTimer = setInterval(pollElyDevice, (elyDevice.interval || 5) * 1000);
+    } catch (e) {
+      elyMode = 'idle';
+      elyError = String(e);
+    }
+  }
+
+  async function pollElyDevice() {
+    if (!elyDevice) return;
+    try {
+      const result = await invoke('poll_elyby_device_code', { device: elyDevice });
+      if (result.state === 'pending') return;
+      if (result.state === 'slow_down') {
+        // Ely.by asked for a slower cadence: +5 seconds
+        stopElyPolling();
+        elyPollTimer = setInterval(pollElyDevice, ((elyDevice.interval || 5) + 5) * 1000);
+        return;
+      }
+      stopElyPolling();
+      if (result.state === 'failed') {
+        elyError = result.reason;
+        elyDevice = null;
+        elyMode = 'idle';
+        return;
+      }
+      // completed: account persisted and activated by the backend
+      elyDevice = null;
+      elyMode = 'signedin';
+      await onrefresh?.();
+    } catch (e) {
+      elyError = String(e);
+    }
+  }
+
+  async function copyElyCode() {
+    if (!elyDevice) return;
+    try {
+      await navigator.clipboard.writeText(elyDevice.user_code);
+      elyCopied = true;
+      setTimeout(() => (elyCopied = false), 1600);
+    } catch {
+      /* clipboard unavailable: the code stays selectable on screen */
+    }
+  }
+
+  /// Sends the user to the Ely.by verification page (or the click-through
+  /// URL when the server pre-fills the code) in the system browser.
+  function openElyVerification() {
+    const url = elyDevice?.verification_uri_complete ?? elyDevice?.verification_uri;
+    if (url) invoke('open_path', { path: url }).catch(() => {});
+  }
+
+  // ---- ely.by: classic credentials (fallback) ----
   async function addElyby(e) {
     e.preventDefault();
     error = '';
@@ -413,42 +512,117 @@
           {/if}
         </div>
       {:else if tab === 'elyby'}
-        <form class="flex flex-col gap-3 p-4" onsubmit={addElyby}>
+        <div class="flex flex-col gap-3 p-4">
           <div class="flex items-center gap-2">
             <span class="flex h-6 w-6 items-center justify-center rounded bg-[#3a7bd5]/15 text-[11px] font-bold text-[#3a7bd5]">e</span>
             <span class="text-[12px] font-medium">Sign in with Ely.by</span>
           </div>
-          <input
-            class="h-8 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-            placeholder="Ely.by username or email"
-            autocomplete="username"
-            bind:value={elyUser}
-          />
-          <input
-            type="password"
-            class="h-8 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-            placeholder="Password"
-            autocomplete="current-password"
-            bind:value={elyPassword}
-          />
-          <button
-            type="submit"
-            class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
-            disabled={!elyUser.trim() || !elyPassword || elyBusy}
-          >
-            {elyBusy ? 'Signing in…' : 'Sign in'}
-          </button>
-          {#if elyDone}
+
+          {#if elyMode === 'idle'}
+            <button
+              class="w-full rounded bg-(--accent) px-3 py-2 text-[13px] font-semibold text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
+              disabled={elyBrowserBusy}
+              onclick={elyBrowser}
+            >
+              {elyBrowserBusy ? 'Waiting for the browser…' : 'Sign in with browser (recommended)'}
+            </button>
+            <p class="text-[11px] text-(--text-muted)">
+              Opens <code class="text-(--accent)">account.ely.by</code> in your browser and returns
+              automatically — no password ever enters the launcher.
+            </p>
+            <button
+              class="w-full rounded border border-(--border) px-3 py-1.5 text-[12px] hover:bg-(--bg-subtle) disabled:opacity-40"
+              disabled={elyBrowserBusy}
+              onclick={startElyDevice}
+            >
+              Use a device code instead
+            </button>
+          {:else if elyMode === 'requesting'}
+            <p class="py-6 text-center text-[12px] text-(--text-muted)">Requesting a device code…</p>
+          {:else if elyMode === 'code' && elyDevice}
+            <div class="flex flex-col items-center gap-2 py-2">
+              <span class="text-[11px] text-(--text-muted)">Enter this code at</span>
+              <code class="select-all rounded bg-(--bg-subtle) px-2 py-1 text-[12px]">{elyDevice.verification_uri}</code>
+              <span class="mt-2 text-[11px] text-(--text-muted)">Device code</span>
+              <code class="select-all rounded bg-(--bg-subtle) px-3 py-1.5 text-xl font-bold tracking-widest text-(--accent)">
+                {elyDevice.user_code}
+              </code>
+              <div class="mt-1 flex gap-2">
+                <button
+                  class="rounded border border-(--border) px-3 py-1 text-[12px] hover:bg-(--bg-subtle)"
+                  onclick={copyElyCode}>
+                  {elyCopied ? 'Copied ✓' : 'Copy code'}
+                </button>
+                {#if elyDevice.verification_uri || elyDevice.verification_uri_complete}
+                  <button
+                    class="rounded border border-(--border) px-3 py-1 text-[12px] hover:bg-(--bg-subtle)"
+                    onclick={openElyVerification}>
+                    Open page
+                  </button>
+                {/if}
+                <button class="rounded border border-(--border) px-3 py-1 text-[12px] hover:bg-(--bg-subtle)" onclick={startElyDevice}>
+                  Restart
+                </button>
+              </div>
+              <p class="mt-3 flex items-center gap-2 text-[11px] text-(--text-muted)">
+                <span class="inline-block h-2 w-2 animate-pulse rounded-full bg-(--accent)"></span>
+                Waiting for you to finish signing in…
+              </p>
+            </div>
+          {:else if elyMode === 'signedin'}
+            <p class="py-6 text-center text-[12px] font-medium text-(--accent)">Signed in — account saved.</p>
+            <button
+              class="mx-auto block rounded border border-(--border) px-3 py-1.5 text-[12px] hover:bg-(--bg-subtle)"
+              onclick={() => {
+                elyMode = 'idle';
+                elyError = '';
+              }}>Sign in another account</button
+            >
+          {/if}
+
+          {#if elyError}
+            <p class="rounded bg-red-500/10 px-3 py-2 text-[12px] text-red-400">{elyError}</p>
+          {/if}
+          {#if elyDone && elyMode === 'idle'}
             <p class="rounded bg-(--accent)/10 px-3 py-2 text-[12px] font-medium text-(--accent)">
               Signed in — the Ely.by account is saved and active.
             </p>
           {/if}
+
+          <!-- classic credentials: collapsed fallback -->
+          <details class="rounded border border-(--border)">
+            <summary class="cursor-pointer select-none px-3 py-2 text-[11px] font-medium text-(--text-muted) hover:text-(--text-main)">
+              Classic login (fallback) — username &amp; password
+            </summary>
+            <form class="flex flex-col gap-3 p-3 pt-1" onsubmit={addElyby}>
+              <input
+                class="h-8 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+                placeholder="Ely.by username or email"
+                autocomplete="username"
+                bind:value={elyUser}
+              />
+              <input
+                type="password"
+                class="h-8 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+                placeholder="Password"
+                autocomplete="current-password"
+                bind:value={elyPassword}
+              />
+              <button
+                type="submit"
+                class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
+                disabled={!elyUser.trim() || !elyPassword || elyBusy}
+              >
+                {elyBusy ? 'Signing in…' : 'Sign in'}
+              </button>
+            </form>
+          </details>
           <p class="text-[11px] text-(--text-muted)">
             Your skin, cape and UUID come straight from Ely.by. Launches inject the SHA-256 verified
             authlib-injector agent aimed at
             <code class="text-(--accent)">authserver.ely.by</code> — no URL to configure.
           </p>
-        </form>
+        </div>
       {:else if tab === 'custom'}
         <form class="flex flex-col gap-3 p-4" onsubmit={addCustom}>
           <input
@@ -526,7 +700,7 @@
 
             {#if editingId === account.id && editingAccount}
               <div class="mt-2 flex items-start gap-3 rounded border border-(--border) bg-(--bg-subtle) p-3">
-                <SkinViewer3D skin={editSkin} cape={editCape} width={110} height={150} />
+                <SkinViewer3D skin={editSkin} cape={editCape} model={editingAccount?.model} width={110} height={150} />
                 <div class="flex min-w-0 flex-1 flex-col gap-2">
                   <button class="rounded border border-(--border) px-2.5 py-1.5 text-left text-[11px] hover:bg-(--bg-surface)" onclick={() => pickEditTexture('skin')}>
                     Skin: <span class="truncate text-(--accent)">{editSkin || 'default (Steve/Alex)'}</span>

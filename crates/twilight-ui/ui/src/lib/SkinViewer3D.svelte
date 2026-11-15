@@ -1,15 +1,18 @@
 <script>
   // Interactive 3D Minecraft character (skinview3d WebGL): drag to rotate,
-  // wheel to zoom, smooth idle/walk animation. Textures resolve from https
-  // URLs (Microsoft profile skins), data URLs or local PNG paths via the
-  // Tauri asset protocol; a missing/broken texture falls back to the default
-  // Steve model.
+  // wheel to zoom, smooth idle/walk animation. Textures resolve through the
+  // shared account store's `proxy_skin_png` backend (data URI output — local
+  // PNG paths, https URLs and Ely.by nicknames all work without CORS or
+  // asset-protocol issues); a failed proxy falls back to direct loading and
+  // a missing/broken texture falls back to the default Steve model.
   import { onMount } from 'svelte';
   import { SkinViewer, IdleAnimation, WalkingAnimation } from 'skinview3d';
+  import { skinDataUri } from './accounts.svelte.js';
 
   let {
     skin = null,
     cape = null,
+    model = null,
     width = 260,
     height = 340,
     walking = false,
@@ -21,16 +24,17 @@
   let viewer = null;
   let loadedSkin;
   let loadedCape;
+  let loadedModel;
 
-  function invoke(cmd, args) {
-    const core = window.__TAURI__?.core;
-    if (!core) return Promise.reject(new Error('Tauri backend unavailable in this preview.'));
-    return core.invoke(cmd, args);
-  }
+  // resolved texture sources (data URIs after the async proxy round-trip)
+  let resolvedSkin = $state(null);
+  let resolvedCape = $state(null);
+  let texSeq = 0;
 
+  /// Fallback when the backend proxy is unavailable (plain web preview):
   /// https/data URLs pass through; local absolute paths go through the
   /// asset protocol (enabled with scope "**" in tauri.conf.json).
-  function resolveTexture(value) {
+  function fallbackTexture(value) {
     if (!value) return null;
     const v = String(value).trim();
     if (!v) return null;
@@ -39,18 +43,29 @@
     return convert ? convert(v) : v;
   }
 
+  // Account.model stores "slim" (Alex arms) or "classic" (Steve);
+  // skinview3d wants "slim" / "default" / "auto-detect".
+  function modelType(value) {
+    const v = String(value ?? '').trim().toLowerCase();
+    if (v === 'slim') return 'slim';
+    if (v === 'classic') return 'default';
+    return 'auto-detect';
+  }
+
   function applyTextures() {
     if (!viewer) return;
-    const s = resolveTexture(skin);
-    const c = resolveTexture(cape);
-    if (s !== loadedSkin) {
-      loadedSkin = s;
-      if (s) viewer.loadSkin(s, { model: 'auto-detect' }).catch(() => {});
-      else viewer.resetSkin();
+    if (resolvedSkin !== loadedSkin || modelType(model) !== loadedModel) {
+      loadedSkin = resolvedSkin;
+      loadedModel = modelType(model);
+      if (resolvedSkin) {
+        viewer.loadSkin(resolvedSkin, { model: loadedModel }).catch(() => {});
+      } else {
+        viewer.resetSkin();
+      }
     }
-    if (c !== loadedCape) {
-      loadedCape = c;
-      if (c) viewer.loadCape(c).catch(() => {});
+    if (resolvedCape !== loadedCape) {
+      loadedCape = resolvedCape;
+      if (resolvedCape) viewer.loadCape(resolvedCape).catch(() => {});
       else viewer.resetCape();
     }
   }
@@ -75,7 +90,23 @@
   });
 
   $effect(() => {
-    // texture props are read inside applyTextures — re-apply on change
+    // skin/cape props are read here; the async backend round-trip updates
+    // the resolved sources, guarded so a fast prop switch never applies a
+    // stale response.
+    const rawSkin = skin;
+    const rawCape = cape;
+    const mine = ++texSeq;
+    (async () => {
+      const proxiedSkin = await skinDataUri(rawSkin);
+      const proxiedCape = await skinDataUri(rawCape);
+      if (mine !== texSeq) return;
+      resolvedSkin = proxiedSkin ?? fallbackTexture(rawSkin);
+      resolvedCape = proxiedCape ?? fallbackTexture(rawCape);
+    })();
+  });
+
+  $effect(() => {
+    // resolved sources + model feed the viewer; re-apply on change
     applyTextures();
   });
 

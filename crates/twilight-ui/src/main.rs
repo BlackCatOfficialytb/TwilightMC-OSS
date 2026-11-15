@@ -25,22 +25,29 @@ fn get_version() -> &'static str {
 /// Reveals a filesystem path in the platform file browser.
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
+    spawn_open(&path)
+}
+
+/// Spawns the platform opener for a path or URL (folders, files and
+/// http(s) browser sign-in links); shared by the file-browser command and
+/// the Ely.by OAuth2 browser flow.
+pub(crate) fn spawn_open(target: &str) -> Result<(), String> {
     #[cfg(windows)]
     let mut cmd = {
         let mut c = std::process::Command::new("explorer");
-        c.arg(&path);
+        c.arg(target);
         c
     };
     #[cfg(target_os = "macos")]
     let mut cmd = {
         let mut c = std::process::Command::new("open");
-        c.arg(&path);
+        c.arg(target);
         c
     };
     #[cfg(all(unix, not(target_os = "macos")))]
     let mut cmd = {
         let mut c = std::process::Command::new("xdg-open");
-        c.arg(&path);
+        c.arg(target);
         c
     };
     cmd.spawn().map_err(|e| e.to_string())?;
@@ -65,6 +72,10 @@ fn main() {
             accounts::offline_uuid,
             accounts::add_custom_yggdrasil_account,
             accounts::add_elyby_account,
+            accounts::start_elyby_device_code,
+            accounts::poll_elyby_device_code,
+            accounts::elyby_browser_login,
+            accounts::proxy_skin_png,
             accounts::start_microsoft_device_code,
             accounts::poll_microsoft_device_code,
             accounts::refresh_microsoft_account,

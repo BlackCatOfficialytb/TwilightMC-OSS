@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 use twilight_auth::{
-    Account, AccountStore, DEFAULT_CLIENT_ID, DeviceCode, MicrosoftAuth, generate_offline_uuid,
+    Account, AccountStore, DEFAULT_CLIENT_ID, DEFAULT_ELYBY_CLIENT_ID, DeviceCode, ElybyDeviceCode,
+    ElybyDevicePoll, ElybyToken, MicrosoftAuth, generate_offline_uuid,
 };
 
 #[derive(Default, Serialize, Deserialize)]
@@ -36,6 +37,10 @@ pub(crate) struct Settings {
     /// the default public client id.
     #[serde(default)]
     pub(crate) msa_client_id: Option<String>,
+    /// Overridable Ely.by OAuth application id (browser/device flows); empty
+    /// = Freesm's registered public client id.
+    #[serde(default)]
+    pub(crate) elyby_client_id: Option<String>,
     /// UI mode: `launcher` (full library) or `client` (minimal dashboard).
     #[serde(default)]
     pub(crate) mode: Option<String>,
@@ -180,6 +185,29 @@ fn microsoft_auth(settings: &Settings) -> MicrosoftAuth {
     MicrosoftAuth::new(msa_client_id(settings))
 }
 
+/// Configured Ely.by OAuth application id: the `TWILIGHT_ELYBY_CLIENT_ID`
+/// environment variable wins, then the settings value, then Freesm's
+/// registered public client id. (Split from the env read so tests stay
+/// hermetic.)
+fn elyby_client_id(settings: &Settings) -> String {
+    elyby_client_id_from_env(std::env::var("TWILIGHT_ELYBY_CLIENT_ID").ok(), settings)
+}
+
+fn elyby_client_id_from_env(env: Option<String>, settings: &Settings) -> String {
+    let trimmed_nonempty = |id: Option<String>| {
+        id.map(|id| id.trim().to_owned())
+            .filter(|id| !id.is_empty())
+    };
+    trimmed_nonempty(env)
+        .or_else(|| trimmed_nonempty(settings.elyby_client_id.clone()))
+        .unwrap_or_else(|| DEFAULT_ELYBY_CLIENT_ID.to_owned())
+}
+
+/// Ely.by OAuth client for this app's settings.
+fn elyby_auth(settings: &Settings) -> twilight_auth::ElybyAuth {
+    twilight_auth::ElybyAuth::with_client_id(elyby_client_id(settings))
+}
+
 /// Custom Yggdrasil (Ely.by et al.) account.
 async fn add_custom(path: &Path, username: &str, server_url: &str) -> Result<Account, String> {
     if !valid_username(username) {
@@ -222,23 +250,41 @@ async fn add_elyby(
     if account.uuid.is_nil() {
         return Err("signed in, but Ely.by returned no profile for this account".into());
     }
+    // Classic authenticate responses carry no texture URLs; fill them from
+    // the skinsystem. Best-effort: an skinsystem outage must never block the
+    // sign-in itself, so a failure just leaves the textures unset.
+    let textures = auth
+        .skinsystem_textures(&account.username)
+        .await
+        .ok()
+        .unwrap_or_default();
+    let account = account
+        .with_textures(textures.skin_url, textures.cape_url)
+        .with_model(textures.model);
     let account = upsert(accounts, account).await?;
     set_active(accounts, settings, &account.id).await?;
     Ok(account)
 }
 
-/// The active skin/cape texture URLs of a Microsoft profile.
+/// The active skin URL, cape URL and arm model of a Mojang-shaped profile
+/// (Microsoft and the Ely.by OAuth2 profile endpoint). The model is
+/// normalized to `"slim"` (Alex arms) or `None` (classic/Steve auto-detect).
 fn textures_from_profile(
     profile: &twilight_auth::MinecraftProfile,
-) -> (Option<String>, Option<String>) {
-    let skin = profile
+) -> (Option<String>, Option<String>, Option<String>) {
+    let active = profile
         .skins
         .iter()
         .find(|s| s.state.eq_ignore_ascii_case("ACTIVE"))
-        .or_else(|| profile.skins.first())
-        .and_then(|s| s.url.clone());
+        .or_else(|| profile.skins.first());
+    let skin = active.and_then(|s| s.url.clone());
+    let model = active
+        .and_then(|s| s.metadata.as_ref())
+        .and_then(|m| m.model.as_deref())
+        .filter(|m| m.trim().eq_ignore_ascii_case("slim"))
+        .map(|_| "slim".to_owned());
     let cape = profile.capes.first().and_then(|c| c.url.clone());
-    (skin, cape)
+    (skin, cape, model)
 }
 
 /// Turns a successful MSA sign-in into a persisted account (tokens, profile
@@ -253,14 +299,44 @@ async fn save_microsoft_account(
     let profile = session.profile.ok_or_else(|| {
         "signed in, but this Microsoft account owns no Minecraft profile".to_owned()
     })?;
-    let (skin, cape) = textures_from_profile(&profile);
+    let (skin, cape, model) = textures_from_profile(&profile);
     let account = Account::microsoft(
         profile.name.clone(),
         profile.uuid().unwrap_or_default(),
         Some(session.mc.access_token),
         Some(session.msa.refresh_token).filter(|t| !t.is_empty()),
     )
-    .with_textures(skin, cape);
+    .with_textures(skin, cape)
+    .with_model(model);
+    let account = upsert(accounts, account).await?;
+    set_active(accounts, settings, &account.id).await?;
+    Ok(account)
+}
+
+/// Turns an Ely.by OAuth2 token set into a persisted account: resolves the
+/// Mojang-simulation profile, stores the refresh token for silent renewal,
+/// and activates the account. Shared by the device-code poll and the browser
+/// redirect flow.
+async fn save_elyby_oauth_account(
+    accounts: &Path,
+    settings: &Path,
+    auth: &twilight_auth::ElybyAuth,
+    token: ElybyToken,
+) -> Result<Account, String> {
+    let profile = auth
+        .profile(&token.access_token)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "signed in, but this Ely.by account owns no Minecraft profile".to_owned())?;
+    let (skin, cape, model) = textures_from_profile(&profile);
+    let mut account = Account::elyby(
+        profile.name.clone(),
+        profile.uuid().unwrap_or_default(),
+        Some(token.access_token),
+    )
+    .with_textures(skin, cape)
+    .with_model(model);
+    account.refresh_token = token.refresh_token.filter(|t| !t.trim().is_empty());
     let account = upsert(accounts, account).await?;
     set_active(accounts, settings, &account.id).await?;
     Ok(account)
@@ -360,6 +436,71 @@ pub async fn add_elyby_account(
     .await
 }
 
+/// Ely.by device-flow step 1: request the code the user must enter on
+/// account.ely.by.
+#[tauri::command]
+pub async fn start_elyby_device_code(app: AppHandle) -> Result<ElybyDeviceCode, String> {
+    let settings = load_settings(&settings_path(&app).await?).await;
+    elyby_auth(&settings)
+        .request_device_code()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Ely.by device-flow step 2 (stateless): one poll tick per invocation; the
+/// webview spaces the calls. A completed poll persists the account (with its
+/// refresh token) and activates it.
+#[tauri::command]
+pub async fn poll_elyby_device_code(
+    app: AppHandle,
+    device: ElybyDeviceCode,
+) -> Result<DevicePollResult, String> {
+    let accounts = accounts_path(&app).await?;
+    let settings = settings_path(&app).await?;
+    let auth = elyby_auth(&load_settings(&settings).await);
+    match auth.poll_device_token(&device).await {
+        Ok(ElybyDevicePoll::Pending) => Ok(DevicePollResult::Pending),
+        Ok(ElybyDevicePoll::SlowDown) => Ok(DevicePollResult::SlowDown),
+        Ok(ElybyDevicePoll::Failed(reason)) => Ok(DevicePollResult::Failed { reason }),
+        Ok(ElybyDevicePoll::Completed(token)) => {
+            match save_elyby_oauth_account(&accounts, &settings, &auth, token).await {
+                Ok(account) => Ok(DevicePollResult::Completed { account }),
+                Err(reason) => Ok(DevicePollResult::Failed { reason }),
+            }
+        }
+        Err(e) => Ok(DevicePollResult::Failed {
+            reason: e.to_string(),
+        }),
+    }
+}
+
+/// Direct Ely.by sign-in (primary): opens the system browser at the OAuth2
+/// authorize URL, waits (up to 5 minutes) for the one-shot loopback redirect
+/// to capture the authorization code, then exchanges it with PKCE and
+/// persists the account. Long-running; the webview awaits it.
+#[tauri::command]
+pub async fn elyby_browser_login(app: AppHandle) -> Result<Account, String> {
+    let accounts = accounts_path(&app).await?;
+    let settings = settings_path(&app).await?;
+    let auth = elyby_auth(&load_settings(&settings).await);
+
+    let (redirect_uri, rx) = twilight_auth::spawn_loopback_redirect().map_err(|e| e.to_string())?;
+    let pair = twilight_auth::pkce_pair();
+    let url = auth.authorization_url(&pair.challenge, &redirect_uri);
+    crate::spawn_open(&url)?;
+    // the listener itself gives up after 300 seconds (yielding None)
+    let redirect = rx.await.map_err(|e| e.to_string())?;
+    let redirect =
+        redirect.ok_or_else(|| "no sign-in response arrived within 5 minutes".to_owned())?;
+    let code = twilight_auth::extract_authorization_code(&redirect)
+        .ok_or_else(|| "sign-in was cancelled or denied".to_owned())?;
+    let token = auth
+        .exchange_authorization_code(&code, &pair.verifier, &redirect_uri)
+        .await
+        .map_err(|e| e.to_string())?;
+    save_elyby_oauth_account(&accounts, &settings, &auth, token).await
+}
+
 /// Device-flow step 1: request the code the user must enter.
 #[tauri::command]
 pub async fn start_microsoft_device_code(app: AppHandle) -> Result<DeviceCode, String> {
@@ -416,11 +557,15 @@ pub async fn refresh_microsoft_account(app: AppHandle, id: String) -> Result<Acc
         .refresh_session(account.refresh_token.as_deref().unwrap_or_default())
         .await
         .map_err(|e| e.to_string())?;
-    let (skin, cape) = session
+    let (skin, cape, model) = session
         .profile
         .as_ref()
         .map(textures_from_profile)
-        .unwrap_or((account.skin.clone(), account.cape.clone()));
+        .unwrap_or((
+            account.skin.clone(),
+            account.cape.clone(),
+            account.model.clone(),
+        ));
     let refreshed = Account::microsoft(
         session
             .profile
@@ -437,7 +582,8 @@ pub async fn refresh_microsoft_account(app: AppHandle, id: String) -> Result<Acc
             .filter(|t| !t.is_empty())
             .or(account.refresh_token.clone()),
     )
-    .with_textures(skin.or(account.skin.clone()), cape.or(account.cape.clone()));
+    .with_textures(skin.or(account.skin.clone()), cape.or(account.cape.clone()))
+    .with_model(model.or(account.model.clone()));
     // keep the persisted id stable so the active pointer survives the refresh
     let mut refreshed = refreshed;
     refreshed.id = account.id.clone();
@@ -469,6 +615,76 @@ pub async fn set_account_textures(
 ) -> Result<Account, String> {
     let accounts = accounts_path(&app).await?;
     set_textures(&accounts, &id, skin, cape).await
+}
+
+/// Standard-alphabet base64 with padding (RFC 4648 §4) — hand-rolled because
+/// the tree carries no base64 crate; used to inline proxied skin PNGs.
+fn base64_standard(data: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[(n >> 18) as usize & 63] as char);
+        out.push(TABLE[(n >> 12) as usize & 63] as char);
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[n as usize & 63] as char
+        } else {
+            '='
+        });
+    }
+    out
+}
+
+/// Wraps raw PNG bytes in a `data:image/png;base64` URI.
+fn png_data_uri(bytes: &[u8]) -> String {
+    format!("data:image/png;base64,{}", base64_standard(bytes))
+}
+
+/// Inlines a skin texture as a data URI so the webview can render it without
+/// CORS or asset-protocol restrictions. `data:` sources pass through; local
+/// files are read; http(s) URLs are downloaded; anything else is treated as
+/// an Ely.by nickname resolved through the skinsystem's direct
+/// `/skins/{name}.png` fallback (which follows redirects to the texture).
+async fn proxy_skin_png_bytes(source: &str) -> Result<String, String> {
+    let source = source.trim();
+    if source.is_empty() {
+        return Err("empty skin source".into());
+    }
+    if source.starts_with("data:") {
+        return Ok(source.to_owned()); // already webview-ready
+    }
+    let url = if source.starts_with("http://") || source.starts_with("https://") {
+        source.to_owned()
+    } else if Path::new(source).is_file() {
+        let bytes = tokio::fs::read(source).await.map_err(|e| e.to_string())?;
+        return Ok(png_data_uri(&bytes));
+    } else {
+        twilight_auth::skin_png_url(source)
+    };
+    let resp = reqwest::get(&url).await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!(
+            "skin fetch failed with HTTP {}",
+            resp.status().as_u16()
+        ));
+    }
+    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    Ok(png_data_uri(&bytes))
+}
+
+/// Proxy a skin texture (data URI, local path, https URL or Ely.by nickname)
+/// into a `data:image/png;base64` URI the webview can always render.
+#[tauri::command]
+pub async fn proxy_skin_png(source: String) -> Result<String, String> {
+    proxy_skin_png_bytes(&source).await
 }
 
 #[cfg(test)]
@@ -609,7 +825,7 @@ mod tests {
 
     #[test]
     fn profile_textures_pick_the_active_skin() {
-        use twilight_auth::{MinecraftProfile, ProfileTexture};
+        use twilight_auth::{MinecraftProfile, ProfileTexture, ProfileTextureMetadata};
         let profile = MinecraftProfile {
             id: "abc".into(),
             name: "Notch".into(),
@@ -618,21 +834,116 @@ mod tests {
                     id: "s1".into(),
                     state: "ACTIVE".into(),
                     url: Some("https://textures/active".into()),
+                    metadata: Some(ProfileTextureMetadata {
+                        model: Some("slim".into()),
+                    }),
                 },
                 ProfileTexture {
                     id: "s2".into(),
                     state: "".into(),
                     url: Some("https://textures/other".into()),
+                    metadata: None,
                 },
             ],
             capes: vec![ProfileTexture {
                 id: "c1".into(),
                 state: "".into(),
                 url: Some("https://textures/cape".into()),
+                metadata: None,
             }],
         };
-        let (skin, cape) = textures_from_profile(&profile);
+        let (skin, cape, model) = textures_from_profile(&profile);
         assert_eq!(skin.as_deref(), Some("https://textures/active"));
         assert_eq!(cape.as_deref(), Some("https://textures/cape"));
+        assert_eq!(model.as_deref(), Some("slim"));
+
+        // a non-slim model claim (or none at all) stays auto-detect
+        let wide = MinecraftProfile {
+            skins: vec![ProfileTexture {
+                id: "w".into(),
+                state: "ACTIVE".into(),
+                url: Some("https://textures/wide".into()),
+                metadata: Some(ProfileTextureMetadata {
+                    model: Some("default".into()),
+                }),
+            }],
+            ..Default::default()
+        };
+        let (skin, cape, model) = textures_from_profile(&wide);
+        assert_eq!(skin.as_deref(), Some("https://textures/wide"));
+        assert_eq!(cape, None);
+        assert_eq!(model, None);
+    }
+
+    #[test]
+    fn elyby_client_id_resolves_env_settings_then_default() {
+        // no env, no usable setting → Freesm's registered public client id
+        assert_eq!(
+            elyby_client_id_from_env(None, &Settings::default()),
+            "freesmlauncher"
+        );
+        // blank settings are ignored like a missing one
+        let settings = Settings {
+            elyby_client_id: Some("   ".into()),
+            ..Settings::default()
+        };
+        assert_eq!(elyby_client_id_from_env(None, &settings), "freesmlauncher");
+        // settings override
+        let settings = Settings {
+            elyby_client_id: Some(" settings-client ".into()),
+            ..Settings::default()
+        };
+        assert_eq!(elyby_client_id_from_env(None, &settings), "settings-client");
+        // env wins over everything (and is trimmed)
+        assert_eq!(
+            elyby_client_id_from_env(Some("  env-client  ".into()), &settings),
+            "env-client"
+        );
+        // a blank env value falls through to the settings
+        assert_eq!(
+            elyby_client_id_from_env(Some(String::new()), &settings),
+            "settings-client"
+        );
+    }
+
+    #[test]
+    fn base64_standard_matches_the_rfc_4648_vectors() {
+        let cases: &[(&[u8], &str)] = &[
+            (b"", ""),
+            (b"f", "Zg=="),
+            (b"fo", "Zm8="),
+            (b"foo", "Zm9v"),
+            (b"foob", "Zm9vYg=="),
+            (b"fooba", "Zm9vYmE="),
+            (b"foobar", "Zm9vYmFy"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(base64_standard(input), *expected, "{input:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn proxy_skin_png_passthrough_and_local_file() {
+        // data URIs are already webview-ready
+        let data_uri = "data:image/png;base64,Zm9vYmFy";
+        assert_eq!(proxy_skin_png_bytes(data_uri).await.unwrap(), data_uri);
+        assert!(proxy_skin_png_bytes("   ").await.is_err());
+
+        // a local file is inlined as a data URI
+        let dir = std::env::temp_dir().join(format!(
+            "twi-ui-skin-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos()
+        ));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let file = dir.join("steve.png");
+        tokio::fs::write(&file, b"foobar").await.unwrap();
+        assert_eq!(
+            proxy_skin_png_bytes(&file.to_string_lossy()).await.unwrap(),
+            "data:image/png;base64,Zm9vYmFy"
+        );
     }
 }

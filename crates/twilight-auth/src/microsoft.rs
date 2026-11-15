@@ -111,13 +111,26 @@ impl MinecraftProfile {
     }
 }
 
+/// Optional texture metadata (`metadata.model` = `"slim"` for Alex-style
+/// arms; absent means classic/Steve).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProfileTextureMetadata {
+    #[serde(default)]
+    pub model: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProfileTexture {
+    /// Texture id; Ely.by's Mojang-simulation profile omits it, so its
+    /// absence is tolerated.
+    #[serde(default)]
     pub id: String,
     #[serde(default)]
     pub state: String,
     #[serde(default)]
     pub url: Option<String>,
+    #[serde(default)]
+    pub metadata: Option<ProfileTextureMetadata>,
 }
 
 /// Everything one successful sign-in yields.

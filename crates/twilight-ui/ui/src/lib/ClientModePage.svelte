@@ -6,6 +6,7 @@
   // tokens, so it follows Twilight/Catppuccin/Nord/High-Contrast alike.
   import SkinViewer3D from './SkinViewer3D.svelte';
   import Twemoji from './Twemoji.svelte';
+  import { skinSource } from './accounts.svelte.js';
 
   let {
     instances = [],
@@ -129,7 +130,10 @@
   }
 
   function typeLabel(account) {
-    return { offline: 'Offline', microsoft: 'Microsoft' }[account.account_type.type] ?? 'Yggdrasil';
+    return (
+      { offline: 'Offline', microsoft: 'Microsoft', ely_by: 'Ely.by' }[account.account_type.type] ??
+      'Yggdrasil'
+    );
   }
 </script>
 
@@ -150,7 +154,17 @@
     <div class="grid gap-6 md:grid-cols-[auto_1fr]">
       <!-- center stage: the active character -->
       <div class="flex flex-col items-center gap-3 rounded-lg border border-(--border) bg-(--bg-surface) p-5">
-        <SkinViewer3D skin={active.skin} cape={active.cape} width={220} height={300} />
+        <!-- keyed on the account id: switching accounts rebuilds the viewer
+             instead of patching textures across identities -->
+        {#key active?.id}
+          <SkinViewer3D
+            skin={skinSource(active)}
+            cape={active.cape}
+            model={active.model}
+            width={220}
+            height={300}
+          />
+        {/key}
         <div class="text-center">
           <p class="text-sm font-semibold">{active.username}</p>
           <p class="text-[11px] text-(--text-muted)">{typeLabel(active)}</p>

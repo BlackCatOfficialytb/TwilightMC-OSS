@@ -471,6 +471,17 @@ pub async fn run_launch_with(
     //      accounts launch through the agent jar, auto-fetched + SHA-256
     //      verified into <shared>/libraries; Ely.by always targets its
     //      canonical endpoint
+    //
+    //      Deliberate design note: Ely.by's own authlib replacement meta
+    //      (`https://authlib.ely.by/api/authlib-injector`, the `by.ely`
+    //      namespace some launchers swap in) is NOT used here. The canonical
+    //      authlib-injector endpoint above already serves valid Yggdrasil
+    //      session payloads for every signed-in account, and swapping the
+    //      meta would only widen the surface (extra fetch, different skin
+    //      resolution) without fixing anything. Skins come from the account's
+    //      stored textures (skinsystem for classic sign-ins, the OAuth2
+    //      profile otherwise) and the game validates sessions against the
+    //      endpoint the account actually signed in with.
     let authlib_jar = match account.authlib_server() {
         Some(server_url) => Some((
             twilight_auth::ensure_authlib_injector(&client, &paths.shared_dir).await?,

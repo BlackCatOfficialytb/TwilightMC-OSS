@@ -11,6 +11,14 @@
   import Twemoji from './lib/Twemoji.svelte';
   import { topOverlay } from './lib/overlays.js';
   import { isDarkTheme, loadSavedAccent, normalizeThemeId, applyTheme } from './lib/theme';
+  // shared account state: one store drives the sidebar chip, the client
+  // dashboard and the account manager modal
+  import {
+    accounts as accountStore,
+    refreshAccounts,
+    skinSource,
+    skinDataUri,
+  } from './lib/accounts.svelte.js';
 
   let version = $state('…');
   let active = $state('instances');
@@ -68,9 +76,22 @@
 
   // ---- auth state ----
 
-  let accounts = $state([]);
-  let activeAccount = $state(null);
+  // `accountStore` (lib/accounts.svelte.js) owns the list + active pointer;
+  // everything reads it through this derived alias.
+  const activeAccount = $derived(accountStore.active);
   let modalOpen = $state(false);
+
+  // sidebar avatar: proxied skin data URI for the face crop (null = letter)
+  let avatarUri = $state(null);
+  let avatarSeq = 0;
+  $effect(() => {
+    const source = skinSource(activeAccount);
+    const mine = ++avatarSeq;
+    (async () => {
+      const uri = await skinDataUri(source);
+      if (mine === avatarSeq) avatarUri = uri;
+    })();
+  });
 
   // ---- java discovery state ----
   let runtimes = $state([]);
@@ -478,17 +499,11 @@
     }
   }
 
-  async function refreshAccounts() {
-    try {
-      accounts = await api('get_accounts');
-      activeAccount = await api('get_active_account');
-    } catch {
-      // plain web build: no backend pane
-    }
-  }
-
   function typeLabel(account) {
-    return { offline: 'Offline', microsoft: 'Microsoft' }[account.account_type.type] ?? 'Yggdrasil';
+    return (
+      { offline: 'Offline', microsoft: 'Microsoft', ely_by: 'Ely.by' }[account.account_type.type] ??
+      'Yggdrasil'
+    );
   }
 
   onMount(() => {
@@ -652,8 +667,19 @@
       title={activeAccount ? activeAccount.username : 'Add account'}
       onclick={() => (modalOpen = true)}
     >
-      <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-(--accent)/20 text-[11px] font-bold text-(--accent)">
-        {#if activeAccount}{activeAccount.username[0]?.toUpperCase()}{:else}?{/if}
+      <span class="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded bg-(--accent)/20 text-[11px] font-bold text-(--accent)">
+        {#if avatarUri}
+          <!-- skin face: 8×8 head crop — image 8× the chip, shifted one
+               chip-width so the face at skin px (8,8) fills the frame -->
+          <span
+            class="h-7 w-7"
+            style={`background-image:url(${avatarUri});background-size:800% 800%;background-position:14.2857% 14.2857%;image-rendering:pixelated`}
+          ></span>
+        {:else if activeAccount}
+          {activeAccount.username[0]?.toUpperCase()}
+        {:else}
+          ?
+        {/if}
       </span>
       {#if sidebarExpanded}
         <span class="min-w-0 flex-1 text-left">
@@ -944,9 +970,14 @@
 
   {#if modalOpen}
     <AccountManagerModal
-      accounts={accounts}
+      accounts={accountStore.list}
       active={activeAccount}
-      onclose={() => (modalOpen = false)}
+      onclose={() => {
+        modalOpen = false;
+        // resync: texture edits and sign-ins inside the modal update the
+        // shared store, but a fresh read guarantees consistency
+        refreshAccounts();
+      }}
       onrefresh={refreshAccounts}
     />
   {/if}

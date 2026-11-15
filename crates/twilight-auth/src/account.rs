@@ -42,7 +42,8 @@ pub struct Account {
     pub uuid: uuid::Uuid,
     pub account_type: AccountType,
     pub access_token: Option<String>,
-    /// MSA refresh token for Microsoft accounts (`None` = re-run device flow).
+    /// OAuth2 refresh token (Microsoft MSA and Ely.by accounts; `None` =
+    /// re-run the sign-in flow to renew).
     #[serde(default)]
     pub refresh_token: Option<String>,
     /// Optional skin texture: local PNG path or https URL (for the 3D viewer).
@@ -51,6 +52,10 @@ pub struct Account {
     /// Optional cape texture: local PNG path or https URL.
     #[serde(default)]
     pub cape: Option<String>,
+    /// Skin arm model: `"slim"` (Alex) or `"classic"` (Steve); `None` =
+    /// auto-detect from the texture.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 impl Account {
@@ -66,6 +71,7 @@ impl Account {
             refresh_token: None,
             skin: None,
             cape: None,
+            model: None,
         }
     }
 
@@ -89,6 +95,7 @@ impl Account {
             refresh_token: None,
             skin: None,
             cape: None,
+            model: None,
         }
     }
 
@@ -109,6 +116,7 @@ impl Account {
             refresh_token: None,
             skin: None,
             cape: None,
+            model: None,
         }
     }
 
@@ -130,6 +138,7 @@ impl Account {
             refresh_token,
             skin: None,
             cape: None,
+            model: None,
         }
     }
 
@@ -137,6 +146,15 @@ impl Account {
     pub fn with_textures(mut self, skin: Option<String>, cape: Option<String>) -> Self {
         self.skin = skin.filter(|s| !s.trim().is_empty());
         self.cape = cape.filter(|c| !c.trim().is_empty());
+        self
+    }
+
+    /// Builder-style model attach: `"slim"` (Alex arms) / `"classic"`
+    /// (Steve); `None` or viewer sentinels (`auto-detect`) keep auto-detect.
+    pub fn with_model(mut self, model: Option<String>) -> Self {
+        self.model = model
+            .map(|m| m.trim().to_owned())
+            .filter(|m| !m.is_empty() && !m.eq_ignore_ascii_case("auto-detect"));
         self
     }
 
