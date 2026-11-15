@@ -80,7 +80,7 @@ TwilightMC/
 │   ├── twilight-launch/     # JVM argument builder & process spawner
 │   ├── twilight-auth/       # Offline & Custom Yggdrasil authentication
 │   └── twilight-horizon/    # Clean asset pipeline for Horizon Rust engine
-└── upstream/                # Submodules for reference only (Prism, Freesm, Theseus)
+└── upstream/                # Submodules for reference only (Prism, Freesm, modrinth-code)
 ```
 
 ### Strict Coding Rules:
@@ -90,7 +90,7 @@ TwilightMC/
    - Use standard Rust types (`String`, `Vec`, `HashMap`, `bytes::Bytes`).
    - Use `tokio` for async runtimes and `tokio::sync::mpsc` for message passing.
 2. **Submodule Isolation:**
-   - Code inside `upstream/prism`, `upstream/freesm`, and `upstream/theseus` is strictly for **clean-room reverse-engineering and architectural reference**.
+   - Code inside `upstream/prism`, `upstream/freesm`, and `upstream/modrinth-code` is strictly for **clean-room reverse-engineering and architectural reference**.
    - Do **not** compile, alter, or link upstream C++ code directly into TwilightMC crates.
 3. **Robust Error Handling:**
    - Define domain-specific errors using `thiserror` in each crate.

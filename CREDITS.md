@@ -29,10 +29,10 @@ govern those snapshots themselves.
   Yggdrasil (third-party account server) integration guidance, plus the third
   metadata failover mirror (`meta.freesmlauncher.org`).
 
-### Modrinth (Theseus / labrinth)
+### Modrinth (modrinth-code / labrinth)
 
-- **https://github.com/modrinth/code** · per-package licensing (the Theseus
-  `app-lib` backend is GPL-3.0-only)
+- **https://github.com/modrinth/code** · per-package licensing (the
+  modrinth-code `app-lib` backend is GPL-3.0-only)
 - Shape-shaping contributions: launcher engineering standards, the composite
   launch-overlay approach, and the Modrinth project ecosystem TwilightMC
   integrates with (browser + `.mrpack` installer).
