@@ -156,6 +156,8 @@ fn main() {
             versions::fetch_loader_versions,
             modrinth::search_modrinth_mods,
             modrinth::install_modrinth_mod,
+            modrinth::install_mod_with_deps,
+            modrinth::suggest_accessibility_mods,
             launch::launch_instance,
             launch::kill_instance,
             instances::get_instances,
@@ -183,6 +185,8 @@ fn main() {
             prefs::set_theme_config,
             prefs::get_mode_config,
             prefs::set_mode_config,
+            prefs::get_accessibility_config,
+            prefs::set_accessibility_config,
             storage::get_storage,
             storage::set_folder_dir,
             storage::clean_staging

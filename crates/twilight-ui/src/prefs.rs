@@ -77,3 +77,34 @@ pub async fn set_mode_config(app: AppHandle, mode: String) -> Result<(), String>
     settings.mode = Some(mode);
     save_settings(&settings_path(&app).await?, &settings).await
 }
+
+/// Persisted accessibility flags shown in the Settings page.
+#[derive(Debug, Clone, Serialize)]
+pub struct AccessibilityConfig {
+    /// Blind Mode: screen-reader & audio navigation profile.
+    pub blind_mode: bool,
+    /// Deaf Mode: closed-captions & visual sound-cues profile.
+    pub deaf_mode: bool,
+}
+
+#[tauri::command]
+pub async fn get_accessibility_config(app: AppHandle) -> Result<AccessibilityConfig, String> {
+    let settings = load_settings(&settings_path(&app).await?).await;
+    Ok(AccessibilityConfig {
+        blind_mode: settings.blind_mode,
+        deaf_mode: settings.deaf_mode,
+    })
+}
+
+/// Persists the Blind/Deaf accessibility profile flags.
+#[tauri::command]
+pub async fn set_accessibility_config(
+    app: AppHandle,
+    blind_mode: bool,
+    deaf_mode: bool,
+) -> Result<(), String> {
+    let mut settings = load_settings(&settings_path(&app).await?).await;
+    settings.blind_mode = blind_mode;
+    settings.deaf_mode = deaf_mode;
+    save_settings(&settings_path(&app).await?, &settings).await
+}

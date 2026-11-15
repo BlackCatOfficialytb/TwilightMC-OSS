@@ -6,7 +6,7 @@
   import { onMount } from 'svelte';
   import { pushOverlay, popOverlay } from './overlays.js';
 
-  let { groups = [], onclose, oncreated } = $props();
+  let { groups = [], blindMode = false, deafMode = false, onclose, oncreated } = $props();
 
   const TYPE_FILTERS = [
     { id: 'release', label: 'Releases' },
@@ -51,6 +51,49 @@
 
   let creating = $state(false);
   let createError = $state('');
+
+  // ---- accessibility checklist (Blind/Deaf Mode assistive mods) ----
+  const BLIND_ASSIST = [
+    {
+      id: 'minecraft-access',
+      label: 'Minecraft Access',
+      hint: 'Core: screen reader & 3D spatial navigation',
+    },
+    {
+      id: 'sound-physics-remastered',
+      label: 'Sound Physics Remastered',
+      hint: 'Optional: spatial acoustics & directional echoes',
+    },
+  ];
+  const DEAF_ASSIST = [
+    { id: 'echosight', label: 'EchoSight', hint: 'Directional sound radar & priority subtitles' },
+    {
+      id: 'subtitles-visualizer',
+      label: 'Subtitles Visualizer',
+      hint: 'In-world directional subtitle markers',
+    },
+    { id: 'visible-sound', label: 'Visible Sound', hint: 'In-world block/entity sound highlights' },
+    { id: 'soundsight', label: 'SoundSight', hint: 'Visual threat ring & enhanced subtitles' },
+  ];
+  let assistMods = $state(new Set(['minecraft-access']));
+
+  const assistOptions = $derived([
+    ...(blindMode ? BLIND_ASSIST : []),
+    ...(deafMode ? DEAF_ASSIST : []),
+  ]);
+
+  // the checklist resets with the loader/profile: Blind Mode pre-checks its
+  // core mod (Minecraft Access) on Fabric
+  $effect(() => {
+    assistMods = new Set(blindMode && loader === 'fabric' ? ['minecraft-access'] : []);
+  });
+
+  function toggleAssist(id) {
+    const next = new Set(assistMods);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    assistMods = next;
+  }
 
   function invoke(cmd, args) {
     const core = window.__TAURI__?.core;
@@ -195,6 +238,22 @@
           warning = warning
             ? `${warning} The group could not be set: ${e}`
             : `Instance created, but the group could not be set: ${e}`;
+        }
+      }
+      // accessibility checklist: install the picked assistive mods (+ their
+      // required Modrinth dependencies) right after creation
+      for (const projectId of assistMods) {
+        try {
+          await invoke('install_mod_with_deps', {
+            instanceId: row.id,
+            projectId,
+            gameVersion: version,
+            loader: 'fabric',
+          });
+        } catch (e) {
+          warning = warning
+            ? `${warning} ${projectId} could not be installed: ${e}`
+            : `Instance created, but ${projectId} could not be installed: ${e}`;
         }
       }
       oncreated?.(row, warning);
@@ -397,6 +456,44 @@
             </p>
           {:else if !loader}
             <p class="mt-2 text-[11px] text-(--text-muted)">No mod loader is selected.</p>
+          {/if}
+
+          {#if blindMode && (loader === '' || loader === 'horizon')}
+            <div
+              role="alert"
+              class="mt-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-400"
+            >
+              Blind Mode Notice: Vanilla Minecraft's built-in Narrator lacks 3D world navigation and
+              block inspection, and Horizon does not support Fabric accessibility mods yet. We
+              strongly recommend selecting <strong>Fabric</strong> with Minecraft Access.
+            </div>
+          {/if}
+
+          {#if loader === 'fabric' && assistOptions.length}
+            <section class="mt-3 border-t border-(--border) pt-3">
+              <h4 class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">
+                Accessibility mods
+              </h4>
+              <p class="mt-0.5 text-[10px] text-(--text-muted)">
+                Installed right after the instance is created.
+              </p>
+              <div class="mt-1.5 flex flex-col gap-1.5">
+                {#each assistOptions as mod (mod.id)}
+                  <label class="flex cursor-pointer items-start gap-2 text-[12px]">
+                    <input
+                      type="checkbox"
+                      class="mt-0.5 h-3.5 w-3.5 accent-(--accent)"
+                      checked={assistMods.has(mod.id)}
+                      onchange={() => toggleAssist(mod.id)}
+                    />
+                    <span>
+                      <span>{mod.label}</span>
+                      <span class="block text-[10px] text-(--text-muted)">{mod.hint}</span>
+                    </span>
+                  </label>
+                {/each}
+              </div>
+            </section>
           {/if}
 
           {#if needsBuilds}

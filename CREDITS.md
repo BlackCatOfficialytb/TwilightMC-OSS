@@ -81,7 +81,7 @@ by the theme ground; a missing glyph always falls back to Twemoji.
   under the **Creative Commons Attribution 4.0 International (CC-BY 4.0)**
   license. Attribution is kept here as long as any Twemoji glyphs ship.
 
-## Special thanks
+## Community Inspiration & Special Thanks
 
 - Special thanks to `cheryy_on_top` and `mimoji` from `discord.gg/sabatank`
   for the hilarious late-night debate about the Minecraft Narrator jumpscare

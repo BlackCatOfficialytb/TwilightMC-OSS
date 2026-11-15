@@ -57,6 +57,12 @@ pub(crate) struct Settings {
     pub(crate) java_dir: Option<String>,
     #[serde(default)]
     pub(crate) skins_dir: Option<String>,
+    /// Accessibility: screen-reader & audio navigation profile (Blind Mode).
+    #[serde(default)]
+    pub(crate) blind_mode: bool,
+    /// Accessibility: closed-captions & visual sound-cues profile (Deaf Mode).
+    #[serde(default)]
+    pub(crate) deaf_mode: bool,
     /// Overrides the staging/temp root: staging becomes
     /// `<downloads_dir>\twilightmc_staging` instead of `%TEMP%\…`.
     #[serde(default)]

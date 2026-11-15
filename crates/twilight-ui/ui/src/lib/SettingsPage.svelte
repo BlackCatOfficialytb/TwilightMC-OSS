@@ -19,6 +19,8 @@
   let {
     version = '',
     theme = $bindable('twilight-dark'),
+    blindMode = $bindable(false),
+    deafMode = $bindable(false),
     storage = null,
     runtimes = [],
     scanning = false,
@@ -46,6 +48,7 @@
     { id: 'appearance', label: 'Appearance', icon: '🎨' },
     { id: 'java', label: 'Java & Memory', icon: '☕' },
     { id: 'storage', label: 'Folders', icon: '📁' },
+    { id: 'accessibility', label: 'Accessibility', icon: '♿' },
     { id: 'about', label: 'About & Updates', icon: 'ℹ' },
   ];
   let section = $state('appearance');
@@ -589,6 +592,71 @@
             </div>
           {/each}
         {/if}
+      {:else if section === 'accessibility'}
+        <h2 class="text-[16px] font-semibold">Accessibility</h2>
+        <p class="mt-1 text-[12px] text-(--text-muted)">
+          Assistive profiles that adapt suggestions, installs and pre-launch setup for screen-reader and caption users.
+        </p>
+
+        <div class="mt-6 flex items-center justify-between gap-4 rounded border border-(--border) bg-(--bg-subtle) p-4">
+          <div class="min-w-0">
+            <div class="text-[12px] font-medium">Blind Mode</div>
+            <p class="mt-1 text-[11px] text-(--text-muted)">
+              Screen reader &amp; audio navigation. Suggests Minecraft Access and spatial-audio mods on
+              Fabric; Fabric is strongly recommended over Vanilla or Horizon.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={blindMode}
+            class="relative h-6 w-11 shrink-0 rounded-full border transition-colors {blindMode
+              ? 'border-transparent bg-(--accent)'
+              : 'border-(--border) bg-(--bg-surface)'}"
+            aria-label="Blind Mode (screen reader and audio navigation): suggests Minecraft Access on Fabric and recommends Fabric over Vanilla or Horizon"
+            title="Toggle Blind Mode"
+            onclick={() => (blindMode = !blindMode)}
+          >
+            <span
+              class="absolute top-[2px] left-[2px] h-[18px] w-[18px] rounded-full bg-white shadow transition-transform {blindMode
+                ? 'translate-x-[22px]'
+                : ''}"
+              aria-hidden="true"
+            ></span>
+          </button>
+        </div>
+
+        <div class="mt-4 flex items-center justify-between gap-4 rounded border border-(--border) bg-(--bg-subtle) p-4">
+          <div class="min-w-0">
+            <div class="text-[12px] font-medium">Deaf Mode</div>
+            <p class="mt-1 text-[11px] text-(--text-muted)">
+              Closed captions &amp; visual sound cues. Enforces <span class="font-mono">showSubtitles:true</span> in
+              <span class="font-mono">options.txt</span> before every launch and suggests visual-sound Fabric mods.
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={deafMode}
+            class="relative h-6 w-11 shrink-0 rounded-full border transition-colors {deafMode
+              ? 'border-transparent bg-(--accent)'
+              : 'border-(--border) bg-(--bg-surface)'}"
+            aria-label="Deaf Mode (closed captions and visual sound cues): enforces showSubtitles true in options.txt before launch and suggests visual-sound Fabric mods"
+            title="Toggle Deaf Mode"
+            onclick={() => (deafMode = !deafMode)}
+          >
+            <span
+              class="absolute top-[2px] left-[2px] h-[18px] w-[18px] rounded-full bg-white shadow transition-transform {deafMode
+                ? 'translate-x-[22px]'
+                : ''}"
+              aria-hidden="true"
+            ></span>
+          </button>
+        </div>
+
+        <p class="mt-4 text-[11px] text-(--text-muted)" aria-live="polite">
+          Blind Mode is {blindMode ? 'on' : 'off'}. Deaf Mode is {deafMode ? 'on' : 'off'}.
+        </p>
       {:else}
         <h2 class="text-[16px] font-semibold">About &amp; Updates</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">Build info and project links.</p>

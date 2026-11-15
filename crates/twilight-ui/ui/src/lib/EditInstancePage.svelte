@@ -9,7 +9,7 @@
   import { pushOverlay, popOverlay } from './overlays.js';
   import ModrinthBrowserModal from './ModrinthBrowserModal.svelte';
 
-  let { instance, storage = null, onback, onopenconsole } = $props();
+  let { instance, storage = null, blindMode = false, deafMode = false, onback, onopenconsole } = $props();
 
   const sections = [
     { id: 'components', label: 'Version Components', icon: '🧱' },
@@ -76,6 +76,42 @@
     } finally {
       modsBusy = false;
     }
+  }
+
+  // ---- accessibility (Blind/Deaf Mode) ----
+
+  const ASSIST_LABELS = { 'minecraft-access': 'Minecraft Access', echosight: 'EchoSight' };
+
+  // key mods of each active profile that are missing from the mods folder
+  const missingKeyMods = $derived([
+    ...(blindMode && !mods.some((m) => m.filename.toLowerCase().includes('minecraft-access'))
+      ? ['minecraft-access']
+      : []),
+    ...(deafMode && !mods.some((m) => m.filename.toLowerCase().includes('echosight'))
+      ? ['echosight']
+      : []),
+  ]);
+
+  let assistInstalling = $state(false);
+
+  async function installKeyMods() {
+    assistInstalling = true;
+    try {
+      for (const projectId of missingKeyMods) {
+        await window.__TAURI__.core.invoke('install_mod_with_deps', {
+          instanceId: instance.id,
+          projectId,
+          gameVersion: instance.minecraft_version,
+          loader: 'fabric',
+        });
+      }
+      modsMsg = 'Accessibility mods installed.';
+    } catch (e) {
+      modsMsg = String(e);
+    } finally {
+      assistInstalling = false;
+    }
+    await listMods();
   }
 
   async function toggleMod(mod) {
@@ -234,6 +270,27 @@
         <p class="mt-1 text-[12px] text-(--text-muted)">
           Every <span class="font-mono">.jar</span> in this instance's mods folder; toggling renames it in place.
         </p>
+
+        {#if (blindMode || deafMode) && instance.loader_type === 'Fabric' && missingKeyMods.length}
+          <div
+            class="mt-4 rounded border border-amber-500/30 bg-amber-500/10 p-3"
+            role="status"
+            aria-live="polite"
+          >
+            <p class="text-[12px] text-amber-400">
+              <strong>{missingKeyMods.map((id) => ASSIST_LABELS[id] ?? id).join(' and ')}</strong>
+              {missingKeyMods.length > 1 ? 'are' : 'is'} not installed yet — recommended for your
+              accessibility profile. Required dependencies (e.g. Fabric API) install automatically.
+            </p>
+            <button
+              class="mt-2 rounded border border-amber-500/40 px-3 py-1.5 text-[12px] font-medium text-amber-400 hover:bg-amber-500/20 disabled:opacity-40"
+              disabled={modsBusy || assistInstalling}
+              onclick={installKeyMods}
+            >
+              {assistInstalling ? 'Installing…' : 'Install Recommended Accessibility Mods'}
+            </button>
+          </div>
+        {/if}
 
         <div class="mt-6 flex items-center justify-between">
           <span class="text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Installed ({mods.length})</span>

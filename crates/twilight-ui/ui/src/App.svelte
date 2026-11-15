@@ -66,6 +66,20 @@
     window.__TAURI__?.core.invoke('set_mode_config', { mode }).catch(() => {});
   });
 
+  // Accessibility profiles: Blind Mode (screen reader & audio navigation) and
+  // Deaf Mode (closed captions & visual sound cues); same local-first +
+  // settings.json mirror pattern as the launcher/client mode above.
+  let blindMode = $state(localStorage.getItem('twilight-blind-mode') === 'true');
+  let deafMode = $state(localStorage.getItem('twilight-deaf-mode') === 'true');
+
+  $effect(() => {
+    localStorage.setItem('twilight-blind-mode', String(blindMode));
+    localStorage.setItem('twilight-deaf-mode', String(deafMode));
+    window.__TAURI__?.core
+      .invoke('set_accessibility_config', { blindMode, deafMode })
+      .catch(() => {});
+  });
+
   const nav = [
     { id: 'instances', label: 'Instances', icon: 'instances' },
     { id: 'worlds', label: 'Servers & P2P', icon: 'worlds' },
@@ -723,7 +737,7 @@
           </div>
         {/if}
       </div>
-      <span class="text-xs text-(--text-muted)">{status}</span>
+      <span class="text-xs text-(--text-muted)" aria-live="polite">{status}</span>
     </header>
 
     <main class="min-w-0 flex-1 overflow-y-auto p-6">
@@ -750,6 +764,8 @@
         <EditInstancePage
           instance={editFor}
           {storage}
+          {blindMode}
+          {deafMode}
           onback={() => (editFor = null)}
           onopenconsole={() => (drawerOpen = true)}
         />
@@ -758,6 +774,8 @@
         <SettingsPage
           {version}
           bind:theme
+          bind:blindMode
+          bind:deafMode
           {storage}
           {runtimes}
           {scanning}
@@ -984,6 +1002,8 @@
   {#if wizardOpen}
     <NewInstanceModal
       groups={groupList}
+      {blindMode}
+      {deafMode}
       onclose={() => (wizardOpen = false)}
       oncreated={onWizardCreated}
     />
