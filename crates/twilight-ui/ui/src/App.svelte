@@ -12,6 +12,9 @@
   import SkinFace from './lib/SkinFace.svelte';
   import LauncherIcon from './lib/LauncherIcon.svelte';
   import Twemoji from './lib/Twemoji.svelte';
+  import AlertDialog from './lib/AlertDialog.svelte';
+  import ToastContainer from './lib/ToastContainer.svelte';
+  import { toast } from './lib/alerts.svelte.js';
   import { topOverlay } from './lib/overlays.js';
   import { isDarkTheme, loadSavedAccent, normalizeThemeId, applyTheme } from './lib/theme';
   import { syncIconTheme } from './lib/icons';
@@ -216,6 +219,7 @@
     const text = consoleLines.map((l) => l.line).join('\n');
     try {
       await navigator.clipboard.writeText(text);
+      toast('Logs copied to clipboard.', 'success');
     } catch {
       const area = document.createElement('textarea');
       area.value = text;
@@ -288,6 +292,7 @@
       // drawer, never a silent no-op
       console.error('Launch failed:', e);
       logLine({ stream: 'stderr', line: `[ERROR] Launch failed: ${e}` });
+      toast(`Launch failed: ${e}`, 'error');
       status = 'Launch failed';
     } finally {
       gameRunning = false;
@@ -356,9 +361,11 @@
       const row = await api('duplicate_instance', { instanceId: selectedInst.id });
       await loadInstances();
       selectedId = row.id;
+      toast(`Copied ${label}.`, 'success');
       status = `Copied ${label}.`;
     } catch (e) {
       status = String(e);
+      toast(`Copy failed: ${e}`, 'error');
     }
   }
 
@@ -390,9 +397,11 @@
     if (!selectedInst) return;
     try {
       const path = await api('create_desktop_shortcut', { instanceId: selectedInst.id });
+      toast(`Shortcut created: ${path}`, 'success');
       status = `Shortcut created: ${path}`;
     } catch (e) {
       status = String(e);
+      toast(`Shortcut failed: ${e}`, 'error');
     }
   }
 
@@ -814,7 +823,7 @@
             title={storage ? storage.instances_dir : ''}
             onclick={openInstanceDir}
           >
-            <LauncherIcon name="viewfolder" size={14} /> Instance Folder
+            <LauncherIcon name="folder" size={14} /> Instance Folder
           </button>
           <button
             class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
@@ -1111,4 +1120,8 @@
       </div>
     </div>
   {/if}
+
+  <!-- the one mounted alert dialog + toast stack (alerts.svelte.js drives both) -->
+  <AlertDialog />
+  <ToastContainer />
 </div>

@@ -102,7 +102,7 @@
           instanceId: instance.id,
           projectId,
           gameVersion: instance.minecraft_version,
-          loader: 'fabric',
+          loader: instance.loader_type.toLowerCase(),
         });
       }
       modsMsg = 'Accessibility mods installed.';
@@ -271,7 +271,7 @@
           Every <span class="font-mono">.jar</span> in this instance's mods folder; toggling renames it in place.
         </p>
 
-        {#if (blindMode || deafMode) && instance.loader_type === 'Fabric' && missingKeyMods.length}
+        {#if (blindMode || deafMode) && (instance.loader_type === 'Fabric' || instance.loader_type === 'Quilt') && missingKeyMods.length}
           <div
             class="mt-4 rounded border border-amber-500/30 bg-amber-500/10 p-3"
             role="status"

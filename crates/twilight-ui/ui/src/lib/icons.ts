@@ -66,6 +66,10 @@ const EMOJI: Record<string, string> = {
   moon: '🌙', // 1f319 vendored
   package: '📦', // 1f4e6 vendored
   modrinth: '🧩', // 1f9e9 vendored
+  // alert dialog variants (raw characters: never broken, any pack):
+  success: '✅',
+  warning: '⚠',
+  error: '⛔',
   // SVG names Twemoji renders as raw characters (no vendored asset needed):
   instances: '📁', // 1f4c1 vendored
   folder: '📁', // 1f4c1 vendored

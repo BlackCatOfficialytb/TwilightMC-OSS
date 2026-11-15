@@ -83,9 +83,11 @@
   ]);
 
   // the checklist resets with the loader/profile: Blind Mode pre-checks its
-  // core mod (Minecraft Access) on Fabric
+  // core mod (Minecraft Access) on Fabric or Quilt
   $effect(() => {
-    assistMods = new Set(blindMode && loader === 'fabric' ? ['minecraft-access'] : []);
+    assistMods = new Set(
+      blindMode && (loader === 'fabric' || loader === 'quilt') ? ['minecraft-access'] : [],
+    );
   });
 
   function toggleAssist(id) {
@@ -241,14 +243,15 @@
         }
       }
       // accessibility checklist: install the picked assistive mods (+ their
-      // required Modrinth dependencies) right after creation
+      // required Modrinth dependencies) right after creation, with whatever
+      // loader the user picked (Quilt resolves via QFAPI)
       for (const projectId of assistMods) {
         try {
           await invoke('install_mod_with_deps', {
             instanceId: row.id,
             projectId,
             gameVersion: version,
-            loader: 'fabric',
+            loader,
           });
         } catch (e) {
           warning = warning
@@ -464,18 +467,19 @@
               class="mt-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-400"
             >
               Blind Mode Notice: Vanilla Minecraft's built-in Narrator lacks 3D world navigation and
-              block inspection, and Horizon does not support Fabric accessibility mods yet. We
-              strongly recommend selecting <strong>Fabric</strong> with Minecraft Access.
+              block inspection. We strongly recommend selecting <strong>Fabric</strong> or
+              <strong>Quilt</strong> with Minecraft Access.
             </div>
           {/if}
 
-          {#if loader === 'fabric' && assistOptions.length}
+          {#if (loader === 'fabric' || loader === 'quilt') && assistOptions.length}
             <section class="mt-3 border-t border-(--border) pt-3">
               <h4 class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">
                 Accessibility mods
               </h4>
               <p class="mt-0.5 text-[10px] text-(--text-muted)">
                 Installed right after the instance is created.
+                {loader === 'quilt' ? 'Dependencies resolve through QFAPI.' : ''}
               </p>
               <div class="mt-1.5 flex flex-col gap-1.5">
                 {#each assistOptions as mod (mod.id)}
