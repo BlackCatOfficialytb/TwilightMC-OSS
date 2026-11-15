@@ -82,10 +82,12 @@ pub struct LaunchArgs {
     /// Explicit java executable; falls back to full JVM discovery + `select_best_java`.
     #[arg(long, value_name = "FILE", env = "TWILIGHTMC_JAVA")]
     pub java: Option<PathBuf>,
-    /// Mod loader composited onto the launch (`fabric` / `quilt`, case-insensitive).
+    /// Mod loader composited onto the launch (`fabric`, `quilt`, `forge`,
+    /// `neoforge`; case-insensitive).
     #[arg(long, value_name = "LOADER", env = "TWILIGHTMC_LOADER")]
     pub loader: Option<String>,
-    /// Pinned loader version; empty/omitted resolves the latest stable release.
+    /// Pinned loader version; empty/omitted resolves the latest stable release
+    /// (`forge`/`neoforge`: the index's recommended build for this game version).
     #[arg(long, value_name = "VERSION", env = "TWILIGHTMC_LOADER_VERSION")]
     pub loader_version: Option<String>,
     /// Print the assembled command and exit; no downloads, no natives writes, no spawn.

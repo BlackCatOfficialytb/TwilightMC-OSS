@@ -74,18 +74,36 @@ async fn load_pack(
     Ok((size, mrpack, index))
 }
 
-/// Loader decision from the dependencies table, mirroring the CLI:
-/// `fabric-loader` / `quilt-loader`; a pack claiming both is rejected.
+/// Loader decision from the dependencies table, mirroring the CLI: the four
+/// spec loader keys; a pack claiming more than one loader is rejected.
 fn detect_loader(
     dependencies: &std::collections::BTreeMap<String, String>,
 ) -> Result<(String, String), String> {
-    let fabric = dependencies.get("fabric-loader");
-    let quilt = dependencies.get("quilt-loader");
-    match (fabric, quilt) {
-        (Some(_), Some(_)) => Err("this pack declares both fabric-loader and quilt-loader".into()),
-        (Some(version), None) => Ok(("fabric".into(), version.trim().to_owned())),
-        (None, Some(version)) => Ok(("quilt".into(), version.trim().to_owned())),
-        (None, None) => Ok((String::new(), String::new())),
+    const KEYS: [(&str, &str); 4] = [
+        ("fabric-loader", "fabric"),
+        ("quilt-loader", "quilt"),
+        ("forge", "forge"),
+        ("neoforge", "neoforge"),
+    ];
+    let claimed: Vec<(&str, String)> = KEYS
+        .iter()
+        .filter_map(|(key, token)| {
+            dependencies
+                .get(*key)
+                .map(|version| (*token, version.trim().to_owned()))
+        })
+        .collect();
+    match claimed.len() {
+        0 => Ok((String::new(), String::new())),
+        1 => Ok((claimed[0].0.to_owned(), claimed[0].1.clone())),
+        _ => Err(format!(
+            "this pack declares more than one mod loader ({})",
+            claimed
+                .iter()
+                .map(|(token, _)| *token)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )),
     }
 }
 

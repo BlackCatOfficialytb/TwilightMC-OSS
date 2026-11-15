@@ -141,20 +141,37 @@ async fn fetch_http(url: &str) -> Result<Vec<u8>, CliError> {
     Ok(bytes.to_vec())
 }
 
-/// Reads the loader decision out of the index dependencies: `fabric-loader`
-/// and `quilt-loader` map to their loader, an empty version means "latest".
-/// A pack claiming both loaders is ambiguous and rejected.
+/// Reads the loader decision out of the index dependencies: the four loader
+/// keys map to their loader, an empty version means "latest". A pack claiming
+/// more than one loader is ambiguous and rejected.
 fn detect_loader(
     dependencies: &BTreeMap<String, String>,
 ) -> Result<Option<(ModLoader, Option<String>)>, CliError> {
-    match (
-        dependencies.get("fabric-loader"),
-        dependencies.get("quilt-loader"),
-    ) {
-        (Some(_), Some(_)) => Err(CliError::ModpackAmbiguousLoaders),
-        (Some(version), None) => Ok(Some((ModLoader::Fabric, non_empty(Some(version.as_str()))))),
-        (None, Some(version)) => Ok(Some((ModLoader::Quilt, non_empty(Some(version.as_str()))))),
-        (None, None) => Ok(None),
+    // spec keys for the Forge family are `forge` / `neoforge`; the `-loader`
+    // spellings of fabric/quilt keep their historic names
+    const KEYS: [(&str, ModLoader); 4] = [
+        ("fabric-loader", ModLoader::Fabric),
+        ("quilt-loader", ModLoader::Quilt),
+        ("forge", ModLoader::Forge),
+        ("neoforge", ModLoader::NeoForge),
+    ];
+    let claimed: Vec<(ModLoader, Option<String>)> = KEYS
+        .iter()
+        .filter_map(|(key, loader)| {
+            dependencies
+                .get(*key)
+                .map(|version| (*loader, non_empty(Some(version.as_str()))))
+        })
+        .collect();
+    match claimed.len() {
+        0 => Ok(None),
+        1 => Ok(Some(claimed[0].clone())),
+        _ => Err(CliError::ModpackAmbiguousLoaders {
+            loaders: claimed
+                .iter()
+                .map(|(loader, _)| loader.to_string())
+                .collect(),
+        }),
     }
 }
 
@@ -270,7 +287,45 @@ mod tests {
             ("quilt-loader".to_owned(), "0.26.4".to_owned()),
         ]);
         let err = detect_loader(&deps).unwrap_err();
-        assert!(matches!(err, CliError::ModpackAmbiguousLoaders), "{err:?}");
+        assert!(
+            matches!(err, CliError::ModpackAmbiguousLoaders { ref loaders }
+                if loaders == &["fabric".to_owned(), "quilt".to_owned()]),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn forge_family_loader_keys_are_recognized() {
+        let deps: BTreeMap<String, String> = BTreeMap::from([
+            ("minecraft".to_owned(), "1.20.1".to_owned()),
+            ("forge".to_owned(), "47.4.29".to_owned()),
+        ]);
+        assert_eq!(
+            detect_loader(&deps).unwrap(),
+            Some((ModLoader::Forge, Some("47.4.29".to_owned())))
+        );
+
+        let deps: BTreeMap<String, String> = BTreeMap::from([
+            ("minecraft".to_owned(), "1.21.4".to_owned()),
+            ("neoforge".to_owned(), String::new()),
+        ]);
+        assert_eq!(
+            detect_loader(&deps).unwrap(),
+            Some((ModLoader::NeoForge, None)),
+            "an empty pin defers to the recommended build"
+        );
+
+        // a pack claiming a Forge family loader and fabric is ambiguous
+        let deps: BTreeMap<String, String> = BTreeMap::from([
+            ("forge".to_owned(), "47.4.29".to_owned()),
+            ("fabric-loader".to_owned(), "0.16.9".to_owned()),
+        ]);
+        let err = detect_loader(&deps).unwrap_err();
+        assert!(
+            matches!(err, CliError::ModpackAmbiguousLoaders { ref loaders }
+                if loaders == &["fabric".to_owned(), "forge".to_owned()]),
+            "{err:?}"
+        );
     }
 
     #[test]

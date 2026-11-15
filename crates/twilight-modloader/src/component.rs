@@ -1,8 +1,9 @@
-//! Composite launch component: a raw loader-meta profile becomes the Knot
-//! main-class override plus the loader libraries to download (mapping jar
-//! first, then common, then client libraries) and append to the classpath.
+//! Composite launch component: a raw loader-meta profile becomes the main-class
+//! override plus the loader libraries to download and append to the classpath
+//! (fabric/quilt: mapping jar first, then common, then client libraries;
+//! Forge/NeoForge Meta v1: the profile's own `libraries`).
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::Path;
 
 use serde::Deserialize;
@@ -27,24 +28,39 @@ pub struct ResolvedLoaderLib {
     pub sha1: Option<String>,
 }
 
-/// Composite launch data for one resolved loader profile: the Knot main class
-/// takes over from the vanilla manifest main class, and the loader libraries
-/// are downloaded into the shared library store and prepended to the classpath.
+/// Composite launch data for one resolved loader profile: the main class takes
+/// over from the vanilla manifest, and the loader libraries are downloaded into
+/// the shared library store and prepended to the classpath.
 #[derive(Debug, Clone)]
 pub struct LoaderProfile {
     pub loader: ModLoader,
     pub loader_version: String,
     pub main_class: String,
-    /// Mapping jar (fabric `intermediary` / quilt `hashed`) first, then common
-    /// followed by client libraries, de-duplicated by coordinate.
+    /// Extra JVM arguments (`+jvmArgs`); token-substituted by the caller.
+    pub jvm_args: Vec<String>,
+    /// Full game-argument template the profile overrides the manifest with
+    /// (`minecraftArguments`). `None` keeps the vanilla manifest's arguments.
+    pub minecraft_arguments: Option<String>,
+    /// Launch-wrapper tweaker classes (`+tweakers`), emitted as
+    /// `--tweakClass` pairs ahead of the profile's own arguments.
+    pub tweakers: Vec<String>,
+    /// Profile traits (`+traits`), merged into the manifest trait set.
+    pub traits: BTreeSet<String>,
+    /// Classpath entries.
     pub libraries: Vec<ResolvedLoaderLib>,
+    /// Files staged into the library store but kept off the classpath
+    /// (Forge/NeoForge `mavenFiles`: installers, universal jars, tooling).
+    pub maven_files: Vec<ResolvedLoaderLib>,
 }
 
 impl LoaderProfile {
     /// Loader jars as downloader requests rooted at the shared library store.
+    /// `mavenFiles` stage alongside the classpath entries: the Forge wrapper
+    /// locates them inside the libraries directory, not on the classpath.
     pub fn download_requests(&self, library_root: &Path) -> Vec<DownloadRequest> {
         self.libraries
             .iter()
+            .chain(self.maven_files.iter())
             .map(|lib| DownloadRequest {
                 url: lib.url.clone(),
                 dest: library_root.join(&lib.storage),
@@ -58,8 +74,9 @@ impl LoaderProfile {
 // raw meta shapes
 // ---------------------------------------------------------------------------
 
-/// Unified raw profile shape; fabric v2 and quilt v3 both fit it. Every field
-/// is optional so the same model covers both sexes of profiles.
+/// Unified raw profile shape; fabric v2, quilt v3 and the Prism/Freesm Meta v1
+/// Forge/NeoForge profiles all fit it. Every field is optional so the same
+/// model covers both sexes of profiles.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RawProfile {
@@ -74,6 +91,27 @@ pub(crate) struct RawProfile {
     maven: Option<String>,
     #[serde(default)]
     launcher_meta: Option<RawLauncherMeta>,
+    /// Meta v1: the build string the profile was published under.
+    #[serde(default)]
+    version: Option<String>,
+    /// Meta v1: main class to spawn (`...forgewrapper.installer.Main`).
+    #[serde(default)]
+    main_class: Option<String>,
+    /// Meta v1: full game-argument template.
+    #[serde(default)]
+    minecraft_arguments: Option<String>,
+    #[serde(default, rename = "+jvmArgs")]
+    jvm_args: Vec<String>,
+    #[serde(default, rename = "+tweakers")]
+    tweakers: Vec<String>,
+    #[serde(default, rename = "+traits")]
+    traits: Vec<String>,
+    /// Meta v1: classpath entries.
+    #[serde(default)]
+    libraries: Vec<RawMetaLib>,
+    /// Meta v1: library-store files kept off the classpath.
+    #[serde(default)]
+    maven_files: Vec<RawMetaLib>,
 }
 
 /// `loader: { version: "...", stable: true|false }` — fabric wording.
@@ -118,9 +156,95 @@ struct RawLibEntry {
     sha1: Option<String>,
 }
 
+/// One Meta v1 `libraries` / `mavenFiles` entry (Mojang-style shape).
+#[derive(Debug, Clone, Deserialize)]
+struct RawMetaLib {
+    name: String,
+    #[serde(default)]
+    downloads: Option<RawDownloads>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RawDownloads {
+    #[serde(default)]
+    artifact: Option<RawArtifact>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RawArtifact {
+    #[serde(default)]
+    url: Option<String>,
+    /// Verbatim store path; authoritative when present because coordinates do
+    /// not round-trip (versions may carry `+`, names an `@zip` extension).
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    sha1: Option<String>,
+}
+
 impl RawProfile {
     /// Builds the composite [`LoaderProfile`] from one raw profile object.
     pub(crate) fn into_profile(self, loader: ModLoader) -> Result<LoaderProfile, LoaderError> {
+        match loader {
+            ModLoader::Forge | ModLoader::NeoForge => self.into_meta_profile(loader),
+            ModLoader::Fabric | ModLoader::Quilt => self.into_knot_profile(loader),
+        }
+    }
+
+    /// Prism/Freesm Meta v1 (Forge, NeoForge): the profile owns its main class,
+    /// classpath entries and library-store files. Nothing is synthesized — the
+    /// published payload is already the complete wrapper launch data.
+    fn into_meta_profile(self, loader: ModLoader) -> Result<LoaderProfile, LoaderError> {
+        let loader_version = self
+            .version
+            .as_deref()
+            .map(str::trim)
+            .filter(|version| !version.is_empty())
+            .map(str::to_owned)
+            .or_else(|| version_from_coordinate(self.maven.as_deref()))
+            .ok_or(LoaderError::MissingField { field: "version" })?;
+
+        // Meta v1 profiles normally carry the wrapper class; Forge 1.12.2-era
+        // payloads name the launchwrapper class and lean on `+tweakers`
+        // instead, so fall back to the loader's own default.
+        let main_class = self
+            .main_class
+            .as_deref()
+            .map(str::trim)
+            .filter(|class| !class.is_empty())
+            .unwrap_or_else(|| loader.knot_main_class())
+            .to_owned();
+
+        let libraries = self
+            .libraries
+            .iter()
+            .map(|lib| resolve_meta_lib(lib, loader.maven_base()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let maven_files = self
+            .maven_files
+            .iter()
+            .map(|lib| resolve_meta_lib(lib, loader.maven_base()))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(LoaderProfile {
+            loader,
+            loader_version,
+            main_class,
+            jvm_args: self.jvm_args,
+            minecraft_arguments: self
+                .minecraft_arguments
+                .map(|args| args.trim().to_owned())
+                .filter(|args| !args.is_empty()),
+            tweakers: self.tweakers,
+            traits: self.traits.into_iter().collect(),
+            libraries,
+            maven_files,
+        })
+    }
+
+    /// Fabric/Quilt: mapping jar, then common + client libraries, then the
+    /// synthesized loader jar when the meta dropped it.
+    fn into_knot_profile(self, loader: ModLoader) -> Result<LoaderProfile, LoaderError> {
         let maven_base = loader.maven_base();
 
         // fabric declares `loader.version`; quilt only mirrors the loader
@@ -137,6 +261,9 @@ impl RawProfile {
         let mapping = match loader {
             ModLoader::Fabric => self.intermediary,
             ModLoader::Quilt => self.hashed,
+            ModLoader::Forge | ModLoader::NeoForge => {
+                unreachable!("meta v1 profiles take the other branch")
+            }
         }
         .ok_or_else(|| LoaderError::MissingField {
             field: loader.mapping_field(),
@@ -180,7 +307,9 @@ impl RawProfile {
         // `ClassNotFoundException: ...launch.knot.KnotClient`. Synthesize the
         // loader coordinate from the resolved version unless the meta already
         // lists it (older meta wordings did).
-        let loader_coordinate = loader.loader_coordinate(&loader_version);
+        let loader_coordinate = loader
+            .loader_coordinate(&loader_version)
+            .expect("fabric/quilt always carry a loader artifact coordinate");
         if !libraries.iter().any(|lib| lib.name == loader_coordinate) {
             // right behind the mapping jar keeps the loader-first classpath
             libraries.insert(1, resolve_ref(&loader_coordinate, None, None, maven_base)?);
@@ -190,7 +319,12 @@ impl RawProfile {
             loader,
             loader_version,
             main_class: loader.knot_main_class().to_owned(),
+            jvm_args: Vec::new(),
+            minecraft_arguments: None,
+            tweakers: Vec::new(),
+            traits: BTreeSet::new(),
             libraries,
+            maven_files: Vec::new(),
         })
     }
 }
@@ -198,6 +332,33 @@ impl RawProfile {
 /// Extracts the version segment of a `group:artifact:version[:...]` coordinate.
 fn version_from_coordinate(coordinate: Option<&str>) -> Option<String> {
     coordinate?.split(':').nth(2).map(str::to_owned)
+}
+
+/// Resolves one Meta v1 `libraries`/`mavenFiles` entry. The metadata usually
+/// names the storage path verbatim; when it does not (the Forge wrapper and
+/// installer entries), expand the coordinate instead. URL-less entries fall
+/// back to the loader's own maven repository.
+fn resolve_meta_lib(
+    entry: &RawMetaLib,
+    fallback_base: &str,
+) -> Result<ResolvedLoaderLib, LoaderError> {
+    let artifact = entry.downloads.as_ref().and_then(|d| d.artifact.as_ref());
+    let storage = match artifact.and_then(|artifact| artifact.path.as_deref()) {
+        Some(path) if !path.trim().is_empty() => path.trim().to_owned(),
+        _ => maven_storage_path(&entry.name)?,
+    };
+    let url = match artifact.and_then(|artifact| artifact.url.as_deref()) {
+        Some(url) if !url.trim().is_empty() => url.trim().to_owned(),
+        _ => repo_url(fallback_base, &storage),
+    };
+    Ok(ResolvedLoaderLib {
+        name: entry.name.clone(),
+        url,
+        storage,
+        sha1: artifact
+            .and_then(|artifact| artifact.sha1.as_deref())
+            .map(str::to_owned),
+    })
 }
 
 /// Resolves one coordinate reference into URL + storage path.
@@ -230,8 +391,16 @@ fn repo_url(base: &str, storage: &str) -> String {
 }
 
 /// Expands `group:artifact:version[:classifier[:extension]]` into its maven
-/// storage path `group/artifact/version/artifact-version[-classifier][.ext].jar`.
+/// storage path `group/artifact/version/artifact-version[-classifier].<ext>`.
+/// A `name@zip` IEEE suffix names the extension instead of defaulting to
+/// `.jar` (NeoForge's `neoform@zip`).
 pub(crate) fn maven_storage_path(coordinate: &str) -> Result<String, LoaderError> {
+    let (coordinate, suffix) = match coordinate.rsplit_once('@') {
+        Some((coordinate, extension)) if !extension.is_empty() && !extension.contains(':') => {
+            (coordinate, Some(extension))
+        }
+        _ => (coordinate, None),
+    };
     let segments: Vec<&str> = coordinate.split(':').collect();
     if segments.len() < 3 || segments.len() > 5 || segments.iter().any(|s| s.is_empty()) {
         return Err(LoaderError::BadCoordinate {
@@ -246,9 +415,10 @@ pub(crate) fn maven_storage_path(coordinate: &str) -> Result<String, LoaderError
         segments[1],
         segments[2],
     );
+    let extension = suffix.unwrap_or("jar");
     match segments.len() {
-        3 => Ok(format!("{head}.jar")),
-        4 => Ok(format!("{head}-{}.jar", segments[3])),
+        3 => Ok(format!("{head}.{extension}")),
+        4 => Ok(format!("{head}-{}.{extension}", segments[3])),
         _ => Ok(format!("{head}-{}.{}", segments[3], segments[4])),
     }
 }
@@ -256,7 +426,10 @@ pub(crate) fn maven_storage_path(coordinate: &str) -> Result<String, LoaderError
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::resolver::{FABRIC_PROFILE_FIXTURE, QUILT_PROFILE_FIXTURE, parse_loader_meta};
+    use crate::resolver::{
+        FABRIC_PROFILE_FIXTURE, FORGE_LEGACY_PROFILE_FIXTURE, FORGE_MODERN_PROFILE_FIXTURE,
+        FORGE_WRAPPER_MAIN, NEOFORGE_PROFILE_FIXTURE, QUILT_PROFILE_FIXTURE, parse_loader_meta,
+    };
     use std::path::Path;
 
     fn fabric_profile() -> LoaderProfile {
@@ -438,6 +611,12 @@ mod tests {
             maven_storage_path("g:a:1:cls:zip").unwrap(),
             "g/a/1/a-1-cls.zip"
         );
+        // `@ext` names the extension (NeoForge's neoform@zip)
+        assert_eq!(
+            maven_storage_path("net.neoforged:neoform:1.21.4-20241203.161809@zip").unwrap(),
+            "net/neoforged/neoform/1.21.4-20241203.161809/neoform-1.21.4-20241203.161809.zip"
+        );
+        assert_eq!(maven_storage_path("g:a:1@zip").unwrap(), "g/a/1/a-1.zip");
         assert!(matches!(
             maven_storage_path("net.fabricmc"),
             Err(LoaderError::BadCoordinate { .. })
@@ -446,6 +625,145 @@ mod tests {
             maven_storage_path("g:a:"),
             Err(LoaderError::BadCoordinate { .. })
         ));
+    }
+
+    #[test]
+    fn legacy_forge_profile_carries_tweakers_and_the_launchwrapper_class() {
+        let raw: serde_json::Value = serde_json::from_str(FORGE_LEGACY_PROFILE_FIXTURE).unwrap();
+        let profile = parse_loader_meta(ModLoader::Forge, &raw).unwrap();
+        assert_eq!(profile.loader_version, "14.23.5.2864");
+        assert_eq!(profile.main_class, "net.minecraft.launchwrapper.Launch");
+        assert_eq!(
+            profile.tweakers,
+            vec!["net.minecraftforge.fml.common.launcher.FMLTweaker".to_owned()]
+        );
+        assert_eq!(
+            profile.jvm_args,
+            vec!["-Dfml.ignoreInvalidMinecraftCertificates=true".to_owned()]
+        );
+        assert!(profile.traits.contains("legacyLaunch"));
+        assert!(profile.minecraft_arguments.is_none(), "no arg template");
+        assert!(profile.maven_files.is_empty());
+        assert_eq!(profile.libraries.len(), 2);
+        assert_eq!(
+            profile.libraries[0].storage,
+            "net/minecraftforge/forge/1.12.2-14.23.5.2864/forge-1.12.2-14.23.5.2864-universal.jar"
+        );
+        assert_eq!(
+            profile.libraries[1].url,
+            "https://libraries.minecraft.net/net/minecraft/launchwrapper/1.12/launchwrapper-1.12.jar"
+        );
+    }
+
+    #[test]
+    fn modern_forge_profile_spawns_the_wrapper_and_stages_the_installer() {
+        let raw: serde_json::Value = serde_json::from_str(FORGE_MODERN_PROFILE_FIXTURE).unwrap();
+        let profile = parse_loader_meta(ModLoader::Forge, &raw).unwrap();
+        assert_eq!(profile.loader_version, "47.4.29");
+        assert_eq!(profile.main_class, FORGE_WRAPPER_MAIN);
+        assert_eq!(
+            profile.minecraft_arguments.as_deref(),
+            Some(
+                "--username ${auth_player_name} --gameDir ${game_directory} \
+                 --launchTarget forgeclient --fml.forgeVersion 47.4.29 --fml.mcVersion 1.20.1"
+            )
+        );
+        assert!(profile.tweakers.is_empty(), "modern Forge has no tweakers");
+        assert!(profile.jvm_args.is_empty());
+
+        // the wrapper artifact has no `path`: the coordinate expands instead
+        assert_eq!(
+            profile.libraries[0].name,
+            "io.github.zekerzhayard:ForgeWrapper:prism-2026-08-01"
+        );
+        assert_eq!(
+            profile.libraries[0].storage,
+            "io/github/zekerzhayard/ForgeWrapper/prism-2026-08-01/ForgeWrapper-prism-2026-08-01.jar"
+        );
+        // its URL is verbatim (Prism's own mirror), not the loader maven
+        assert_eq!(
+            profile.libraries[0].url,
+            "https://files.prismlauncher.org/maven/io/github/zekerzhayard/ForgeWrapper/prism-2026-08-01/ForgeWrapper-prism-2026-08-01.jar"
+        );
+        assert_eq!(
+            profile.libraries[0].sha1.as_deref(),
+            Some("852b7e59748da1512d40e38407eadb1f0031a996")
+        );
+        assert_eq!(
+            profile.libraries[1].storage,
+            "cpw/mods/securejarhandler/2.1.10/securejarhandler-2.1.10.jar"
+        );
+
+        // the installer stays off the classpath but is still downloaded
+        assert_eq!(profile.maven_files.len(), 1);
+        assert_eq!(
+            profile.maven_files[0].storage,
+            "net/minecraftforge/forge/1.20.1-47.4.29/forge-1.20.1-47.4.29-installer.jar"
+        );
+    }
+
+    #[test]
+    fn neoforge_profile_handles_zip_extensions_and_plus_versions() {
+        let raw: serde_json::Value = serde_json::from_str(NEOFORGE_PROFILE_FIXTURE).unwrap();
+        let profile = parse_loader_meta(ModLoader::NeoForge, &raw).unwrap();
+        assert_eq!(profile.loader, ModLoader::NeoForge);
+        assert_eq!(profile.loader_version, "21.4.161");
+        assert_eq!(profile.main_class, FORGE_WRAPPER_MAIN);
+        assert!(
+            profile
+                .minecraft_arguments
+                .as_deref()
+                .is_some_and(|args| args.contains("--launchTarget neoforgeclient"))
+        );
+        assert_eq!(profile.libraries.len(), 1);
+        assert_eq!(
+            profile.libraries[0].url,
+            "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.4.161/neoforge-21.4.161-universal.jar"
+        );
+
+        // mavenFiles keep the verbatim `path` when present: `+` in the version
+        // segment and the `@zip` extension do not round-trip coordinates
+        let storages: Vec<&str> = profile
+            .maven_files
+            .iter()
+            .map(|lib| lib.storage.as_str())
+            .collect();
+        assert_eq!(
+            storages,
+            vec![
+                "net/neoforged/neoforge/21.4.161/neoforge-21.4.161-installer.jar",
+                "net/neoforged/neoform/1.21.4-20241203.161809/neoform-1.21.4-20241203.161809.zip",
+                "net/fabricmc/sponge-mixin/0.15.2+mixin.0.8.7/sponge-mixin-0.15.2+mixin.0.8.7.jar",
+            ]
+        );
+    }
+
+    #[test]
+    fn meta_profiles_download_libraries_and_maven_files_into_one_store() {
+        let raw: serde_json::Value = serde_json::from_str(NEOFORGE_PROFILE_FIXTURE).unwrap();
+        let profile = parse_loader_meta(ModLoader::NeoForge, &raw).unwrap();
+        let requests = profile.download_requests(Path::new("S/libraries"));
+        assert_eq!(
+            requests.len(),
+            profile.libraries.len() + profile.maven_files.len(),
+            "classpath entries and library-store files are both fetched"
+        );
+        assert_eq!(
+            requests.last().unwrap().dest,
+            Path::new("S/libraries").join(
+                "net/fabricmc/sponge-mixin/0.15.2+mixin.0.8.7/sponge-mixin-0.15.2+mixin.0.8.7.jar"
+            )
+        );
+    }
+
+    #[test]
+    fn meta_profile_without_a_version_is_loud() {
+        let raw = serde_json::json!({ "mainClass": FORGE_WRAPPER_MAIN, "libraries": [] });
+        let err = parse_loader_meta(ModLoader::Forge, &raw).unwrap_err();
+        assert!(
+            matches!(err, LoaderError::MissingField { field: "version" }),
+            "{err:?}"
+        );
     }
 
     #[test]

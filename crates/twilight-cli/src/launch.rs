@@ -17,7 +17,7 @@ use twilight_downloader::{
 use twilight_horizon::AssetStore;
 use twilight_launch::{
     GameOptions, LaunchEvent, LaunchPlan, ProfileVars, QuickPlay, active_paths, classpath_string,
-    game_arguments, inject_account_vars, jvm_arguments, separator,
+    game_arguments, inject_account_vars, jvm_arguments, replace_tokens_in, separator,
 };
 use twilight_manifest::{RuntimeContext, VersionFile};
 use twilight_modloader::{LoaderProfile, ModLoader, resolve_loader_profile};
@@ -208,11 +208,48 @@ pub fn assemble_command(
     vars.insert("classpath".to_owned(), full_classpath.clone());
     vars.insert("classpath_separator".to_owned(), separator().to_owned());
 
-    let jvm_args = jvm_arguments(version, ctx, &none, &vars, None);
+    // loader traits (Meta v1 `+traits`) drive quick-play detection and travel
+    // into the diagnostics header, mirroring Prism's profile trait set
+    let traits: BTreeSet<String> = loader
+        .map(|profile| profile.traits.clone())
+        .unwrap_or_default();
+
+    // Prism prepends `+jvmArgs` (extraArguments) ahead of the manifest list
+    let mut jvm_args = loader
+        .map(|profile| {
+            profile
+                .jvm_args
+                .iter()
+                .map(|arg| replace_tokens_in(arg, &vars))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    jvm_args.extend(jvm_arguments(version, ctx, &none, &vars, None));
     let manifest_supplies_classpath = jvm_args
         .iter()
         .any(|arg| arg == "-cp" || arg == "-classpath");
-    let game_args = game_arguments(version, ctx, &none, &none, &vars, game_options);
+
+    // a Meta v1 profile owns the whole game-argument template; patching a
+    // scratch manifest reuses the legacy `minecraftArguments` substitution
+    let scratch;
+    let game_source = match loader.and_then(|profile| profile.minecraft_arguments.as_deref()) {
+        Some(arguments) => {
+            scratch = VersionFile {
+                arguments: None,
+                minecraft_arguments: Some(arguments.to_owned()),
+                ..version.clone()
+            };
+            &scratch
+        }
+        None => version,
+    };
+    let mut options = game_options.clone();
+    if let Some(profile) = loader {
+        options
+            .tweakers
+            .splice(0..0, profile.tweakers.iter().cloned());
+    }
+    let game_args = game_arguments(game_source, ctx, &none, &traits, &vars, &options);
 
     // the Knot main class takes over whenever a loader profile was resolved;
     // without one the manifest's own main class is mandatory
@@ -353,6 +390,8 @@ fn build_diagnostics(
         let (display, uid) = match profile.loader {
             ModLoader::Fabric => ("Fabric Loader", "net.fabricmc.fabric-loader"),
             ModLoader::Quilt => ("Quilt Loader", "net.quiltmc.quilt-loader"),
+            ModLoader::Forge => ("Forge Loader", "net.minecraftforge"),
+            ModLoader::NeoForge => ("NeoForge Loader", "net.neoforged"),
         };
         components.push(format!("{display} ({uid}) {}", profile.loader_version));
     }
@@ -395,8 +434,9 @@ fn build_diagnostics(
         hardware,
         components,
         main_class: plan.main_class.clone(),
-        // assemble_command runs with no trait set today
-        traits: Vec::new(),
+        traits: loader
+            .map(|profile| profile.traits.iter().cloned().collect())
+            .unwrap_or_default(),
         libraries,
         native_libraries: native_jars
             .iter()
@@ -1002,6 +1042,225 @@ mod tests {
         );
     }
 
+    /// Meta v1 Forge 1.20.1 profile: wrapper class, `minecraftArguments` and an
+    /// installer staged off the classpath.
+    const FORGE_PROFILE: &str = r#"{
+        "uid": "net.minecraftforge",
+        "version": "47.4.29",
+        "mainClass": "io.github.zekerzhayard.forgewrapper.installer.Main",
+        "minecraftArguments": "--username ${auth_player_name} --gameDir ${game_directory} --launchTarget forgeclient --fml.forgeVersion 47.4.29 --fml.mcVersion 1.20.1",
+        "+jvmArgs": ["-Dtwilight.test=${version_name}"],
+        "libraries": [
+            { "name": "io.github.zekerzhayard:ForgeWrapper:prism-2026-08-01",
+              "downloads": { "artifact": {
+                  "sha1": "852b7e59748da1512d40e38407eadb1f0031a996",
+                  "url": "https://files.prismlauncher.org/maven/io/github/zekerzhayard/ForgeWrapper/prism-2026-08-01/ForgeWrapper-prism-2026-08-01.jar" } } },
+            { "name": "cpw.mods:securejarhandler:2.1.10",
+              "downloads": { "artifact": {
+                  "path": "cpw/mods/securejarhandler/2.1.10/securejarhandler-2.1.10.jar",
+                  "sha1": "51e6a22c6c716beb11e244bf5b8be480f51dd6b5",
+                  "url": "https://maven.minecraftforge.net/cpw/mods/securejarhandler/2.1.10/securejarhandler-2.1.10.jar" } } }
+        ],
+        "mavenFiles": [
+            { "name": "net.minecraftforge:forge:1.20.1-47.4.29:installer",
+              "downloads": { "artifact": {
+                  "sha1": "5061de68499474cc8eeeede3d794afb063dd3e6d",
+                  "url": "https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.4.29/forge-1.20.1-47.4.29-installer.jar" } } }
+        ]
+    }"#;
+
+    fn forge_profile() -> LoaderProfile {
+        let raw: serde_json::Value = serde_json::from_str(FORGE_PROFILE).unwrap();
+        twilight_modloader::parse_loader_meta(ModLoader::Forge, &raw).unwrap()
+    }
+
+    #[test]
+    fn forge_profile_drives_the_wrapper_launch() {
+        let version = twilight_manifest::parse_version_file(MODERN).unwrap();
+        let paths = resolve_paths(&cfg(), &version);
+        let profile = forge_profile();
+        let plan = assemble_command(
+            &java(),
+            &ctx(),
+            &version,
+            &paths,
+            &account(),
+            Some(&profile),
+            &GameOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(plan.main_class, twilight_modloader::FORGE_WRAPPER_MAIN);
+        // `+jvmArgs` lead the jvm list, tokens substituted, manifest list after
+        assert_eq!(
+            plan.jvm_args[0], "-Dtwilight.test=26.3",
+            "{:?}",
+            plan.jvm_args
+        );
+        assert!(
+            plan.jvm_args
+                .iter()
+                .any(|arg| arg == &format!("-Djava.library.path={}", paths.natives_dir.display())),
+            "{:?}",
+            plan.jvm_args
+        );
+
+        // the profile's own argument template replaces the manifest's game args
+        assert!(
+            plan.game_args
+                .windows(2)
+                .any(|p| p[0] == "--launchTarget" && p[1] == "forgeclient"),
+            "{:?}",
+            plan.game_args
+        );
+        assert!(
+            plan.game_args
+                .windows(2)
+                .any(|p| p[0] == "--fml.forgeVersion" && p[1] == "47.4.29"),
+            "{:?}",
+            plan.game_args
+        );
+        assert!(
+            !plan.game_args.iter().any(|arg| arg == "--assetIndex"),
+            "the profile template, not the manifest list, wins: {:?}",
+            plan.game_args
+        );
+
+        // wrapper + support jar lead the classpath, main jar stays last
+        let cp_pos = plan.jvm_args.iter().position(|a| a == "-cp").unwrap();
+        let normalized = plan.jvm_args[cp_pos + 1].replace('\\', "/");
+        let entries: Vec<&str> = normalized.split(separator()).collect();
+        assert_eq!(
+            entries[0],
+            "S/libraries/io/github/zekerzhayard/ForgeWrapper/prism-2026-08-01/ForgeWrapper-prism-2026-08-01.jar"
+        );
+        assert_eq!(
+            entries[1],
+            "S/libraries/cpw/mods/securejarhandler/2.1.10/securejarhandler-2.1.10.jar"
+        );
+        assert_eq!(
+            entries.last().copied(),
+            Some("S/instances/26.3/minecraft/versions/26.3/26.3.jar")
+        );
+        assert!(
+            !normalized.contains("forge-1.20.1-47.4.29-installer.jar"),
+            "mavenFiles stay off the classpath: {normalized}"
+        );
+    }
+
+    #[test]
+    fn legacy_forge_tweakers_become_tweakclass_pairs() {
+        let version = twilight_manifest::parse_version_file(LEGACY).unwrap();
+        let paths = resolve_paths(&cfg(), &version);
+        let raw = serde_json::json!({
+            "uid": "net.minecraftforge",
+            "version": "14.23.5.2864",
+            "mainClass": "net.minecraft.launchwrapper.Launch",
+            "+tweakers": ["net.minecraftforge.fml.common.launcher.FMLTweaker"],
+            "+traits": ["legacyLaunch"],
+            "libraries": []
+        });
+        let profile = twilight_modloader::parse_loader_meta(ModLoader::Forge, &raw).unwrap();
+        let plan = assemble_command(
+            &java(),
+            &ctx(),
+            &version,
+            &paths,
+            &account(),
+            Some(&profile),
+            &GameOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(plan.main_class, "net.minecraft.launchwrapper.Launch");
+        let at = plan
+            .game_args
+            .iter()
+            .position(|arg| arg == "--tweakClass")
+            .expect("tweakers emit --tweakClass pairs");
+        assert_eq!(
+            plan.game_args[at + 1],
+            "net.minecraftforge.fml.common.launcher.FMLTweaker"
+        );
+        // legacy manifests keep their own argument string
+        assert!(
+            plan.game_args
+                .windows(2)
+                .any(|p| p[0] == "--username" && p[1] == "Steve"),
+            "{:?}",
+            plan.game_args
+        );
+    }
+
+    #[test]
+    fn dry_run_report_shows_the_forge_loader_line() {
+        let (_, paths) = assemble_for(MODERN);
+        let version = twilight_manifest::parse_version_file(MODERN).unwrap();
+        let profile = forge_profile();
+        let plan = assemble_command(
+            &java(),
+            &ctx(),
+            &version,
+            &paths,
+            &account(),
+            Some(&profile),
+            &GameOptions::default(),
+        )
+        .unwrap();
+        let report = dry_run_report(&plan, &paths, &ctx(), &account(), &java(), Some(&profile));
+        assert!(
+            report.contains(
+                "loader: forge 47.4.29 (io.github.zekerzhayard.forgewrapper.installer.Main with 2 loader libraries)"
+            ),
+            "{report}"
+        );
+        assert!(report.contains("--launchTarget"), "{report}");
+    }
+
+    #[test]
+    fn diagnostic_header_names_the_forge_component() {
+        let version = twilight_manifest::parse_version_file(MODERN).unwrap();
+        let paths = resolve_paths(&cfg(), &version);
+        let profile = forge_profile();
+        let plan = assemble_command(
+            &java(),
+            &ctx(),
+            &version,
+            &paths,
+            &account(),
+            Some(&profile),
+            &GameOptions::default(),
+        )
+        .unwrap();
+        let hardware = twilight_launch::Hardware {
+            os: "Test OS".into(),
+            cpu: "Test CPU".into(),
+            ram_total_mib: 1024,
+            ram_available_mib: 512,
+            arch: "64-bit",
+            gpu: "Unknown".into(),
+        };
+        let diag = build_diagnostics(
+            &account(),
+            &paths,
+            &version,
+            &java(),
+            Some(&profile),
+            &plan,
+            &[],
+            &[],
+            Vec::new(),
+            hardware,
+        );
+        let text = twilight_launch::render(&diag).replace('\\', "/");
+        assert!(
+            text.contains("1) Forge Loader (net.minecraftforge) 47.4.29"),
+            "{text}"
+        );
+        assert!(text.contains("2) Minecraft (net.minecraft) 26.3"), "{text}");
+        assert!(text.contains("--launchTarget"), "{text}");
+    }
+
     #[test]
     fn diagnostic_header_lists_components_libraries_and_paths() {
         let (plan, paths) = assemble_for(MODERN);
@@ -1068,10 +1327,18 @@ mod tests {
             parse_loader_token(Some(" FABRIC ")).unwrap(),
             Some(ModLoader::Fabric)
         );
+        assert_eq!(
+            parse_loader_token(Some("Forge")).unwrap(),
+            Some(ModLoader::Forge)
+        );
+        assert_eq!(
+            parse_loader_token(Some(" neoforge ")).unwrap(),
+            Some(ModLoader::NeoForge)
+        );
         assert_eq!(parse_loader_token(None).unwrap(), None);
-        let err = parse_loader_token(Some("forge")).unwrap_err();
+        let err = parse_loader_token(Some("liteloader")).unwrap_err();
         assert!(
-            matches!(err, CliError::UnknownLoader { ref given } if given == "forge"),
+            matches!(err, CliError::UnknownLoader { ref given } if given == "liteloader"),
             "{err:?}"
         );
     }

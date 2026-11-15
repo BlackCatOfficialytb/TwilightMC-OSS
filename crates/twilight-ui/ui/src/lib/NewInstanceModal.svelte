@@ -25,10 +25,10 @@
     { id: 'liteloader', label: 'LiteLoader' },
   ];
 
-  // The backend's loader catalog covers fabric/quilt; the rest render but
-  // cannot be created yet.
-  const SUPPORTED_LOADERS = ['', 'fabric', 'quilt'];
-  const BUILD_LOADERS = ['fabric', 'quilt'];
+  // The backend loader catalog covers fabric/quilt/forge/neoforge; LiteLoader
+  // still renders but cannot be created yet.
+  const SUPPORTED_LOADERS = ['', 'fabric', 'quilt', 'forge', 'neoforge'];
+  const BUILD_LOADERS = ['fabric', 'quilt', 'forge', 'neoforge'];
 
   const HELP_URL = 'https://github.com/BlackCatOfficialytb/TwilightMC-OSS#readme';
 

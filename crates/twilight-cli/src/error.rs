@@ -35,10 +35,10 @@ pub enum CliError {
     Loader(#[from] LoaderError),
     #[error(".mrpack install failed")]
     Modrinth(#[from] ModrinthError),
-    #[error("unknown mod loader {given:?} (supported: fabric, quilt)")]
+    #[error("unknown mod loader {given:?} (supported: fabric, quilt, forge, neoforge)")]
     UnknownLoader { given: String },
-    #[error("the modpack declares both fabric-loader and quilt-loader; pass a loader explicitly")]
-    ModpackAmbiguousLoaders,
+    #[error("the modpack declares more than one mod loader ({loaders:?})")]
+    ModpackAmbiguousLoaders { loaders: Vec<String> },
     #[error("account authentication failed")]
     Auth(#[from] twilight_auth::AuthError),
     #[error("io failure")]

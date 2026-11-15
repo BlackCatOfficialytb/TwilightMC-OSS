@@ -66,7 +66,8 @@ pub struct LoaderVersionRow {
     pub stable: bool,
 }
 
-/// Flattens a loader meta `versions/loader/{game}` list into dropdown rows.
+/// Flattens a fabric/quilt meta `versions/loader/{game}` array into dropdown
+/// rows (`/loader/{version,stable}` pointers).
 pub(crate) fn parse_loader_versions(raw: &serde_json::Value) -> Vec<LoaderVersionRow> {
     raw.as_array()
         .map(|list| {
@@ -84,21 +85,62 @@ pub(crate) fn parse_loader_versions(raw: &serde_json::Value) -> Vec<LoaderVersio
         .unwrap_or_default()
 }
 
+/// Meta v1 Forge/NeoForge index → dropdown rows for one game version. The
+/// index spans every game version, so it is filtered by the `net.minecraft`
+/// requirement; `recommended` maps onto the dropdown's `stable` flag.
+pub(crate) fn parse_meta_versions(
+    raw: &serde_json::Value,
+    game_version: &str,
+) -> Vec<LoaderVersionRow> {
+    twilight_modloader::parse_meta_index(raw, game_version)
+        .into_iter()
+        .map(|build| LoaderVersionRow {
+            version: build.version,
+            stable: build.recommended,
+        })
+        .collect()
+}
+
 /// Lists the builds a loader published for one Minecraft version (the
-/// wizard's loader-version dropdown; latest stable goes first in the meta).
+/// wizard's loader-version dropdown). Fabric/Quilt answer from their own meta
+/// APIs; Forge/NeoForge filter the Meta v1 index across its failover hosts.
 #[tauri::command]
 pub async fn fetch_loader_versions(
     loader: String,
     game_version: String,
 ) -> Result<Vec<LoaderVersionRow>, String> {
     let loader = ModLoader::from_token(&loader)
-        .ok_or_else(|| format!("unsupported loader {loader:?} (fabric/quilt only)"))?;
-    let base = match loader {
-        ModLoader::Fabric => twilight_modloader::FABRIC_META_BASE,
-        ModLoader::Quilt => twilight_modloader::QUILT_META_BASE,
-    };
+        .ok_or_else(|| format!("unsupported loader {loader:?} (fabric, quilt, forge, neoforge)"))?;
     let client = reqwest::Client::new();
-    let url = profile_url(base, loader, &game_version, None);
+
+    if loader.meta_uid().is_some() {
+        let mut last = String::new();
+        for base in loader.meta_v1_bases() {
+            let url = profile_url(base, loader, &game_version, None);
+            let raw = match client
+                .get(url)
+                .send()
+                .await
+                .and_then(reqwest::Response::error_for_status)
+            {
+                Ok(response) => match response.json::<serde_json::Value>().await {
+                    Ok(raw) => raw,
+                    Err(e) => {
+                        last = e.to_string();
+                        continue;
+                    }
+                },
+                Err(e) => {
+                    last = e.to_string();
+                    continue;
+                }
+            };
+            return Ok(parse_meta_versions(&raw, &game_version));
+        }
+        return Err(last);
+    }
+
+    let url = profile_url(loader.meta_base(), loader, &game_version, None);
     let raw = client
         .get(url)
         .send()
@@ -154,6 +196,40 @@ mod tests {
             "entries without a loader.version pointer are dropped"
         );
         assert!(rows.iter().any(|r| r.stable));
+    }
+
+    #[test]
+    fn meta_index_rows_filter_by_game_version() {
+        let raw: serde_json::Value = serde_json::from_str(
+            r#"{
+              "uid": "net.neoforged",
+              "versions": [
+                {"version":"21.4.161","recommended":true,
+                 "requires":[{"uid":"net.minecraft","equals":"1.21.4"}]},
+                {"version":"21.4.160","recommended":false,
+                 "requires":[{"uid":"net.minecraft","equals":"1.21.4"}]},
+                {"version":"21.5.1","recommended":true,
+                 "requires":[{"uid":"net.minecraft","equals":"1.21.5"}]}
+              ]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            parse_meta_versions(&raw, "1.21.4"),
+            vec![
+                LoaderVersionRow {
+                    version: "21.4.161".into(),
+                    stable: true
+                },
+                LoaderVersionRow {
+                    version: "21.4.160".into(),
+                    stable: false
+                },
+            ],
+            "other game versions are filtered out; recommended maps to stable"
+        );
+        assert!(parse_meta_versions(&raw, "1.8.9").is_empty());
     }
 
     #[test]
