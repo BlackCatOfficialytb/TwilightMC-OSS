@@ -74,6 +74,8 @@ pub(crate) fn validate_http_url(url: &str) -> Result<(), String> {
 /// The PowerShell argument vector that opens `url` in the default browser.
 /// A single-quoted `-Command` payload keeps `&` and `?` query parameters
 /// literal (no `cmd` mangling), with `'` doubled per PowerShell quoting.
+/// Windows-only: non-Windows runners open URLs through `open`/`xdg-open`.
+#[cfg(windows)]
 pub(crate) fn powershell_start_process_args(url: &str) -> Vec<String> {
     let escaped = url.replace('\'', "''");
     vec![
@@ -224,6 +226,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn powershell_command_keeps_query_parameters_literal() {
         let args = powershell_start_process_args(
             "https://account.ely.by/oauth2/v1?response_type=code&scope=a+b",
@@ -239,6 +242,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn powershell_command_escapes_single_quotes_by_doubling() {
         let args = powershell_start_process_args("https://a.b/?x=it's");
         assert_eq!(args[3], "Start-Process 'https://a.b/?x=it''s'");

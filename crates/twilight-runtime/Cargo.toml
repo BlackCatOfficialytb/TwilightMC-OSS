@@ -9,5 +9,3 @@ description = "System JVM discovery, fast version detection and manifest compati
 tokio = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
-
-twilight-manifest = { path = "../twilight-manifest" }

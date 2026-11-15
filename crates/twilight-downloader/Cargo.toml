@@ -14,5 +14,3 @@ reqwest = { workspace = true }
 bytes = { workspace = true }
 sha1 = { workspace = true }
 futures = { workspace = true }
-
-twilight-manifest = { path = "../twilight-manifest" }
