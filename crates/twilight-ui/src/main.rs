@@ -28,9 +28,8 @@ fn open_path(path: String) -> Result<(), String> {
     spawn_open(&path)
 }
 
-/// Spawns the platform opener for a path or URL (folders, files and
-/// http(s) browser sign-in links); shared by the file-browser command and
-/// the Ely.by OAuth2 browser flow.
+/// Spawns the platform opener for a local path (folder or file); shared by
+/// the file-browser command. Never used for URLs — see [`open_url`].
 pub(crate) fn spawn_open(target: &str) -> Result<(), String> {
     #[cfg(windows)]
     let mut cmd = {
@@ -54,6 +53,76 @@ pub(crate) fn spawn_open(target: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Validates an absolute http(s) URL before it may reach the OS opener.
+/// Anything else is rejected: local paths go through [`spawn_open`], and
+/// foreign schemes (`file:`, `ftp:`, `javascript:`…) must never be handed
+/// to a shell.
+pub(crate) fn validate_http_url(url: &str) -> Result<(), String> {
+    let url = url.trim();
+    if url.is_empty() {
+        return Err("empty URL".into());
+    }
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(format!("not an http(s) URL: {url}"));
+    }
+    if url.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("URL contains whitespace or control characters".into());
+    }
+    Ok(())
+}
+
+/// The PowerShell argument vector that opens `url` in the default browser.
+/// A single-quoted `-Command` payload keeps `&` and `?` query parameters
+/// literal (no `cmd` mangling), with `'` doubled per PowerShell quoting.
+pub(crate) fn powershell_start_process_args(url: &str) -> Vec<String> {
+    let escaped = url.replace('\'', "''");
+    vec![
+        "-NoProfile".to_owned(),
+        "-NonInteractive".to_owned(),
+        "-Command".to_owned(),
+        format!("Start-Process '{escaped}'"),
+    ]
+}
+
+/// Opens an http(s) URL in the user's default web browser. Deliberately
+/// separate from [`spawn_open`]: handing an OAuth2 URL (which carries `?`
+/// and `&` query parameters) to a file/folder opener such as `explorer`
+/// makes Windows fall back to File Explorer instead of the browser.
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    open_url(&url)
+}
+
+/// [`open_external_url`] core, isolated from tauri for reuse and tests.
+pub(crate) fn open_url(url: &str) -> Result<(), String> {
+    // trim once, up front: the trimmed form is both what gets validated and
+    // what reaches the OS, so stray newlines can never ride along into the
+    // shell payload
+    let url = url.trim();
+    validate_http_url(url)?;
+    #[cfg(windows)]
+    {
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args(powershell_start_process_args(url));
+        cmd.spawn().map_err(|e| e.to_string())?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 fn main() {
     // Desktop-shortcut boot: `--launch <id>` / `--launch=<id>` decides the
     // auto-launch target before Tauri takes over the event loop.
@@ -64,7 +133,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_version,
             open_path,
+            open_external_url,
             accounts::get_accounts,
+            accounts::refresh_elyby_account,
             accounts::add_offline_account,
             accounts::remove_account,
             accounts::set_active_account,
@@ -118,4 +189,58 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running TwilightMC UI");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn http_urls_validate_and_foreign_schemes_reject() {
+        assert!(validate_http_url("https://account.ely.by/oauth2/v1?x=1&y=2").is_ok());
+        assert!(validate_http_url("http://localhost:1234/?code=abc").is_ok());
+        assert!(validate_http_url("  https://github.com/BlackCatOfficialytb  ").is_ok());
+
+        for bad in [
+            "",
+            "   ",
+            "ftp://example.com/file",
+            "file:///C:/Windows",
+            "javascript:alert(1)",
+            "C:\\Users\\Admin",
+            "/etc/passwd",
+        ] {
+            assert!(validate_http_url(bad).is_err(), "{bad:?} must be rejected");
+        }
+        // whitespace and control characters never reach the shell (open_url
+        // trims the ends first, so only inner ones can smuggle through)
+        assert!(validate_http_url("https://a.b/path with space").is_err());
+        assert!(validate_http_url("https://a.b/?x=\u{7}y").is_err());
+        assert!(validate_http_url("https://a.b\u{0}").is_err());
+    }
+
+    #[test]
+    fn powershell_command_keeps_query_parameters_literal() {
+        let args = powershell_start_process_args(
+            "https://account.ely.by/oauth2/v1?response_type=code&scope=a+b",
+        );
+        assert_eq!(args[0], "-NoProfile");
+        assert_eq!(args[1], "-NonInteractive");
+        assert_eq!(args[2], "-Command");
+        // `&` survives unescaped inside the single-quoted payload
+        assert_eq!(
+            args[3],
+            "Start-Process 'https://account.ely.by/oauth2/v1?response_type=code&scope=a+b'"
+        );
+    }
+
+    #[test]
+    fn powershell_command_escapes_single_quotes_by_doubling() {
+        let args = powershell_start_process_args("https://a.b/?x=it's");
+        assert_eq!(args[3], "Start-Process 'https://a.b/?x=it''s'");
+        assert_eq!(
+            powershell_start_process_args("it's a 'test'")[3],
+            "Start-Process 'it''s a ''test'''"
+        );
+    }
 }

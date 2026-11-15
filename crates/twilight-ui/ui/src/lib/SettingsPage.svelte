@@ -4,6 +4,8 @@
   // owning persistence; actions bubble up as callbacks.
   import AccentPicker from './AccentPicker.svelte';
   import Twemoji from './Twemoji.svelte';
+  import LauncherIcon from './LauncherIcon.svelte';
+  import { ICON_PACKS, getIconPack, setIconPack } from './icons';
   import {
     DEFAULT_THEME,
     THEME_PRESETS,
@@ -36,6 +38,7 @@
     onsavefolder,
     onopenfolder,
     oncleanstaging,
+    onopenaccounts,
     onopenurl,
   } = $props();
 
@@ -46,6 +49,7 @@
     { id: 'about', label: 'About & Updates', icon: 'ℹ' },
   ];
   let section = $state('appearance');
+  let iconPack = $state(getIconPack());
 
   // ---- custom themes (localStorage-backed) ----
   let customs = $state(listCustomThemes());
@@ -206,6 +210,16 @@
         </button>
       {/each}
     </div>
+    <button
+      class="mt-4 flex h-10 items-center gap-2.5 rounded px-2.5 text-left text-[13px] text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main)"
+      title="Open the dedicated Accounts page"
+      onclick={onopenaccounts}
+    >
+      <span class="flex w-5 shrink-0 items-center justify-center">
+        <LauncherIcon name="accounts" size={15} />
+      </span>
+      <span class="truncate">Accounts</span>
+    </button>
   </nav>
 
   <!-- content column -->
@@ -279,6 +293,34 @@
         <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Accent color</h3>
         <div class="mt-3">
           <AccentPicker {theme} />
+        </div>
+
+        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Icon pack</h3>
+        <p class="mt-1 text-[12px] text-(--text-muted)">
+          The glyph set used across the launcher. Fluent (Auto) follows the theme.
+        </p>
+        <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {#each ICON_PACKS as p (p.id)}
+            <button
+              class="flex flex-col items-start gap-2 rounded border p-2.5 text-left {iconPack === p.id
+                ? 'border-(--accent) bg-(--brand-tint)'
+                : 'border-(--border) hover:border-(--text-muted)'}"
+              aria-pressed={iconPack === p.id}
+              title="{p.label}: {p.hint}"
+              onclick={() => {
+                setIconPack(p.id);
+                iconPack = getIconPack();
+              }}
+            >
+              <span class="flex items-center gap-2">
+                <LauncherIcon name="instances" size={16} pack={p.id} />
+                <LauncherIcon name="settings" size={16} pack={p.id} />
+                <LauncherIcon name="accounts" size={16} pack={p.id} />
+              </span>
+              <span class="text-[12px] font-medium">{p.label}</span>
+              <span class="text-[10px] text-(--text-muted)">{p.hint}</span>
+            </button>
+          {/each}
         </div>
 
         <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Create a custom theme</h3>

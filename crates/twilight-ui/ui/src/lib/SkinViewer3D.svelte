@@ -18,6 +18,10 @@
     walking = false,
     autorotate = false,
     zoom = 0.85,
+    // outer (hat/jacket) layer control: visible by default, with an optional
+    // toggle button rendered under the canvas when `showToggle` is set
+    outerLayer = $bindable(true),
+    showToggle = false,
   } = $props();
 
   let canvas = $state(null); // bind:this
@@ -70,6 +74,24 @@
     }
   }
 
+  /// Explicitly drives the outer (hat/jacket/sleeve) layer visibility on
+  /// every body part — skinview3d keeps `outerLayer` as a separate Object3D
+  /// on each of the six parts, and a skin swap can silently rebuild them.
+  function applyOuterLayer() {
+    const parts = viewer?.playerObject?.skin;
+    if (!parts) return;
+    for (const part of [
+      parts.head,
+      parts.body,
+      parts.rightArm,
+      parts.leftArm,
+      parts.rightLeg,
+      parts.leftLeg,
+    ]) {
+      if (part?.outerLayer) part.outerLayer.visible = outerLayer;
+    }
+  }
+
   onMount(() => {
     viewer = new SkinViewer({
       canvas,
@@ -83,6 +105,7 @@
     viewer.autoRotate = autorotate;
     viewer.animation = walking ? new WalkingAnimation() : new IdleAnimation();
     applyTextures();
+    applyOuterLayer();
     return () => {
       viewer?.dispose();
       viewer = null;
@@ -106,8 +129,16 @@
   });
 
   $effect(() => {
-    // resolved sources + model feed the viewer; re-apply on change
+    // resolved sources + model feed the viewer; re-apply on change, then
+    // re-assert the outer layer (a fresh skin load rebuilds the parts)
     applyTextures();
+    applyOuterLayer();
+  });
+
+  $effect(() => {
+    // the toggle prop alone also re-drives every part's outer layer
+    outerLayer;
+    if (viewer) applyOuterLayer();
   });
 
   $effect(() => {
@@ -124,3 +155,15 @@
 </script>
 
 <canvas bind:this={canvas} style="width:{width}px;height:{height}px;display:block"></canvas>
+{#if showToggle}
+  <button
+    class="rounded border border-(--border) px-2.5 py-1 text-[11px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) {outerLayer
+      ? 'text-(--accent)'
+      : ''}"
+    title="Toggle the hat/jacket outer layer"
+    aria-pressed={outerLayer}
+    onclick={() => (outerLayer = !outerLayer)}
+  >
+    Outer layer: {outerLayer ? 'on' : 'off'}
+  </button>
+{/if}

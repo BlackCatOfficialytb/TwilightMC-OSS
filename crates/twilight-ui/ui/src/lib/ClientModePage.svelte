@@ -6,6 +6,7 @@
   // tokens, so it follows Twilight/Catppuccin/Nord/High-Contrast alike.
   import SkinViewer3D from './SkinViewer3D.svelte';
   import Twemoji from './Twemoji.svelte';
+  import LauncherIcon from './LauncherIcon.svelte';
   import { skinSource } from './accounts.svelte.js';
 
   let {
@@ -212,9 +213,9 @@
               {/each}
             </select>
             <button
-              class="rounded px-2 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+              class="flex items-center gap-1.5 rounded px-2 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
               title="Open the console drawer"
-              onclick={() => onopenconsole?.()}>▶ Console</button
+              onclick={() => onopenconsole?.()}><LauncherIcon name="log" size={12} /> Console</button
             >
           </div>
           <button

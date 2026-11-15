@@ -3,7 +3,7 @@
   // the selected instance's identity, path and actions in Prism's order,
   // plus a playtime/version footer. The parent owns selection; actions
   // bubble up as callbacks.
-  import Twemoji from './Twemoji.svelte';
+  import LauncherIcon from './LauncherIcon.svelte';
 
   let {
     instance,
@@ -125,29 +125,29 @@
 
   <div class="mt-3 flex flex-col gap-1.5">
     <button
-      class="w-full rounded bg-(--accent) px-3 py-2 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
+      class="flex w-full items-center justify-center gap-1.5 rounded bg-(--accent) px-3 py-2 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
       disabled={gameRunning}
       title={gameRunning ? 'A game is already running' : `Launch ${instance.name}`}
       onclick={onlaunch}
     >
-      ▶ Launch
+      <LauncherIcon name="launch" size={13} /> Launch
     </button>
 
     {#if gameRunning}
       <button
-        class="w-full rounded px-3 py-2 text-[12px] font-medium text-rose-400 hover:bg-rose-500/10"
+        class="flex w-full items-center justify-center gap-1.5 rounded px-3 py-2 text-[12px] font-medium text-rose-400 hover:bg-rose-500/10"
         title="Stop the running game"
         onclick={onkill}
       >
-        ■ Kill
+        <LauncherIcon name="kill" size={13} /> Kill
       </button>
     {/if}
 
     <button
-      class="w-full rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+      class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
       onclick={onedit}
     >
-      <Twemoji emoji="⚙" /> Edit
+      <LauncherIcon name="edit" size={13} /> Edit
     </button>
 
     <button
@@ -199,39 +199,39 @@
     {/if}
 
     <button
-      class="w-full rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
+      class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
       disabled={!storage}
       title={storage ? 'Opens the instance folder' : 'Storage unknown'}
       onclick={onopenfolder}
     >
-      <Twemoji emoji="📂" /> Folder
+      <LauncherIcon name="folder" size={13} /> Folder
     </button>
     <button
-      class="w-full rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+      class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
       title="Export this instance as a .zip"
       onclick={onexport}
     >
-      ⤓ Export
+      <LauncherIcon name="export" size={13} /> Export
     </button>
     <button
-      class="w-full rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+      class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
       title="Clone this instance"
       onclick={oncopy}
     >
-      ⧉ Copy
+      <LauncherIcon name="copy" size={13} /> Copy
     </button>
     <button
-      class="w-full rounded px-3 py-2 text-[12px] text-rose-400 hover:bg-rose-500/10"
+      class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-rose-400 hover:bg-rose-500/10"
       onclick={ondelete}
     >
-      ✕ Delete
+      <LauncherIcon name="delete" size={13} /> Delete
     </button>
     <button
-      class="w-full rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+      class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
       title="Create a desktop shortcut that launches this instance"
       onclick={onshortcut}
     >
-      ⇱ Create Shortcut
+      <LauncherIcon name="shortcut" size={13} /> Create Shortcut
     </button>
   </div>
 

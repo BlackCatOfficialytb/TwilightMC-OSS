@@ -55,3 +55,28 @@ export async function skinDataUri(source) {
     return null;
   }
 }
+
+/** Reads the pixel size out of a `data:image/png;base64` URI without
+ *  decoding the whole image: the PNG signature sits at bytes 1–3 of the
+ *  decoded stream and the IHDR width/height at 16–19 / 20–23 (big-endian
+ *  u32). The first 44 base64 characters are exactly the 33 bytes needed.
+ *  Returns null for anything that isn't a decodable PNG. */
+export function parsePngSize(dataUri) {
+  try {
+    const base64 = String(dataUri ?? '').split(',')[1] ?? '';
+    // 44 base64 chars → 33 decoded bytes (with padding)
+    const head = atob(base64.slice(0, 44));
+    if (head.length < 24) return null;
+    const byte = (i) => head.charCodeAt(i) & 0xff;
+    // signature "\x89PNG"
+    if (byte(1) !== 0x50 || byte(2) !== 0x4e || byte(3) !== 0x47) return null;
+    const width =
+      ((byte(16) << 24) | (byte(17) << 16) | (byte(18) << 8) | byte(19)) >>> 0;
+    const height =
+      ((byte(20) << 24) | (byte(21) << 16) | (byte(22) << 8) | byte(23)) >>> 0;
+    if (!width || !height) return null;
+    return { width, height };
+  } catch {
+    return null;
+  }
+}

@@ -7,17 +7,20 @@
   import InstanceContextPanel from './lib/InstanceContextPanel.svelte';
   import SettingsPage from './lib/SettingsPage.svelte';
   import AccountManagerModal from './lib/AccountManagerModal.svelte';
+  import AccountsPage from './lib/AccountsPage.svelte';
   import ClientModePage from './lib/ClientModePage.svelte';
+  import SkinFace from './lib/SkinFace.svelte';
+  import LauncherIcon from './lib/LauncherIcon.svelte';
   import Twemoji from './lib/Twemoji.svelte';
   import { topOverlay } from './lib/overlays.js';
   import { isDarkTheme, loadSavedAccent, normalizeThemeId, applyTheme } from './lib/theme';
+  import { syncIconTheme } from './lib/icons';
   // shared account state: one store drives the sidebar chip, the client
   // dashboard and the account manager modal
   import {
     accounts as accountStore,
     refreshAccounts,
     skinSource,
-    skinDataUri,
   } from './lib/accounts.svelte.js';
 
   let version = $state('…');
@@ -36,6 +39,8 @@
   $effect(() => {
     applyTheme(theme); // dark/light ground + preset-* token classes
     localStorage.setItem('twilight-theme', theme);
+    // fluent-auto icons flip packs with the theme ground
+    syncIconTheme(theme);
     window.__TAURI__?.core
       .invoke('set_theme_config', { theme: isDarkTheme(theme) ? 'dark' : 'light' })
       .catch(() => {});
@@ -62,10 +67,11 @@
   });
 
   const nav = [
-    { id: 'instances', label: 'Instances', icon: '▦' },
-    { id: 'worlds', label: 'Servers & P2P', icon: '⌗' },
-    { id: 'downloads', label: 'Downloads', icon: '⤓' },
-    { id: 'settings', label: 'Settings', icon: '⚙' },
+    { id: 'instances', label: 'Instances', icon: 'instances' },
+    { id: 'worlds', label: 'Servers & P2P', icon: 'worlds' },
+    { id: 'downloads', label: 'Downloads', icon: 'download' },
+    { id: 'settings', label: 'Settings', icon: 'settings' },
+    { id: 'accounts', label: 'Accounts', icon: 'accounts' },
   ];
 
   const sections = {
@@ -80,18 +86,6 @@
   // everything reads it through this derived alias.
   const activeAccount = $derived(accountStore.active);
   let modalOpen = $state(false);
-
-  // sidebar avatar: proxied skin data URI for the face crop (null = letter)
-  let avatarUri = $state(null);
-  let avatarSeq = 0;
-  $effect(() => {
-    const source = skinSource(activeAccount);
-    const mine = ++avatarSeq;
-    (async () => {
-      const uri = await skinDataUri(source);
-      if (mine === avatarSeq) avatarUri = uri;
-    })();
-  });
 
   // ---- java discovery state ----
   let runtimes = $state([]);
@@ -634,12 +628,8 @@
             }
           }}
         >
-          <span class="flex w-5 shrink-0 items-center justify-center text-[15px] leading-none">
-            {#if item.id === 'settings'}
-              <Twemoji emoji={item.icon} size={15} />
-            {:else}
-              {item.icon}
-            {/if}
+          <span class="flex w-5 shrink-0 items-center justify-center">
+            <LauncherIcon name={item.icon} size={15} />
           </span>
           {#if sidebarExpanded}
             <span class="truncate text-[13px]">{item.label}</span>
@@ -652,40 +642,38 @@
         title="Add Instance"
         onclick={openWizard}
       >
-        <span class="w-5 shrink-0 text-center text-[15px] leading-none">＋</span>
+        <span class="flex w-5 shrink-0 items-center justify-center">
+          <LauncherIcon name="new" size={15} />
+        </span>
         {#if sidebarExpanded}
           <span class="truncate text-[13px]">Add Instance</span>
         {/if}
       </button>
     </div>
 
-    <!-- account card -->
+    <!-- account card: navigates to the dedicated Accounts page -->
     <button
       class="mt-2 flex items-center gap-2 rounded border border-(--border) bg-(--bg-surface) p-2 {sidebarExpanded
         ? ''
         : 'justify-center'}"
-      title={activeAccount ? activeAccount.username : 'Add account'}
-      onclick={() => (modalOpen = true)}
+      title={activeAccount ? activeAccount.username : 'Manage accounts'}
+      onclick={() => {
+        active = 'accounts';
+        editFor = null;
+        mode = 'launcher'; // the accounts page lives in the launcher dashboard
+      }}
     >
-      <span class="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded bg-(--accent)/20 text-[11px] font-bold text-(--accent)">
-        {#if avatarUri}
-          <!-- skin face: 8×8 head crop — image 8× the chip, shifted one
-               chip-width so the face at skin px (8,8) fills the frame -->
-          <span
-            class="h-7 w-7"
-            style={`background-image:url(${avatarUri});background-size:800% 800%;background-position:14.2857% 14.2857%;image-rendering:pixelated`}
-          ></span>
-        {:else if activeAccount}
-          {activeAccount.username[0]?.toUpperCase()}
-        {:else}
-          ?
-        {/if}
-      </span>
+      <SkinFace
+        source={skinSource(activeAccount)}
+        size={28}
+        letter={activeAccount ? activeAccount.username[0]?.toUpperCase() : '?'}
+        class="rounded bg-(--accent)/20 text-(--accent)"
+      />
       {#if sidebarExpanded}
         <span class="min-w-0 flex-1 text-left">
-          <span class="block truncate text-[12px] font-medium">{activeAccount ? activeAccount.username : 'Add account'}</span>
+          <span class="block truncate text-[12px] font-medium">{activeAccount ? activeAccount.username : 'Accounts'}</span>
           <span class="block text-[10px] text-(--text-muted)">
-            {activeAccount ? typeLabel(activeAccount) : 'Offline'}
+            {activeAccount ? typeLabel(activeAccount) : 'manage & sign in'}
           </span>
         </span>
       {/if}
@@ -739,7 +727,10 @@
     </header>
 
     <main class="min-w-0 flex-1 overflow-y-auto p-6">
-      {#if mode === 'client'}
+      {#if currentView === 'accounts'}
+        <!-- dedicated accounts page: shows in both launcher and client modes -->
+        <AccountsPage onback={() => (active = 'instances')} />
+      {:else if mode === 'client'}
         <!-- client dashboard: minimal quick-launch hub -->
         <ClientModePage
           instances={instances}
@@ -749,7 +740,10 @@
           onlaunch={launchInstance}
           onopenconsole={() => (drawerOpen = true)}
           onrefresh={refreshAccounts}
-          onopenaccounts={() => (modalOpen = true)}
+          onopenaccounts={() => {
+            active = 'accounts';
+            mode = 'launcher';
+          }}
         />
       {:else if currentView === 'edit' && editFor}
         <!-- full-page instance editor: grid and context panel stay behind -->
@@ -781,41 +775,45 @@
           onsavefolder={saveFolder}
           onopenfolder={openFolder}
           oncleanstaging={cleanStaging}
-          onopenurl={(url) => api('open_path', { path: url }).catch((e) => (status = String(e)))}
+          onopenaccounts={() => {
+            active = 'accounts';
+            mode = 'launcher';
+          }}
+          onopenurl={(url) => api('open_external_url', { url }).catch((e) => (status = String(e)))}
         />
       {:else if active === 'instances'}
         <!-- action toolbar -->
         <div class="mb-4 flex items-center gap-2">
           <button
-            class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
+            class="flex items-center gap-1.5 rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
             onclick={openWizard}
           >
-            ＋ Add Instance
+            <LauncherIcon name="new" size={13} /> Add Instance
           </button>
           <button
-            class="rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
+            class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
             disabled={!storage}
             title={storage ? storage.instances_dir : ''}
             onclick={openInstanceDir}
           >
-            <Twemoji emoji="📂" /> Instance Folder
+            <LauncherIcon name="viewfolder" size={14} /> Instance Folder
           </button>
           <button
-            class="rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+            class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
             title="Install a Modrinth .mrpack into a new instance"
             onclick={() => (modpackOpen = true)}
           >
-            ⤓ Install .mrpack
+            <LauncherIcon name="package" size={14} /> Install .mrpack
           </button>
           <button
-            class="rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+            class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
             onclick={() => {
               active = 'settings';
               loadPrefs();
               if (!storage) loadStorage();
             }}
           >
-            <Twemoji emoji="⚙" /> Settings
+            <LauncherIcon name="settings" size={14} /> Settings
           </button>
           <input
             class="h-8 w-64 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
@@ -824,14 +822,14 @@
           />
           <span class="flex-1"></span>
           <button
-            class="rounded px-2 py-1 text-sm text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+            class="flex rounded px-2 py-1 text-sm text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
             title={isDarkTheme(theme) ? 'Twilight Light' : 'Twilight Dark'}
             onclick={toggleTheme}
           >
             {#if isDarkTheme(theme)}
-              <Twemoji emoji="☀" alt="Light theme" />
+              <LauncherIcon name="sun" size={15} />
             {:else}
-              <Twemoji emoji="🌙" alt="Dark theme" />
+              <LauncherIcon name="moon" size={15} />
             {/if}
           </button>
         </div>
@@ -875,6 +873,7 @@
           <span
             class="h-2 w-2 shrink-0 rounded-full {gameRunning ? 'animate-pulse bg-green-500' : 'bg-(--border)'}"
           ></span>
+          <LauncherIcon name="log" size={13} />
           <span class="truncate">Console Drawer (Real-time logs)</span>
           {#if gameRunning}
             <span class="shrink-0 text-[10px] font-medium normal-case tracking-normal text-green-500">running</span>

@@ -487,7 +487,9 @@ pub async fn elyby_browser_login(app: AppHandle) -> Result<Account, String> {
     let (redirect_uri, rx) = twilight_auth::spawn_loopback_redirect().map_err(|e| e.to_string())?;
     let pair = twilight_auth::pkce_pair();
     let url = auth.authorization_url(&pair.challenge, &redirect_uri);
-    crate::spawn_open(&url)?;
+    // the OAuth2 URL carries `?`/`&` query parameters — it must open the web
+    // browser, never the platform file opener
+    crate::open_url(&url)?;
     // the listener itself gives up after 300 seconds (yielding None)
     let redirect = rx.await.map_err(|e| e.to_string())?;
     let redirect =
@@ -588,6 +590,57 @@ pub async fn refresh_microsoft_account(app: AppHandle, id: String) -> Result<Acc
     let mut refreshed = refreshed;
     refreshed.id = account.id.clone();
     upsert(&accounts, refreshed).await
+}
+
+/// Re-issues Ely.by OAuth2 tokens from a stored refresh token (silent
+/// renewal): refreshes the bearer, re-resolves the Mojang-simulation profile
+/// textures and persists the result under the original id without touching
+/// the active pointer. [`refresh_elyby_account`] core, isolated from tauri
+/// for reuse and tests.
+async fn refresh_elyby(accounts: &Path, settings: &Path, id: &str) -> Result<Account, String> {
+    let store = load_accounts(accounts).await;
+    let account = store
+        .find(id)
+        .filter(|a| a.refresh_token.is_some())
+        .ok_or_else(|| "no refresh token stored for this account; sign in again".to_owned())?
+        .clone();
+    let auth = elyby_auth(&load_settings(settings).await);
+    let token = auth
+        .refresh_access_token(account.refresh_token.as_deref().unwrap_or_default())
+        .await
+        .map_err(|e| e.to_string())?;
+    // re-resolve profile textures; an outage falls back to the stored ones so
+    // a token renewal never wipes a good skin
+    let (skin, cape, model) = match auth.profile(&token.access_token).await {
+        Ok(Some(profile)) => textures_from_profile(&profile),
+        _ => (
+            account.skin.clone(),
+            account.cape.clone(),
+            account.model.clone(),
+        ),
+    };
+    let mut refreshed = Account::elyby(
+        account.username.clone(),
+        account.uuid,
+        Some(token.access_token),
+    )
+    .with_textures(skin.or(account.skin.clone()), cape.or(account.cape.clone()))
+    .with_model(model.or(account.model.clone()));
+    refreshed.refresh_token = token
+        .refresh_token
+        .filter(|t| !t.trim().is_empty())
+        .or(account.refresh_token.clone());
+    // keep the persisted id stable so the active pointer survives the refresh
+    refreshed.id = account.id.clone();
+    upsert(accounts, refreshed).await
+}
+
+/// [`refresh_elyby`] command surface for the webview's Refresh button.
+#[tauri::command]
+pub async fn refresh_elyby_account(app: AppHandle, id: String) -> Result<Account, String> {
+    let accounts = accounts_path(&app).await?;
+    let settings = settings_path(&app).await?;
+    refresh_elyby(&accounts, &settings, &id).await
 }
 
 /// Replaces an account's skin and cape (None clears); persists and returns it.
@@ -727,6 +780,26 @@ mod tests {
         assert!(load_accounts(&accounts).await.accounts.is_empty());
         // removing the active account clears the pointer
         assert_eq!(get_active(&accounts, &settings).await, None);
+    }
+
+    #[tokio::test]
+    async fn elyby_refresh_without_refresh_token_is_rejected_before_network() {
+        let (accounts, settings) = test_dir().await;
+        // an Ely.by account persisted without a refresh token (legacy store)
+        let stored = twilight_auth::Account::elyby("Steve", generate_offline_uuid("Steve"), None);
+        upsert(&accounts, stored).await.unwrap();
+        assert!(
+            refresh_elyby(&accounts, &settings, "Steve@ely.by")
+                .await
+                .unwrap_err()
+                .contains("no refresh token")
+        );
+        // and an unknown id fails identically without touching the network
+        assert!(
+            refresh_elyby(&accounts, &settings, "Ghost@ely.by")
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]

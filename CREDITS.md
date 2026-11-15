@@ -56,12 +56,30 @@ govern those snapshots themselves.
 
 ## Interface iconography
 
-- The current temporary interface iconography borrows from **Twitter
-  Twemoji** ([github.com/twitter/twemoji](https://github.com/twitter/twemoji)),
-  licensed under the **Creative Commons Attribution 4.0 International
-  (CC-BY 4.0)** license. These emoji-based glyphs are placeholders until the
-  dedicated TwilightMC icon set lands; attribution is kept here as long as
-  any of them ship.
+The launcher ships four vendored icon packs (in `crates/twilight-ui/ui/public/icons/`)
+plus a Twemoji fallback. The **Fluent (Auto)** default picks Fluent or Fluent Dark
+by the theme ground; a missing glyph always falls back to Twemoji.
+
+- **Fluent / Fluent Dark (Freesm Launcher icon pack)**
+  [github.com/FreesmTeam/FreesmLauncher](https://github.com/FreesmTeam/FreesmLauncher)
+  — vendored SVGs based on **Microsoft's Fluent UI System Icons**
+  ([github.com/microsoft/fluentui-system-icons](https://github.com/microsoft/fluentui-system-icons),
+  MIT). Credited to the FreesmTeam (GPL-3.0 pack packaging) and Microsoft.
+- **Breeze Dark / Breeze Light (Prism Launcher icon pack)**
+  [github.com/PrismLauncher/PrismLauncher](https://github.com/PrismLauncher/PrismLauncher)
+  — vendored SVGs of KDE's **Breeze icon theme**
+  ([invent.kde.org/frameworks/breeze-icons](https://invent.kde.org/frameworks/breeze-icons),
+  LGPL-2.1-or-later). Credited to the Prism team (GPL-3.0 pack packaging) and
+  the KDE Visual Design Group.
+- **Prism PE Colored (Prism Launcher PE icon pack)**
+  [github.com/PrismLauncher/PrismLauncher](https://github.com/PrismLauncher/PrismLauncher)
+  — full-color portable-edition style SVGs, GPL-3.0, credited to the Prism team.
+- **Twitter Twemoji**
+  ([github.com/twitter/twemoji](https://github.com/twitter/twemoji)) — the
+  fallback glyph set (with additions from
+  [github.com/jdecked/twemoji](https://github.com/jdecked/twemoji)), licensed
+  under the **Creative Commons Attribution 4.0 International (CC-BY 4.0)**
+  license. Attribution is kept here as long as any Twemoji glyphs ship.
 
 ## Special thanks
 

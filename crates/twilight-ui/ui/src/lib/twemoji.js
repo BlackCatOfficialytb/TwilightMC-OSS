@@ -46,6 +46,9 @@ export const TWEMOJI_ASSETS = new Set([
   '1f5d1', // 🗑 wastebasket
   '1f512', // 🔒 lock
   '1f310', // 🌐 globe
+  '23f9', // ⏹ stop button
+  '2b07', // ⬇ download
+  '1f50d', // 🔍 magnifier
 ]);
 
 // Absolute base so the shared panel and the console drawer resolve equally.
