@@ -104,6 +104,40 @@ pub fn java_executable_relative() -> &'static str {
     }
 }
 
+/// Resolves a user-picked path (a `bin/java` executable, a `javaw.exe`, or a
+/// JVM home directory) into a probed [`JavaInstallation`].
+///
+/// This is the Prism "Browse to java" step: whatever the user points at, the
+/// answer is either a working runtime with a parsed version or a loud error.
+pub async fn probe_java_installation(path: &Path) -> Result<JavaInstallation, RuntimeError> {
+    let candidate = if path.is_dir() {
+        path.join(java_executable_relative())
+    } else {
+        path.to_path_buf()
+    };
+    if !candidate.is_file() {
+        return Err(RuntimeError::Spawn {
+            path: candidate,
+            source: std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "no java executable at this path (expected bin/java or a JVM home)",
+            ),
+        });
+    }
+    let version = probe_version(&candidate).await?;
+    // the JVM root is whatever holds `bin/`: two levels up from `bin/java`
+    let jvm_home = candidate
+        .parent()
+        .and_then(|bin| bin.parent())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| candidate.clone());
+    Ok(JavaInstallation {
+        executable: candidate,
+        jvm_home,
+        version,
+    })
+}
+
 /// Runs `<java> -version` asynchronously; JVMs print the banner on stderr.
 pub async fn probe_version(executable: &Path) -> Result<JavaVersion, RuntimeError> {
     let output = Command::new(executable)

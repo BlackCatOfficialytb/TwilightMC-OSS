@@ -24,6 +24,14 @@ pub(crate) struct Settings {
     /// Explicit java executable; empty = auto-discovery.
     #[serde(default)]
     pub(crate) java_path: Option<String>,
+    /// Custom Java executables the user added through the picker (Prism-style
+    /// "Browse" list). Probed on demand, never auto-scanned.
+    #[serde(default)]
+    pub(crate) custom_java_paths: Vec<String>,
+    /// The java runtime explicitly applied to launches. `None` = follow
+    /// `java_path` / auto-discovery.
+    #[serde(default)]
+    pub(crate) selected_java_path: Option<String>,
     /// `-Xms` in MiB; 0 = none.
     #[serde(default)]
     pub(crate) min_memory_mb: u32,

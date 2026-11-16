@@ -9,7 +9,7 @@ use std::fmt;
 use reqwest::Client;
 use twilight_downloader::{FREESM_META_BASE, PRISM_META_BASE};
 
-use crate::component::{LoaderProfile, RawProfile};
+use crate::component::{ComponentPack, LoaderProfile, RawProfile};
 use crate::error::LoaderError;
 
 /// Fabric metadata host (API v2).
@@ -321,6 +321,9 @@ pub async fn resolve_loader_profile(
     if loader == ModLoader::Cleanroom {
         return resolve_cleanroom(client, loader_version).await;
     }
+    if loader == ModLoader::LegacyFabric {
+        return resolve_legacy_fabric(client, game_version, loader_version).await;
+    }
     let Some(uid) = loader.meta_uid() else {
         let url = profile_url(loader.meta_base(), loader, game_version, loader_version);
         return fetch_profile(client, loader, &url).await;
@@ -334,6 +337,99 @@ pub async fn resolve_loader_profile(
         loader.meta_v1_bases(),
     )
     .await
+}
+
+/// Instance-zip URL of one Legacy Fabric build: MultiMC/Prism's complete
+/// component pack (`mmc-pack.json` + `patches/*.json`).
+pub fn legacy_fabric_instance_url(base: &str, game_version: &str, loader_version: &str) -> String {
+    format!(
+        "{}/v2/versions/loader/{game_version}/{loader_version}/instance/zip",
+        base.trim_end_matches('/')
+    )
+}
+
+/// Resolves Legacy Fabric from its published MultiMC instance zip.
+///
+/// Synthesizing from the v2 launcher profile misses the component patches:
+/// `1.8.9` needs the patched `legacyfabric.17` LWJGL 2 / jinput natives that
+/// only the `org.lwjgl` patch carries, and its `+libraries` are additive. The
+/// instance zip is the authoritative, self-consistent description, so it wins
+/// over coordinate guessing.
+pub async fn resolve_legacy_fabric(
+    client: &Client,
+    game_version: &str,
+    loader_version: Option<&str>,
+) -> Result<LoaderProfile, LoaderError> {
+    let pin = loader_version
+        .map(str::trim)
+        .filter(|version| !version.is_empty())
+        .map(str::to_owned);
+    let resolved = match pin {
+        Some(version) => version,
+        None => {
+            // the list endpoint carries every build; the first stable one wins
+            let mut last_error = None;
+            let mut picked = None;
+            for base in [LEGACY_FABRIC_META_BASE, FABRIC_META_BASE] {
+                let url = profile_url(base, ModLoader::LegacyFabric, game_version, None);
+                match fetch_json(client, &url).await {
+                    Ok(raw) => match pick_fabric_build(&raw) {
+                        Some(version) => {
+                            picked = Some(version);
+                            break;
+                        }
+                        None => {
+                            last_error = Some(LoaderError::NoStableProfile {
+                                loader: format!("legacyfabric {game_version}"),
+                            })
+                        }
+                    },
+                    Err(error) => last_error = Some(error),
+                }
+            }
+            match picked {
+                Some(version) => version,
+                None => {
+                    return Err(last_error.unwrap_or(LoaderError::NoStableProfile {
+                        loader: "legacyfabric".to_owned(),
+                    }));
+                }
+            }
+        }
+    };
+
+    let url = legacy_fabric_instance_url(LEGACY_FABRIC_META_BASE, game_version, &resolved);
+    let bytes = fetch_bytes(client, &url).await?;
+    let pack = ComponentPack::parse(&bytes)?;
+    let mut profile = pack.into_profile(ModLoader::LegacyFabric)?;
+    // the MMC pack names the build in `mmc-pack.json`, but keep the resolved
+    // one authoritative when the pack leaves it out
+    if profile.loader_version.trim().is_empty() {
+        profile.loader_version = resolved;
+    }
+    profile.main_class = ModLoader::LegacyFabric.knot_main_class().to_owned();
+    Ok(profile)
+}
+
+/// First stable `loader.version` of a fabric-family list endpoint, else the
+/// first entry that names one.
+fn pick_fabric_build(raw: &serde_json::Value) -> Option<String> {
+    let list = raw.as_array()?;
+    let version_of = |entry: &serde_json::Value| {
+        entry
+            .pointer("/loader/version")
+            .and_then(|value| value.as_str())
+            .map(str::trim)
+            .filter(|version| !version.is_empty())
+            .map(str::to_owned)
+    };
+    list.iter()
+        .find(|entry| {
+            entry.pointer("/loader/stable") == Some(&serde_json::Value::Bool(true))
+                && version_of(entry).is_some()
+        })
+        .and_then(version_of)
+        .or_else(|| list.iter().find_map(version_of))
 }
 
 /// Resolves CleanroomMC from its published MMC component packs: the maven
@@ -355,37 +451,43 @@ pub async fn resolve_cleanroom(
         None => fetch_cleanroom_release(client).await?,
     };
     let url = cleanroom_pack_url(&version);
-    let response = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|source| LoaderError::Http {
-            url: url.clone(),
-            source,
-        })?;
-    if !response.status().is_success() {
-        return Err(LoaderError::HttpStatus {
-            url: url.clone(),
-            status: response.status().as_u16(),
-        });
-    }
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|source| LoaderError::Http {
-            url: url.clone(),
-            source,
-        })?
-        .to_vec();
-    let patch = twilight_modrinth::zip_entry(&bytes, "patches/net.minecraftforge.json")
-        .map_err(LoaderError::Pack)?;
-    let raw: serde_json::Value = serde_json::from_slice(&patch).map_err(LoaderError::from)?;
-    let mut profile = parse_loader_meta(ModLoader::Cleanroom, &raw)?;
+    let bytes = fetch_bytes(client, &url).await?;
+    let pack = ComponentPack::parse(&bytes)?;
+    // Cleanroom's loader lives in the `net.minecraftforge` component (it reuses
+    // Forge's uid), and its `org.lwjgl` component upgrades 1.12.2's LWJGL 2 to
+    // LWJGL 3 — both patches must merge into one launch profile.
+    let mut profile = pack.into_named_profile(ModLoader::Cleanroom, "net.minecraftforge")?;
     // the pack's forge patch does not repeat the release version we fetched
     if profile.loader_version.trim().is_empty() {
         profile.loader_version = version;
     }
     Ok(profile)
+}
+
+/// Downloads one URL into memory, surfacing transport/status failures.
+async fn fetch_bytes(client: &Client, url: &str) -> Result<Vec<u8>, LoaderError> {
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|source| LoaderError::Http {
+            url: url.to_owned(),
+            source,
+        })?;
+    if !response.status().is_success() {
+        return Err(LoaderError::HttpStatus {
+            url: url.to_owned(),
+            status: response.status().as_u16(),
+        });
+    }
+    response
+        .bytes()
+        .await
+        .map(|bytes| bytes.to_vec())
+        .map_err(|source| LoaderError::Http {
+            url: url.to_owned(),
+            source,
+        })
 }
 
 /// `maven-metadata.xml`'s `<release>` tag pins the newest Cleanroom build.
@@ -864,7 +966,12 @@ pub(crate) const CLEANROOM_PROFILE_FIXTURE: &str = r#"{
             "name": "org.lwjgl:lwjgl:3.4.3",
             "downloads": { "classifiers": {
                 "natives-windows": { "url": "https://repo.maven.apache.org/maven2/org/lwjgl/lwjgl/3.4.3/lwjgl-3.4.3-natives-windows.jar" }
-            } }
+            } },
+            "natives": {
+                "linux": "natives-linux",
+                "osx": "natives-macos",
+                "windows": "natives-windows"
+            }
         }
     ]
 }"#;
@@ -887,9 +994,125 @@ pub(crate) const CLEANROOM_METADATA_FIXTURE: &str = r#"<?xml version="1.0" encod
   </versioning>
 </metadata>"#;
 
+/// Cleanroom's `patches/org.lwjgl.json`: the LWJGL 3 upgrade that replaces
+/// 1.12.2's LWJGL 2 (which crashes on Java 21+).
+#[cfg(test)]
+pub(crate) const LWJGL3_PATCH_FIXTURE: &str = r#"{
+    "formatVersion": 1,
+    "uid": "org.lwjgl",
+    "name": "LWJGL 3",
+    "version": "3.4.3",
+    "libraries": [
+        {
+            "name": "org.lwjgl:lwjgl:3.4.3",
+            "downloads": {
+                "artifact": {
+                    "url": "https://repo.maven.apache.org/maven2/org/lwjgl/lwjgl/3.4.3/lwjgl-3.4.3.jar",
+                    "sha1": "0000000000000000000000000000000000000005"
+                },
+                "classifiers": {
+                    "natives-windows": {
+                        "url": "https://repo.maven.apache.org/maven2/org/lwjgl/lwjgl/3.4.3/lwjgl-3.4.3-natives-windows.jar",
+                        "sha1": "0000000000000000000000000000000000000006"
+                    }
+                }
+            },
+            "natives": {
+                "linux": "natives-linux",
+                "osx": "natives-macos",
+                "windows": "natives-windows"
+            },
+            "extract": { "exclude": ["META-INF/"] }
+        },
+        {
+            "name": "org.lwjgl.lwjgl:lwjgl:2.9.4-nightly-20150209",
+            "downloads": { "artifact": {
+                "url": "https://libraries.minecraft.net/org/lwjgl/lwjgl/lwjgl/2.9.4-nightly-20150209/lwjgl-2.9.4-nightly-20150209.jar",
+                "sha1": "0000000000000000000000000000000000000007"
+            } }
+        }
+    ]
+}"#;
+
+/// Legacy Fabric's `patches/org.lwjgl.json`: patched LWJGL 2 + jinput natives
+/// from the legacyfabric maven.
+#[cfg(test)]
+pub(crate) const LWJGL2_PATCH_FIXTURE: &str = r#"{
+    "formatVersion": 1,
+    "uid": "org.lwjgl",
+    "name": "LWJGL 2",
+    "version": "2.9.4+legacyfabric.17",
+    "libraries": [
+        {
+            "name": "net.java.jinput:jinput-platform:2.0.5",
+            "downloads": { "classifiers": {
+                "natives-windows": {
+                    "url": "https://libraries.minecraft.net/net/java/jinput/jinput-platform/2.0.5/jinput-platform-2.0.5-natives-windows.jar",
+                    "sha1": "385ee093e01f587f30ee1c8a2ee7d408fd732e16"
+                }
+            } },
+            "natives": { "windows": "natives-windows" },
+            "extract": { "exclude": ["META-INF/"] }
+        },
+        {
+            "name": "org.lwjgl.lwjgl:lwjgl:2.9.4+legacyfabric.17",
+            "url": "https://maven.legacyfabric.net/"
+        },
+        {
+            "name": "org.lwjgl.lwjgl:lwjgl-platform:2.9.4+legacyfabric.17",
+            "url": "https://maven.legacyfabric.net/",
+            "natives": {
+                "linux": "natives-linux",
+                "osx": "natives-osx",
+                "windows": "natives-windows"
+            },
+            "extract": { "exclude": ["META-INF/"] }
+        }
+    ]
+}"#;
+
+/// Legacy Fabric's `patches/net.fabricmc.intermediary.json`: additive
+/// `+libraries`.
+#[cfg(test)]
+pub(crate) const LEGACY_INTERMEDIARY_PATCH: &str = r#"{
+    "formatVersion": 1,
+    "+libraries": [
+        { "name": "net.legacyfabric:intermediary:1.8.9", "url": "https://maven.legacyfabric.net/" }
+    ],
+    "name": "Intermediary Mappings",
+    "uid": "net.fabricmc.intermediary",
+    "version": "1.8.9"
+}"#;
+
+/// The loader component of a Legacy Fabric pack.
+#[cfg(test)]
+pub(crate) const LOADER_PATCH: &str = r#"{
+    "formatVersion": 1,
+    "name": "Fabric Loader",
+    "uid": "net.fabricmc.fabric-loader",
+    "version": "0.20.1",
+    "mainClass": "net.fabricmc.loader.impl.launch.knot.KnotClient"
+}"#;
+
+/// `mmc-pack.json` of a Legacy Fabric 1.8.9 instance.
+#[cfg(test)]
+pub(crate) const LEGACY_MMC_PACK: &str = r#"{
+    "formatVersion": 1,
+    "components": [
+        { "uid": "org.lwjgl", "version": "2.9.4+legacyfabric.17", "dependencyOnly": true },
+        { "uid": "net.minecraft", "version": "1.8.9", "important": true },
+        { "uid": "net.fabricmc.intermediary", "version": "1.8.9", "dependencyOnly": true },
+        { "uid": "net.fabricmc.fabric-loader", "version": "0.20.1" }
+    ]
+}"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::{
+        LEGACY_INTERMEDIARY_PATCH, LEGACY_MMC_PACK, LOADER_PATCH, LWJGL2_PATCH_FIXTURE,
+        LWJGL3_PATCH_FIXTURE,
+    };
     use crate::test_server::spawn;
     use std::collections::HashMap;
 
@@ -1330,36 +1553,162 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn legacy_fabric_resolves_over_the_loopback_endpoints() {
+    async fn legacy_fabric_picks_the_stable_build_from_the_list_endpoint() {
+        // the list endpoint now only picks the build; the launch data comes from
+        // the instance zip (covered by `legacy_fabric_instance_zip_...`)
+        let raw: serde_json::Value = serde_json::from_str(LEGACY_FABRIC_LIST_FIXTURE).unwrap();
+        assert_eq!(pick_fabric_build(&raw).as_deref(), Some("0.20.1"));
+
         let routes: HashMap<String, (u16, Vec<u8>)> = HashMap::from([(
             "v2/versions/loader/1.8.9".to_owned(),
             (200u16, LEGACY_FABRIC_LIST_FIXTURE.as_bytes().to_vec()),
         )]);
         let addr = spawn(routes).await;
         let base = format!("http://{addr}");
-        let list = fetch_profile(
+        let raw = fetch_json(
             &Client::new(),
-            ModLoader::LegacyFabric,
             &profile_url(&base, ModLoader::LegacyFabric, "1.8.9", None),
         )
         .await
         .unwrap();
-        assert_eq!(list.loader_version, "0.20.1");
+        assert_eq!(pick_fabric_build(&raw).as_deref(), Some("0.20.1"));
+    }
+
+    #[test]
+    fn cleanroom_replaces_vanilla_lwjgl2_with_lwjgl3() {
+        // 1.12.2's vanilla manifest ships LWJGL 2 coordinates; Cleanroom's
+        // patch set must be recognized as superseding them, or both stacks end
+        // up on one classpath and the game dies on Java 21+
+        let raw: serde_json::Value = serde_json::from_str(CLEANROOM_PROFILE_FIXTURE).unwrap();
+        let profile = parse_loader_meta(ModLoader::Cleanroom, &raw).unwrap();
+
+        for vanilla in [
+            "org.lwjgl.lwjgl:lwjgl:2.9.4-nightly-20150209",
+            "org.lwjgl.lwjgl:lwjgl_util:2.9.4-nightly-20150209",
+            "org.lwjgl.lwjgl:lwjgl-platform:2.9.4-nightly-20150209:natives-windows",
+        ] {
+            assert!(
+                profile.is_replaced(vanilla),
+                "Cleanroom's org.lwjgl patch must supersede {vanilla}"
+            );
+        }
+        // the replacement key is `group:artifact`, so a different LWJGL 2 build
+        // of the same artifact is superseded too
+        assert!(profile.is_replaced("org.lwjgl.lwjgl:lwjgl:2.9.4"));
+        // unrelated libraries stay untouched
+        assert!(!profile.is_replaced("com.google.guava:guava:17.0"));
+        assert!(!profile.is_replaced("net.minecraft:launchwrapper:1.12"));
+        // the patch's own `org.lwjgl:*` entries are the replacements, so they
+        // appear in the replacement list (that is how they win resolution)
+        assert!(
+            profile
+                .replacements
+                .iter()
+                .any(|name| name.starts_with("org.lwjgl:lwjgl")),
+            "{:?}",
+            profile.replacements
+        );
+    }
+
+    #[test]
+    fn lwjgl_patch_contributes_natives_and_replacements() {
+        // merge Cleanroom's Forge patch with its `org.lwjgl` patch, exactly as
+        // `ComponentPack` does for the published zip
+        let forge: serde_json::Value = serde_json::from_str(CLEANROOM_PROFILE_FIXTURE).unwrap();
+        let lwjgl: serde_json::Value = serde_json::from_str(LWJGL3_PATCH_FIXTURE).unwrap();
+        let merged = crate::component::merge_patches_for_test(
+            ModLoader::Cleanroom,
+            vec![("net.minecraftforge", forge), ("org.lwjgl", lwjgl)],
+            Some("net.minecraftforge"),
+        )
+        .unwrap();
+
+        // the LWJGL 3 classpath jars and their native classifier are present
+        assert!(
+            merged
+                .libraries
+                .iter()
+                .any(|lib| lib.name == "org.lwjgl:lwjgl:3.4.3"),
+            "{:?}",
+            merged.libraries.iter().map(|l| &l.name).collect::<Vec<_>>()
+        );
+        assert!(
+            merged
+                .native_libraries
+                .iter()
+                .any(
+                    |entry| entry.library.name.to_string() == "org.lwjgl:lwjgl:3.4.3"
+                        && !entry.library.natives.is_empty()
+                ),
+            "the native classifier table must survive the merge"
+        );
+        // the LWJGL 2 coordinates are marked for replacement
+        assert!(merged.is_replaced("org.lwjgl.lwjgl:lwjgl:2.9.4-nightly-20150209"));
+        assert!(merged.is_replaced("org.lwjgl.lwjgl:lwjgl_util:2.9.4-nightly-20150209"));
+        // and the modern-Java requirement survived the merge
+        assert_eq!(merged.required_java_majors(&[8]), &[25]);
+    }
+
+    #[tokio::test]
+    async fn legacy_fabric_instance_zip_resolves_over_loopback() {
+        let zip = crate::component::build_test_pack(&[
+            ("mmc-pack.json", LEGACY_MMC_PACK.as_bytes()),
+            ("patches/org.lwjgl.json", LWJGL2_PATCH_FIXTURE.as_bytes()),
+            (
+                "patches/net.fabricmc.intermediary.json",
+                LEGACY_INTERMEDIARY_PATCH.as_bytes(),
+            ),
+            (
+                "patches/net.fabricmc.fabric-loader.json",
+                LOADER_PATCH.as_bytes(),
+            ),
+        ]);
+        let routes: HashMap<String, (u16, Vec<u8>)> = HashMap::from([(
+            "v2/versions/loader/1.8.9/0.20.1/instance/zip".to_owned(),
+            (200u16, zip),
+        )]);
+        let addr = spawn(routes).await;
+        let base = format!("http://{addr}");
+        let client = Client::new();
+
+        let url = legacy_fabric_instance_url(&base, "1.8.9", "0.20.1");
+        let bytes = fetch_bytes(&client, &url).await.unwrap();
+        let pack = ComponentPack::parse(&bytes).unwrap();
+        let profile = pack.into_profile(ModLoader::LegacyFabric).unwrap();
+
         assert_eq!(
-            list.main_class,
+            profile.main_class,
             "net.fabricmc.loader.impl.launch.knot.KnotClient"
         );
-        // intermediary leads, then the synthesized loader jar, then common
+        // the pack document, not the LWJGL patch, names the loader build
         assert_eq!(
-            list.libraries[0].name,
-            "net.legacyfabric:intermediary:1.8.9"
+            profile.loader_version, "0.20.1",
+            "the loader version comes from mmc-pack.json"
         );
-        assert_eq!(
-            list.libraries[0].url,
-            "https://maven.legacyfabric.net/net/legacyfabric/intermediary/1.8.9/intermediary-1.8.9.jar",
-            "the legacy mapping jar resolves against the legacyfabric maven"
+        // the intermediary patch's `+libraries` are additive
+        assert!(
+            profile
+                .libraries
+                .iter()
+                .any(|lib| lib.name == "net.legacyfabric:intermediary:1.8.9"),
+            "{:?}",
+            profile
+                .libraries
+                .iter()
+                .map(|l| &l.name)
+                .collect::<Vec<_>>()
         );
-        assert_eq!(list.libraries[1].name, "net.fabricmc:fabric-loader:0.20.1");
+        // the LWJGL 2 natives travel as real manifest libraries
+        assert!(
+            !profile.native_libraries.is_empty(),
+            "the org.lwjgl patch must contribute natives"
+        );
+        assert!(
+            profile
+                .replacements
+                .iter()
+                .any(|name| name.starts_with("org.lwjgl.lwjgl:lwjgl"))
+        );
     }
 
     #[tokio::test]

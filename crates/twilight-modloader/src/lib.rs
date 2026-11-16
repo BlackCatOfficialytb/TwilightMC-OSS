@@ -10,7 +10,7 @@ mod resolver;
 #[cfg(test)]
 mod test_server;
 
-pub use component::{LoaderProfile, ResolvedLoaderLib};
+pub use component::{ComponentPack, LoaderLibrary, LoaderProfile, PackPatch, ResolvedLoaderLib};
 pub use error::LoaderError;
 pub use resolver::{
     CLEANROOM_JAVA_MAJORS, CLEANROOM_MAVEN_BASE, CLEANROOM_METADATA_URL, CLEANROOM_RELEASES_BASE,

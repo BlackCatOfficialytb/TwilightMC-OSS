@@ -161,7 +161,8 @@ fn parse_loader_token(loader: Option<&str>) -> Result<Option<ModLoader>, CliErro
 /// resolved through vars, and the plan adds no second classpath switch);
 /// legacy manifests get the classpath from the plan itself. A resolved
 /// [`LoaderProfile`] overrides the main class with Knot and prepends the
-/// loader libraries to the classpath.
+/// loader libraries to the classpath — and drops any vanilla library a patch
+/// set replaces (Cleanroom's LWJGL 3 over 1.12.2's LWJGL 2).
 pub fn assemble_command(
     java: &JavaSelection,
     ctx: &RuntimeContext,
@@ -172,8 +173,18 @@ pub fn assemble_command(
     game_options: &GameOptions,
 ) -> Result<LaunchPlan, CliError> {
     let none = BTreeSet::<String>::new();
+    // a patch set supersedes vanilla entries by `group:artifact`; keeping both
+    // would put LWJGL 2 and LWJGL 3 on one classpath
+    let vanilla_libraries: Vec<twilight_manifest::Library> = version
+        .libraries
+        .iter()
+        .filter(|library| {
+            !loader.is_some_and(|profile| profile.is_replaced(&library.name.to_string()))
+        })
+        .cloned()
+        .collect();
     let (vanilla_entries, _native_jars) =
-        active_paths(&version.libraries, ctx, &paths.library_root, &none);
+        active_paths(&vanilla_libraries, ctx, &paths.library_root, &none);
     // loader jars come first so the Knot launcher wins class resolution
     let mut classpath_entries: Vec<PathBuf> = match loader {
         Some(profile) => profile
@@ -558,8 +569,20 @@ pub async fn run_launch_with(
         twilight_launch::collect_hardware(),
     );
     let none = BTreeSet::<String>::new();
+    // the diagnostics and natives pass must see the same filtered set the
+    // classpath uses, or a patch-set replacement shows up as a stale entry
+    let diagnostic_libraries: Vec<twilight_manifest::Library> = version
+        .libraries
+        .iter()
+        .filter(|library| {
+            !loader_profile
+                .as_ref()
+                .is_some_and(|profile| profile.is_replaced(&library.name.to_string()))
+        })
+        .cloned()
+        .collect();
     let (vanilla_entries, native_jars) =
-        active_paths(&version.libraries, &ctx, &paths.library_root, &none);
+        active_paths(&diagnostic_libraries, &ctx, &paths.library_root, &none);
 
     if cfg.dry_run {
         let plan = assemble_command(
@@ -624,6 +647,13 @@ pub async fn run_launch_with(
         if library.is_local() || !library.is_active(&ctx, &none) {
             continue;
         }
+        // a patch-set replacement supersedes this vanilla artifact entirely
+        if loader_profile
+            .as_ref()
+            .is_some_and(|profile| profile.is_replaced(&library.name.to_string()))
+        {
+            continue;
+        }
         for resolved in library.resolve_downloads(&ctx) {
             requests.push(DownloadRequest {
                 url: resolved.url,
@@ -667,13 +697,28 @@ pub async fn run_launch_with(
     // ---- natives: fresh scratchpad; extraction via 7-Zip or the fallback
     twilight_launch::clean_natives_dir(&paths.natives_dir).await?;
     let mut excludes = BTreeSet::new();
+    let mut native_jar_paths: Vec<PathBuf> = native_jars.clone();
     for library in &version.libraries {
         if library.is_active(&ctx, &none) && library.is_native() {
+            // a patch-set replacement (Cleanroom's LWJGL 3, Legacy Fabric's
+            // patched LWJGL 2) supersedes the vanilla native of that coordinate
+            if loader_profile
+                .as_ref()
+                .is_some_and(|profile| profile.is_replaced(&library.name.to_string()))
+            {
+                continue;
+            }
             excludes.extend(library.extract_excludes.iter().cloned());
         }
     }
+    if let Some(profile) = &loader_profile {
+        for entry in &profile.native_libraries {
+            excludes.extend(entry.library.extract_excludes.iter().cloned());
+        }
+        native_jar_paths.extend(profile.native_jar_paths(&paths.library_root));
+    }
     let exclude_list: Vec<String> = excludes.into_iter().collect();
-    twilight_launch::extract_natives(&paths.natives_dir, &native_jars, &exclude_list).await?;
+    twilight_launch::extract_natives(&paths.natives_dir, &native_jar_paths, &exclude_list).await?;
 
     // ---- assemble and spawn, streaming game output to the console
     let plan = assemble_command(
@@ -1236,6 +1281,87 @@ mod tests {
             "{report}"
         );
         assert!(report.contains("--launchTarget"), "{report}");
+    }
+
+    /// 1.12.2 manifest carrying LWJGL 2, the shape Cleanroom's patch upgrades.
+    const LWJGL2_MANIFEST: &str = r#"{
+        "id": "1.12.2",
+        "type": "release",
+        "mainClass": "net.minecraft.client.main.Main",
+        "assets": "1.12",
+        "compatibleJavaMajors": [8],
+        "arguments": { "jvm": ["-cp", "${classpath}"], "game": [] },
+        "libraries": [
+            { "name": "org.lwjgl.lwjgl:lwjgl:2.9.4-nightly-20150209" },
+            { "name": "org.lwjgl.lwjgl:lwjgl_util:2.9.4-nightly-20150209" },
+            { "name": "com.google.guava:guava:17.0" }
+        ]
+    }"#;
+
+    #[test]
+    fn cleanroom_drops_vanilla_lwjgl2_from_the_classpath() {
+        let version = twilight_manifest::parse_version_file(LWJGL2_MANIFEST).unwrap();
+        let paths = resolve_paths(&cfg(), &version);
+        let raw = serde_json::json!({
+            "uid": "net.minecraftforge",
+            "version": "0.7.14-alpha",
+            "mainClass": "top.outlands.foundation.boot.Foundation",
+            "compatibleJavaMajors": [25],
+            "+tweakers": ["net.minecraftforge.fml.common.launcher.FMLTweaker"],
+            "libraries": [
+                { "name": "org.lwjgl:lwjgl:3.4.3", "downloads": { "artifact": {
+                    "url": "https://repo.maven.apache.org/maven2/org/lwjgl/lwjgl/3.4.3/lwjgl-3.4.3.jar"
+                } } }
+            ]
+        });
+        let profile = twilight_modloader::parse_loader_meta(ModLoader::Cleanroom, &raw).unwrap();
+
+        let plan = assemble_command(
+            &java(),
+            &ctx(),
+            &version,
+            &paths,
+            &account(),
+            Some(&profile),
+            &GameOptions::default(),
+        )
+        .unwrap();
+
+        let cp_pos = plan
+            .jvm_args
+            .iter()
+            .position(|arg| arg == "-cp")
+            .expect("test manifest owns the classpath switch");
+        let normalized = plan.jvm_args[cp_pos + 1].replace('\\', "/");
+        assert!(
+            normalized.contains("org/lwjgl/lwjgl/3.4.3/lwjgl-3.4.3.jar"),
+            "LWJGL 3 leads the classpath: {normalized}"
+        );
+        for legacy in ["lwjgl-2.9.4-nightly-20150209.jar", "lwjgl_util-2.9.4"] {
+            assert!(
+                !normalized.contains(legacy),
+                "vanilla LWJGL 2 ({legacy}) must be retired: {normalized}"
+            );
+        }
+        assert!(
+            normalized.contains("com/google/guava/guava/17.0"),
+            "unrelated vanilla libraries survive: {normalized}"
+        );
+
+        // Java 21/25 replaces the manifest's Java 8 requirement
+        let majors = profile.required_java_majors(&version.compatible_java_majors);
+        assert_eq!(majors, &[25]);
+
+        // the tweaker still reaches the command line
+        let at = plan
+            .game_args
+            .iter()
+            .position(|arg| arg == "--tweakClass")
+            .expect("Cleanroom boots through FMLTweaker");
+        assert_eq!(
+            plan.game_args[at + 1],
+            "net.minecraftforge.fml.common.launcher.FMLTweaker"
+        );
     }
 
     #[test]

@@ -134,6 +134,7 @@
   let storageMsg = $state('');
   let javaPrefs = $state(null);
   let javaPath = $state('');
+  let javaCustomPaths = $state([]);
   let minMem = $state(0);
   let maxMem = $state(0);
   let javaMsg = $state('');
@@ -443,6 +444,7 @@
     try {
       javaPrefs = await api('get_java_prefs');
       javaPath = javaPrefs.java_path ?? '';
+      javaCustomPaths = javaPrefs.custom_java_paths ?? [];
       minMem = javaPrefs.min_memory_mb;
       maxMem = javaPrefs.max_memory_mb;
       javaMsg = '';
@@ -464,6 +466,19 @@
     } catch (e) {
       javaMsg = String(e);
     }
+  }
+
+  // Registers a probed custom Java executable and returns the saved list.
+  async function addCustomJava(path) {
+    javaCustomPaths = await api('add_custom_java', { path });
+    return javaCustomPaths;
+  }
+
+  // Applies (or clears) the runtime launches use.
+  async function applyJavaRuntime(path) {
+    await api('apply_java_runtime', { path: path || null });
+    javaPath = path || '';
+    javaMsg = '';
   }
 
   // ---- folders settings ----
@@ -790,6 +805,7 @@
           {scanning}
           {javaError}
           bind:javaPath
+          bind:javaCustomPaths
           bind:minMem
           bind:maxMem
           {storageBusy}
@@ -799,6 +815,8 @@
           onback={() => (active = 'instances')}
           onscanjava={scanJava}
           onsaveprefs={savePrefs}
+          onaddjava={addCustomJava}
+          onapplyjava={applyJavaRuntime}
           onsavefolder={saveFolder}
           onopenfolder={openFolder}
           oncleanstaging={cleanStaging}
@@ -978,6 +996,7 @@
       oncopy={copyInstance}
       ondelete={() => requestDelete(selectedInst.id)}
       onshortcut={shortcutInstance}
+      onclose={() => (selectedId = null)}
     />
   {/if}
 

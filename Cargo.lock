@@ -4168,6 +4168,7 @@ dependencies = [
  "tokio",
  "twilight-auth",
  "twilight-manifest",
+ "twilight-modrinth",
 ]
 
 [[package]]

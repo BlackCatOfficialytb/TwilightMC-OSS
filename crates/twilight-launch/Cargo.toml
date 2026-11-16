@@ -10,6 +10,8 @@ tokio = { workspace = true }
 thiserror = { workspace = true }
 sysinfo = "0.40.3"
 futures = { workspace = true }
+# pure-Rust ZIP/DEFLATE reader for the natives fallback (no 7-Zip needed)
+twilight-modrinth = { path = "../twilight-modrinth" }
 
 twilight-manifest = { path = "../twilight-manifest" }
 twilight-auth = { path = "../twilight-auth" }

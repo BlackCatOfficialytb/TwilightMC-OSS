@@ -26,6 +26,7 @@
     scanning = false,
     javaError = '',
     javaPath = $bindable(''),
+    javaCustomPaths = $bindable([]),
     minMem = $bindable(0),
     maxMem = $bindable(0),
     sharedInput = $bindable(''),
@@ -37,12 +38,69 @@
     onback,
     onscanjava,
     onsaveprefs,
+    onaddjava,
+    onapplyjava,
     onsavefolder,
     onopenfolder,
     oncleanstaging,
     onopenaccounts,
     onopenurl,
   } = $props();
+
+  // ---- custom java picker ----
+  let addedJava = $state([]);
+  let javaPickMsg = $state('');
+  let javaPickError = $state('');
+  let javaBusy = $state(false);
+  let appliedPath = $state(javaPath);
+
+  async function browseJava() {
+    const open = window.__TAURI__?.dialog?.open;
+    if (!open) {
+      javaPickError = 'File picker unavailable in this build.';
+      return;
+    }
+    javaPickError = '';
+    javaPickMsg = '';
+    try {
+      const picked = await open({
+        multiple: false,
+        title: 'Select a Java executable',
+        filters: [{ name: 'Java', extensions: ['exe', ''] }],
+      });
+      if (!picked) return;
+      javaBusy = true;
+      // probe first: a wrong file must never enter the saved list
+      const probed = await window.__TAURI__.core.invoke('probe_java_path', { path: String(picked) });
+      const saved = await onaddjava?.(probed.executable);
+      if (Array.isArray(saved)) addedJava = saved;
+      javaPickMsg = `Added Java ${probed.major} (${probed.version})`;
+    } catch (e) {
+      javaPickError = String(e);
+    } finally {
+      javaBusy = false;
+    }
+  }
+
+  async function applyJava(path) {
+    javaPickError = '';
+    javaBusy = true;
+    try {
+      await onapplyjava?.(path || null);
+      appliedPath = path || '';
+      javaPath = path || '';
+      javaPickMsg = path ? 'Applied. Launches will use this runtime.' : 'Reverted to auto-discovery.';
+    } catch (e) {
+      javaPickError = String(e);
+    } finally {
+      javaBusy = false;
+    }
+  }
+
+  // the saved list survives page switches; Show it beside the detected table
+  $effect(() => {
+    if (Array.isArray(javaCustomPaths)) addedJava = javaCustomPaths;
+  });
 
   const sections = [
     { id: 'appearance', label: 'Appearance', icon: '🎨' },
@@ -447,6 +505,9 @@
           {#each runtimes as r (r.executable)}
             <option value={r.executable}>Java {r.major} — {r.home}</option>
           {/each}
+          {#each addedJava.filter((p) => !runtimes.some((r) => r.executable === p)) as path (path)}
+            <option value={path}>Custom — {path}</option>
+          {/each}
         </select>
         {#if !runtimes.length}
           <p class="mt-2 text-[12px] text-(--text-muted)">
@@ -456,13 +517,59 @@
         {#if javaError}
           <p class="mt-2 text-[12px] text-rose-400">{javaError}</p>
         {/if}
-        <button
-          class="mt-3 text-[12px] text-(--text-muted) hover:text-(--text-main)"
-          disabled={scanning}
-          onclick={onscanjava}
-        >
-          ↻ Rescan JREs
-        </button>
+
+        <div class="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main) disabled:opacity-50"
+            disabled={scanning}
+            onclick={onscanjava}
+          >
+            ↻ Rescan JREs
+          </button>
+          <button
+            class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main) disabled:opacity-50"
+            disabled={javaBusy}
+            onclick={browseJava}
+          >
+            {javaBusy ? 'Checking…' : 'Browse / Add Custom Java…'}
+          </button>
+          <button
+            class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-50"
+            disabled={javaBusy || javaPath === appliedPath}
+            onclick={() => applyJava(javaPath)}
+          >
+            Apply
+          </button>
+        </div>
+
+        <p class="mt-2 flex items-center gap-1.5 text-[11px] text-(--text-muted)">
+          <span
+            class="inline-block h-1.5 w-1.5 rounded-full {appliedPath ? 'bg-(--accent)' : 'bg-(--text-muted)'}"
+          ></span>
+          Active runtime:
+          <span class="font-mono">{appliedPath || 'auto-discovery'}</span>
+          {#if javaPath !== appliedPath}
+            <span class="text-amber-400">(selection not applied yet)</span>
+          {/if}
+        </p>
+        {#if javaPickMsg}
+          <p class="mt-1 text-[12px] text-(--accent)">{javaPickMsg}</p>
+        {/if}
+        {#if javaPickError}
+          <p role="alert" class="mt-1 text-[12px] text-rose-400">{javaPickError}</p>
+        {/if}
+        {#if addedJava.length}
+          <ul class="mt-2 space-y-0.5">
+            {#each addedJava as path (path)}
+              <li class="flex items-center justify-between gap-2 text-[11px] text-(--text-muted)">
+                <span class="truncate font-mono" title={path}>{path}</span>
+                {#if appliedPath === path}
+                  <span class="shrink-0 text-(--accent)">active</span>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        {/if}
 
         <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Memory allocation</h3>
         <div class="mt-3 flex items-center gap-3">

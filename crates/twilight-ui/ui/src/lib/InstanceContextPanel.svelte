@@ -21,6 +21,7 @@
     oncopy,
     ondelete,
     onshortcut,
+    onclose,
   } = $props();
 
   let groupOpen = $state(false);
@@ -103,20 +104,31 @@
   class="ctx-in flex w-[280px] shrink-0 flex-col overflow-y-auto border-l border-(--border) bg-(--bg-surface) p-3.5"
   aria-label="Selected instance details"
 >
-  <span class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-(--accent)/15">
-    <img
-      src={iconSrc()}
-      alt=""
-      draggable="false"
-      class="h-14 w-14 object-cover"
-      onerror={(e) => {
-        if (!e.currentTarget.dataset.f) {
-          e.currentTarget.dataset.f = '1';
-          e.currentTarget.src = '/logo.png';
-        }
-      }}
-    />
-  </span>
+  <div class="flex items-start justify-between gap-2">
+    <span class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-(--accent)/15">
+      <img
+        src={iconSrc()}
+        alt=""
+        draggable="false"
+        class="h-14 w-14 object-cover"
+        onerror={(e) => {
+          if (!e.currentTarget.dataset.f) {
+            e.currentTarget.dataset.f = '1';
+            e.currentTarget.src = '/logo.png';
+          }
+        }}
+      />
+    </span>
+    <button
+      type="button"
+      class="rounded p-1 text-[13px] leading-none text-(--text-muted) transition-colors hover:bg-(--bg-subtle) hover:text-(--text-main) focus-visible:ring-1 focus-visible:ring-(--accent) focus-visible:outline-none"
+      title="Close panel (Esc)"
+      aria-label="Clear selection and close the instance panel"
+      onclick={() => onclose?.()}
+    >
+      ✕
+    </button>
+  </div>
   <h3 class="mt-2.5 truncate text-[14px] font-semibold" title={instance.name}>{instance.name}</h3>
   <div class="mt-1.5 flex flex-wrap gap-1.5">
     <span class="rounded bg-(--accent)/15 px-2 py-0.5 text-[10px] font-medium text-(--accent)">{instance.minecraft_version}</span>

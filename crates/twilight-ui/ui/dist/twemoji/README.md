@@ -8,5 +8,7 @@ codepoints, exactly as upstream names them (`2699.svg` = ⚙, `1f4c2.svg` =
 
 Only the glyphs the TwilightMC interface actually uses are vendored here;
 `src/lib/twemoji.js` (`TWEMOJI_ASSETS`) maps emoji to these files and
-falls back to the raw character for anything missing. Attribution is kept
-in the repository root `CREDITS.md` for as long as any of these ship.
+falls back to the raw character for anything missing. `ICON_PICKER_TWEMOJI`
+lists the curated gaming/Minecraft subset offered by the instance icon picker.
+Attribution is kept in the repository root `CREDITS.md` for as long as any of
+these ship.

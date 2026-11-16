@@ -43,6 +43,27 @@ pub async fn discover_java_installations() -> Result<Vec<JavaRuntime>, String> {
     Ok(to_sorted_runtimes(installations))
 }
 
+/// Validates a user-picked Java executable and reports its version, the
+/// Prism "Browse to java" step. Accepts a `bin/java[.exe]`, a `javaw.exe`, or
+/// a JVM home directory, and rejects anything that does not answer a version
+/// probe.
+#[tauri::command]
+pub async fn probe_java_path(path: String) -> Result<JavaRuntime, String> {
+    let raw = path.trim();
+    if raw.is_empty() {
+        return Err("no Java path given".into());
+    }
+    let installation = twilight_runtime::probe_java_installation(std::path::Path::new(raw))
+        .await
+        .map_err(|e| format!("not a usable Java runtime ({raw}): {e}"))?;
+    Ok(JavaRuntime {
+        major: installation.version.major,
+        version: installation.version.full,
+        home: installation.jvm_home.display().to_string(),
+        executable: installation.executable.display().to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

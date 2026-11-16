@@ -14,5 +14,6 @@ pub use error::RuntimeError;
 pub use matcher::{is_compatible, select_best_java};
 pub use version::{
     JavaInstallation, JavaVersion, java_executable_relative, parse_java_version,
-    probe_output_version, probe_version, release_file_version, release_line_version,
+    probe_java_installation, probe_output_version, probe_version, release_file_version,
+    release_line_version,
 };

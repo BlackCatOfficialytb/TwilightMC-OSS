@@ -2,10 +2,10 @@
 //!
 //! Primary extractor is the 7-Zip CLI (`7z` then `7za`), mirroring the
 //! deduplication-free `-xr!` extra-filter invocation Prism uses. When no
-//! 7-Zip binary exists, a lightweight pure-Rust fallback extracts
-//! *stored* (uncompressed) jar entries and clearly refuses deflated ones
-//! with `LaunchError::UnsupportedCompression` — so failure is loud, never
-//! a silent half-extraction.
+//! 7-Zip binary exists, the pure-Rust ZIP/DEFLATE reader from
+//! `twilight-modrinth` unpacks each jar instead — every Mojang and mod-loader
+//! natives jar is deflated inside, so a stored-only reader would reject them
+//! and fail the whole launch.
 
 use std::path::{Path, PathBuf};
 
@@ -91,8 +91,12 @@ pub async fn extract_natives(
     extract_natives_with_fallback(natives_dir, native_jars, extract_excludes).await
 }
 
-/// Pure-Rust fallback: extracts every stored (method 0) entry of each jar,
-/// skipping `extract_excludes` (lightweight `*`-suffix glob emulation).
+/// Pure-Rust fallback: decodes every entry of each jar (stored and deflated,
+/// CRC-verified) through `twilight-modrinth`'s reader, skipping
+/// `extract_excludes` (lightweight `*`-suffix glob emulation).
+///
+/// A missing or unreadable jar is reported with its path so the console shows
+/// which download the pipeline could not unpack.
 pub async fn extract_natives_with_fallback(
     natives_dir: &Path,
     native_jars: &[PathBuf],
@@ -103,35 +107,29 @@ pub async fn extract_natives_with_fallback(
         .map_err(LaunchError::ExtractIo)?;
     for jar in native_jars {
         let bytes = tokio::fs::read(jar).await.map_err(LaunchError::ExtractIo)?;
-        let entries =
-            central_directory_entries(&bytes).map_err(|reason| LaunchError::CorruptJar {
-                jar: jar.display().to_string(),
-                reason,
-            })?;
         let jar_name = jar.display().to_string();
-        for entry in entries {
-            if is_excluded(&entry.name, extract_excludes) {
+        let entries = twilight_modrinth::extract_archive(&bytes).map_err(|reason| {
+            LaunchError::CorruptJar {
+                jar: jar_name.clone(),
+                reason: reason.to_string(),
+            }
+        })?;
+        for (name, data) in entries {
+            if is_excluded(&name, extract_excludes) {
                 continue;
             }
-            if entry.method != METHOD_STORED {
-                return Err(LaunchError::UnsupportedCompression {
-                    jar: jar_name.clone(),
-                    entry: entry.name.clone(),
-                    method: entry.method,
-                });
-            }
-            let data =
-                local_entry_data(&bytes, &entry).map_err(|reason| LaunchError::CorruptJar {
-                    jar: jar_name.clone(),
-                    reason,
-                })?;
-            if crc32_ieee(&data) != entry.crc {
+            // zip-slip guard: natives jars are third-party artifacts
+            let relative = name.replace('\\', "/");
+            if relative.starts_with('/')
+                || relative.contains(':')
+                || relative.split('/').any(|segment| segment == "..")
+            {
                 return Err(LaunchError::CorruptJar {
-                    jar: jar_name,
-                    reason: format!("crc mismatch for entry {}", entry.name),
+                    jar: jar_name.clone(),
+                    reason: format!("unsafe entry path {name}"),
                 });
             }
-            let target = natives_dir.join(&entry.name);
+            let target = natives_dir.join(&relative);
             if let Some(parent) = target.parent() {
                 tokio::fs::create_dir_all(parent)
                     .await
@@ -155,94 +153,6 @@ pub async fn clean_natives_dir(natives_dir: &Path) -> std::io::Result<()> {
     tokio::fs::create_dir_all(natives_dir).await
 }
 
-const METHOD_STORED: u16 = 0;
-
-struct ZipEntry {
-    name: String,
-    method: u16,
-    crc: u32,
-    compressed_size: usize,
-    local_offset: usize,
-}
-
-/// Parses the central directory of a jar (zip) file via its End-Of-Central-Directory record.
-fn central_directory_entries(bytes: &[u8]) -> Result<Vec<ZipEntry>, String> {
-    const EOCD: &[u8; 4] = b"PK\x05\x06";
-    let eocd_pos =
-        find_last_signature(bytes, EOCD).ok_or("no end-of-central-directory record found")?;
-    if eocd_pos + 22 > bytes.len() {
-        return Err("truncated end-of-central-directory".into());
-    }
-    let read_u16 = |off: usize| u16::from_le_bytes([bytes[off], bytes[off + 1]]);
-    let read_u32 = |off: usize| {
-        u32::from_le_bytes([bytes[off], bytes[off + 1], bytes[off + 2], bytes[off + 3]])
-    };
-    let _disk = read_u16(eocd_pos + 4);
-    let entry_count = read_u16(eocd_pos + 10) as usize;
-    let cd_offset = read_u32(eocd_pos + 16) as usize;
-    if cd_offset + 4 > bytes.len() {
-        return Err("central directory offset out of bounds".into());
-    }
-
-    let mut entries = Vec::with_capacity(entry_count);
-    let mut cursor = cd_offset;
-    for _ in 0..entry_count {
-        if cursor + 46 + 4 > bytes.len() || &bytes[cursor..cursor + 4] != b"PK\x01\x02" {
-            return Err(format!(
-                "invalid central directory entry at offset {cursor}"
-            ));
-        }
-        let method = read_u16(cursor + 10);
-        let crc = read_u32(cursor + 16);
-        let compressed_size = read_u32(cursor + 20) as usize;
-        let name_len = read_u16(cursor + 28) as usize;
-        let extra_len = read_u16(cursor + 30) as usize;
-        let comment_len = read_u16(cursor + 32) as usize;
-        let local_offset = read_u32(cursor + 42) as usize;
-        if cursor + 46 + name_len > bytes.len() {
-            return Err("central directory entry name truncated".into());
-        }
-        let name =
-            String::from_utf8_lossy(&bytes[cursor + 46..cursor + 46 + name_len]).into_owned();
-        entries.push(ZipEntry {
-            name,
-            method,
-            crc,
-            compressed_size,
-            local_offset,
-        });
-        cursor += 46 + name_len + extra_len + comment_len;
-    }
-    Ok(entries)
-}
-
-/// Reads the (stored) payload of an entry by walking its local file header.
-fn local_entry_data(bytes: &[u8], entry: &ZipEntry) -> Result<Vec<u8>, String> {
-    let off = entry.local_offset;
-    if off + 30 > bytes.len() || &bytes[off..off + 4] != b"PK\x03\x04" {
-        return Err(format!("invalid local header for {}", entry.name));
-    }
-    let read_u16 = |p: usize| u16::from_le_bytes([bytes[p], bytes[p + 1]]);
-    let name_len = read_u16(off + 26) as usize;
-    let extra_len = read_u16(off + 28) as usize;
-    let data_start = off + 30 + name_len + extra_len;
-    if data_start + entry.compressed_size > bytes.len() {
-        return Err(format!("payload of {} out of bounds", entry.name));
-    }
-    Ok(bytes[data_start..data_start + entry.compressed_size].to_vec())
-}
-
-/// Locates the *last* occurrence of a signature (zip records are little variants
-/// of the same magic), scanning backwards.
-fn find_last_signature(bytes: &[u8], signature: &[u8]) -> Option<usize> {
-    if signature.len() > bytes.len() {
-        return None;
-    }
-    (0..=bytes.len() - signature.len())
-        .rev()
-        .find(|&i| &bytes[i..i + signature.len()] == signature)
-}
-
 /// Lightweight glob emulation for `extract_excludes`, mirroring 7-Zip's
 /// `-xr!` semantics closely enough for Mojang shapes (`META-INF/`,
 /// `.signature`, ...): prefix on the whole path *or* on any path component,
@@ -257,34 +167,26 @@ fn is_excluded(entry_name: &str, excludes: &[String]) -> bool {
     })
 }
 
-/// IEEE CRC-32 (reflected, poly 0xEDB88320) — used to verify fallback extraction.
-fn crc32_ieee(data: &[u8]) -> u32 {
-    static TABLE: std::sync::OnceLock<[u32; 256]> = std::sync::OnceLock::new();
-    let table = TABLE.get_or_init(|| {
-        let mut t = [0u32; 256];
-        for (i, item) in t.iter_mut().enumerate() {
-            let mut c = i as u32;
-            for _ in 0..8 {
-                c = if c & 1 != 0 {
-                    0xEDB8_8320 ^ (c >> 1)
-                } else {
-                    c >> 1
-                };
-            }
-            *item = c;
-        }
-        t
-    });
-    let mut crc = 0xFFFF_FFFFu32;
-    for &b in data {
-        crc = table[((crc ^ b as u32) & 0xFF) as usize] ^ (crc >> 8);
-    }
-    crc ^ 0xFFFF_FFFF
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// IEEE CRC-32 (reflected, poly 0xEDB88320) — test-fixture builder only;
+    /// production verification lives in `twilight-modrinth`'s reader.
+    fn crc32_ieee(data: &[u8]) -> u32 {
+        let mut crc = 0xFFFF_FFFFu32;
+        for &byte in data {
+            crc ^= u32::from(byte);
+            for _ in 0..8 {
+                crc = if crc & 1 != 0 {
+                    0xEDB8_8320 ^ (crc >> 1)
+                } else {
+                    crc >> 1
+                };
+            }
+        }
+        crc ^ 0xFFFF_FFFF
+    }
 
     #[test]
     fn sevenzip_args_cover_output_dir_overwrite_and_excludes() {
@@ -384,40 +286,108 @@ mod tests {
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
+    /// Builds a ZIP with one *deflated* (method 8) entry. The payload inside
+    /// uses a DEFLATE stored block (BTYPE=00), which is valid DEFLATE and
+    /// constructible by hand — enough to prove the fallback decodes method 8
+    /// rather than rejecting it. (Real jars use Huffman blocks; the reader's
+    /// inflate handles those, and `twilight-modrinth` covers them directly.)
+    fn build_deflated_zip(name: &str, body: &[u8]) -> Vec<u8> {
+        let mut compressed = vec![0x01]; // BFINAL=1, BTYPE=00 (stored)
+        compressed.extend_from_slice(&(body.len() as u16).to_le_bytes());
+        compressed.extend_from_slice(&(!(body.len() as u16)).to_le_bytes());
+        compressed.extend_from_slice(body);
+
+        let crc = crc32_ieee(body);
+        let mut out = Vec::new();
+        out.extend_from_slice(b"PK\x03\x04");
+        out.extend_from_slice(&20u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&8u16.to_le_bytes()); // method: deflate
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&crc.to_le_bytes());
+        out.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(&compressed);
+
+        let central_offset = out.len() as u32;
+        out.extend_from_slice(b"PK\x01\x02");
+        out.extend_from_slice(&20u16.to_le_bytes());
+        out.extend_from_slice(&20u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&8u16.to_le_bytes()); // method
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&crc.to_le_bytes());
+        out.extend_from_slice(&(compressed.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes()); // local offset 0
+        out.extend_from_slice(name.as_bytes());
+        let central_len = out.len() as u32 - central_offset;
+        out.extend_from_slice(b"PK\x05\x06");
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&central_len.to_le_bytes());
+        out.extend_from_slice(&central_offset.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out
+    }
+
     #[tokio::test]
-    async fn fallback_rejects_deflated_entries_loudly() {
-        // hand-craft one deflated central-directory entry (method 8)
-        let mut zip = build_test_zip(&[("placeholder.bin", b"x")]);
-        // corrupt the single stored entry's method field at local + 8 and CD offset
-        // — the fallback must refuse rather than write garbage files
-        let eocd = find_last_signature(&zip, b"PK\x05\x06").unwrap();
-        let cd_offset = u32::from_le_bytes([
-            zip[eocd + 16],
-            zip[eocd + 17],
-            zip[eocd + 18],
-            zip[eocd + 19],
-        ]) as usize;
-        zip[cd_offset + 10] = 8; // central directory method := deflate
-        let dir = fresh_dir("natives-flate");
+    async fn fallback_extracts_deflated_entries() {
+        // the fallback must decode real (deflated) natives jars, not just
+        // stored ones: refusing them failed every launch without 7-Zip
+        let payload = b"deflated-native-payload".repeat(20);
+        let jar_bytes = build_deflated_zip("openal64.dll", &payload);
+        let dir = fresh_dir("natives-flate-ok");
         tokio::fs::create_dir_all(&dir).await.unwrap();
-        let jar_path = dir.join("deflated.jar");
-        tokio::fs::write(&jar_path, &zip).await.unwrap();
+        let jar_path = dir.join("natives.jar");
+        tokio::fs::write(&jar_path, &jar_bytes).await.unwrap();
+
         let natives = dir.join("out");
-        let err = extract_natives_with_fallback(&natives, &[jar_path], &[])
+        extract_natives_with_fallback(&natives, &[jar_path], &["META-INF/".to_owned()])
+            .await
+            .unwrap();
+        assert_eq!(
+            tokio::fs::read(natives.join("openal64.dll")).await.unwrap(),
+            payload
+        );
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn fallback_rejects_unsafe_entry_paths() {
+        let jar_bytes = build_test_zip(&[("../escape.dll", b"nope")]);
+        let dir = fresh_dir("natives-slip");
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let jar_path = dir.join("evil.jar");
+        tokio::fs::write(&jar_path, &jar_bytes).await.unwrap();
+        let err = extract_natives_with_fallback(&dir.join("out"), &[jar_path], &[])
             .await
             .unwrap_err();
-        assert!(
-            matches!(err, LaunchError::UnsupportedCompression { .. }),
-            "{err:?}"
-        );
+        assert!(matches!(err, LaunchError::CorruptJar { .. }), "{err:?}");
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
     #[tokio::test]
     async fn fallback_detects_corrupt_crc() {
         let mut zip = build_test_zip(&[("lib.so", b"payload")]);
-        // flip a CRC byte inside the central directory
-        let eocd = find_last_signature(&zip, b"PK\x05\x06").unwrap();
+        // flip a CRC byte inside the central directory (offset 16 of the record)
+        let eocd = zip
+            .windows(4)
+            .rposition(|window| window == b"PK\x05\x06")
+            .unwrap();
         let cd_offset = u32::from_le_bytes([
             zip[eocd + 16],
             zip[eocd + 17],
