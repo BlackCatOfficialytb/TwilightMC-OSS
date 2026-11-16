@@ -1,7 +1,8 @@
 //! Loader metadata endpoints and profile resolution: fabric meta v2, quilt
-//! meta v3, and the Prism/Freesm Meta v1 indices (`net.minecraftforge`,
-//! `net.neoforged`). Latest stable comes from the list endpoint, a pinned
-//! request hits the version endpoint.
+//! meta v3, legacy fabric meta v2, the Prism/Freesm Meta v1 indices
+//! (`net.minecraftforge`, `net.neoforged`) and CleanroomMC's MMC component
+//! pack. Latest stable comes from the list endpoint, a pinned request hits the
+//! version endpoint.
 
 use std::fmt;
 
@@ -13,6 +14,21 @@ use crate::error::LoaderError;
 
 /// Fabric metadata host (API v2).
 pub const FABRIC_META_BASE: &str = "https://meta.fabricmc.net";
+/// Legacy Fabric metadata host (same v2 schema as Fabric).
+pub const LEGACY_FABRIC_META_BASE: &str = "https://meta.legacyfabric.net";
+/// Legacy Fabric maven repository (intermediary + patched LWJGL2).
+pub const LEGACY_FABRIC_MAVEN_BASE: &str = "https://maven.legacyfabric.net/";
+/// CleanroomMC maven repository (cleanroom, cleanmix, patched fork artifacts).
+pub const CLEANROOM_MAVEN_BASE: &str = "https://maven.cleanroommc.com/";
+/// CleanroomMC release channel publishing the MMC component packs.
+pub const CLEANROOM_RELEASES_BASE: &str =
+    "https://github.com/CleanroomMC/Cleanroom/releases/download";
+/// CleanroomMC release listing (`maven-metadata.xml` pins `<release>`).
+pub const CLEANROOM_METADATA_URL: &str =
+    "https://maven.cleanroommc.com/com/cleanroommc/cleanroom/maven-metadata.xml";
+/// Java majors Cleanroom's own patch declares (`compatibleJavaMajors`); the
+/// loader is a 1.12.2 fork that runs on modern runtimes only.
+pub const CLEANROOM_JAVA_MAJORS: &[i32] = &[25, 21];
 /// Quilt metadata host (API v3).
 pub const QUILT_META_BASE: &str = "https://meta.quiltmc.org";
 /// Forge wrapper main class both Prism Meta v1 Forge and NeoForge profiles
@@ -33,17 +49,29 @@ pub enum ModLoader {
     Quilt,
     Forge,
     NeoForge,
+    /// Legacy Fabric: Fabric's v2 meta schema backed by a pre-1.14 fork.
+    LegacyFabric,
+    /// CleanroomMC: a 1.12.2 Forge fork running on modern Java.
+    Cleanroom,
 }
 
 impl ModLoader {
     /// Maps a case-insensitive CLI token (`fabric`, `quilt`, `forge`,
-    /// `neoforge`, whitespace trimmed) onto a loader.
+    /// `neoforge`, `legacyfabric`, `cleanroom`, whitespace trimmed) onto a
+    /// loader.
     pub fn from_token(token: &str) -> Option<Self> {
-        match token.trim().to_ascii_lowercase().as_str() {
+        match token
+            .trim()
+            .to_ascii_lowercase()
+            .replace([' ', '-', '_'], "")
+            .as_str()
+        {
             "fabric" => Some(Self::Fabric),
             "quilt" => Some(Self::Quilt),
             "forge" => Some(Self::Forge),
             "neoforge" => Some(Self::NeoForge),
+            "legacyfabric" => Some(Self::LegacyFabric),
+            "cleanroom" | "cleanroommc" => Some(Self::Cleanroom),
             _ => None,
         }
     }
@@ -52,19 +80,62 @@ impl ModLoader {
     /// not carry one (fabric/quilt Knot launchers, the Forge wrapper).
     pub const fn knot_main_class(self) -> &'static str {
         match self {
-            Self::Fabric => "net.fabricmc.loader.impl.launch.knot.KnotClient",
+            Self::Fabric | Self::LegacyFabric => "net.fabricmc.loader.impl.launch.knot.KnotClient",
             Self::Quilt => "org.quiltmc.loader.impl.launch.knot.KnotClient",
             Self::Forge | Self::NeoForge => FORGE_WRAPPER_MAIN,
+            // Cleanroom's component pack names its own bootstrap class
+            Self::Cleanroom => "top.outlands.foundation.boot.Foundation",
         }
     }
 
-    /// Maven repository resolving url-less profile entries.
+    /// Primary maven repository resolving url-less profile entries.
     pub const fn maven_base(self) -> &'static str {
         match self {
             Self::Fabric => "https://maven.fabricmc.net/",
             Self::Quilt => "https://maven.quiltmc.org/repository/release/",
             Self::Forge => FORGE_MAVEN_BASE,
             Self::NeoForge => NEOFORGE_MAVEN_BASE,
+            Self::LegacyFabric => LEGACY_FABRIC_MAVEN_BASE,
+            Self::Cleanroom => CLEANROOM_MAVEN_BASE,
+        }
+    }
+
+    /// Fallback repositories tried when the primary base misses.
+    pub const fn maven_fallbacks(self) -> &'static [&'static str] {
+        match self {
+            // legacy fabric's support jars (asm, mixin, fabric-loader) live in
+            // the upstream fabric repo; patched LWJGL2 lives in its own
+            Self::LegacyFabric => &["https://maven.fabricmc.net/", MINECRAFT_MAVEN_BASE],
+            // cleanroom forks part of the Forge stack and pulls plain Maven
+            Self::Cleanroom => &[
+                "https://repo.maven.apache.org/maven2/",
+                MINECRAFT_MAVEN_BASE,
+            ],
+            _ => &[],
+        }
+    }
+
+    /// True when the loader's classes are a Fabric v2 meta schema (the
+    /// composite needs a mapping jar and a synthesized loader artifact).
+    pub const fn is_fabric_family(self) -> bool {
+        matches!(self, Self::Fabric | Self::Quilt | Self::LegacyFabric)
+    }
+
+    /// Java majors the loader itself requires, overriding the vanilla
+    /// manifest's requirement. Cleanroom is the whole point of this override:
+    /// its 1.12.2 target declares Java 8 upstream, but the fork needs 21+.
+    pub const fn required_java_majors(self) -> Option<&'static [i32]> {
+        match self {
+            Self::Cleanroom => Some(CLEANROOM_JAVA_MAJORS),
+            _ => None,
+        }
+    }
+
+    /// True when the loader targets exactly one Minecraft version.
+    pub const fn fixed_game_version(self) -> Option<&'static str> {
+        match self {
+            Self::Cleanroom => Some("1.12.2"),
+            _ => None,
         }
     }
 
@@ -74,7 +145,7 @@ impl ModLoader {
         match self {
             Self::Forge => Some("net.minecraftforge"),
             Self::NeoForge => Some("net.neoforged"),
-            Self::Fabric | Self::Quilt => None,
+            _ => None,
         }
     }
 
@@ -90,9 +161,11 @@ impl ModLoader {
     /// every artifact they need, so they synthesize nothing.
     pub fn loader_coordinate(self, version: &str) -> Option<String> {
         match self {
-            Self::Fabric => Some(format!("net.fabricmc:fabric-loader:{version}")),
+            Self::Fabric | Self::LegacyFabric => {
+                Some(format!("net.fabricmc:fabric-loader:{version}"))
+            }
             Self::Quilt => Some(format!("org.quiltmc:quilt-loader:{version}")),
-            Self::Forge | Self::NeoForge => None,
+            Self::Forge | Self::NeoForge | Self::Cleanroom => None,
         }
     }
 
@@ -100,20 +173,23 @@ impl ModLoader {
     /// Forge profiles ship their mapping inside the loader payload instead.
     pub const fn mapping_field(self) -> &'static str {
         match self {
-            Self::Fabric => "intermediary",
+            Self::Fabric | Self::LegacyFabric => "intermediary",
             Self::Quilt => "hashed",
-            Self::Forge | Self::NeoForge => "mappings",
+            Self::Forge | Self::NeoForge | Self::Cleanroom => "mappings",
         }
     }
 
     /// Metadata host of the loader API (native APIs only; Meta v1 loaders
-    /// answer from the first failover host).
+    /// answer from the first failover host). Cleanroom publishes component
+    /// packs on GitHub, so it has no meta host.
     pub const fn meta_base(self) -> &'static str {
         match self {
             Self::Fabric => FABRIC_META_BASE,
+            Self::LegacyFabric => LEGACY_FABRIC_META_BASE,
             Self::Quilt => QUILT_META_BASE,
             // Meta v1 loaders fail over across two hosts; the first wins.
             Self::Forge | Self::NeoForge => self.meta_v1_bases()[0],
+            Self::Cleanroom => CLEANROOM_MAVEN_BASE,
         }
     }
 
@@ -129,9 +205,10 @@ impl ModLoader {
             };
         }
         let api = match self {
-            Self::Fabric => "v2",
+            Self::Fabric | Self::LegacyFabric => "v2",
             Self::Quilt => "v3",
             Self::Forge | Self::NeoForge => unreachable!("meta v1 loaders returned above"),
+            Self::Cleanroom => unreachable!("cleanroom resolves through component packs"),
         };
         match pinned {
             Some(version) => format!("{api}/versions/loader/{game_version}/{}", version.trim()),
@@ -147,6 +224,8 @@ impl fmt::Display for ModLoader {
             Self::Quilt => "quilt",
             Self::Forge => "forge",
             Self::NeoForge => "neoforge",
+            Self::LegacyFabric => "legacyfabric",
+            Self::Cleanroom => "cleanroom",
         })
     }
 }
@@ -239,6 +318,9 @@ pub async fn resolve_loader_profile(
     game_version: &str,
     loader_version: Option<&str>,
 ) -> Result<LoaderProfile, LoaderError> {
+    if loader == ModLoader::Cleanroom {
+        return resolve_cleanroom(client, loader_version).await;
+    }
     let Some(uid) = loader.meta_uid() else {
         let url = profile_url(loader.meta_base(), loader, game_version, loader_version);
         return fetch_profile(client, loader, &url).await;
@@ -252,6 +334,111 @@ pub async fn resolve_loader_profile(
         loader.meta_v1_bases(),
     )
     .await
+}
+
+/// Resolves CleanroomMC from its published MMC component packs: the maven
+/// metadata pins the release, the release zip carries `mmc-pack.json` plus a
+/// `patches/net.minecraftforge.json` describing the loader itself.
+///
+/// Unlike every other loader, Cleanroom's launch data is a *patch set*: it
+/// needs the vanilla 1.12.2 manifest plus the Forge patch's main class,
+/// tweakers and 128 library coordinates. `game_version` is fixed at 1.12.2.
+pub async fn resolve_cleanroom(
+    client: &Client,
+    loader_version: Option<&str>,
+) -> Result<LoaderProfile, LoaderError> {
+    let pin = loader_version
+        .map(str::trim)
+        .filter(|version| !version.is_empty());
+    let version = match pin {
+        Some(version) => version.to_owned(),
+        None => fetch_cleanroom_release(client).await?,
+    };
+    let url = cleanroom_pack_url(&version);
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|source| LoaderError::Http {
+            url: url.clone(),
+            source,
+        })?;
+    if !response.status().is_success() {
+        return Err(LoaderError::HttpStatus {
+            url: url.clone(),
+            status: response.status().as_u16(),
+        });
+    }
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|source| LoaderError::Http {
+            url: url.clone(),
+            source,
+        })?
+        .to_vec();
+    let patch = twilight_modrinth::zip_entry(&bytes, "patches/net.minecraftforge.json")
+        .map_err(LoaderError::Pack)?;
+    let raw: serde_json::Value = serde_json::from_slice(&patch).map_err(LoaderError::from)?;
+    let mut profile = parse_loader_meta(ModLoader::Cleanroom, &raw)?;
+    // the pack's forge patch does not repeat the release version we fetched
+    if profile.loader_version.trim().is_empty() {
+        profile.loader_version = version;
+    }
+    Ok(profile)
+}
+
+/// `maven-metadata.xml`'s `<release>` tag pins the newest Cleanroom build.
+async fn fetch_cleanroom_release(client: &Client) -> Result<String, LoaderError> {
+    let url = CLEANROOM_METADATA_URL.to_owned();
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|source| LoaderError::Http {
+            url: url.clone(),
+            source,
+        })?;
+    if !response.status().is_success() {
+        return Err(LoaderError::HttpStatus {
+            url: url.clone(),
+            status: response.status().as_u16(),
+        });
+    }
+    let text = response.text().await.map_err(|source| LoaderError::Http {
+        url: url.clone(),
+        source,
+    })?;
+    parse_cleanroom_release(&text).ok_or(LoaderError::NoStableProfile {
+        loader: "cleanroom".to_owned(),
+    })
+}
+
+/// Extracts `<release>` from Cleanroom's maven metadata, falling back to the
+/// last `<version>` when the tag is absent.
+pub fn parse_cleanroom_release(xml: &str) -> Option<String> {
+    fn tag<'a>(text: &'a str, name: &str) -> Option<&'a str> {
+        let open = format!("<{name}>");
+        let close = format!("</{name}>");
+        let start = text.find(&open)? + open.len();
+        let end = text[start..].find(&close)? + start;
+        Some(text[start..end].trim())
+    }
+    if let Some(release) = tag(xml, "release").filter(|v| !v.is_empty()) {
+        return Some(release.to_owned());
+    }
+    // no `<release>`: the last well-formed `<version>` entry answers
+    xml.rsplit("<version>")
+        .next()
+        .and_then(|tail| tail.split("</version>").next())
+        .map(str::trim)
+        .filter(|v| !v.is_empty() && !v.contains('<'))
+        .map(str::to_owned)
+}
+
+/// Release asset URL of the MMC component pack for `version`.
+pub fn cleanroom_pack_url(version: &str) -> String {
+    format!("{CLEANROOM_RELEASES_BASE}/{version}/cleanroom-{version}.zip")
 }
 
 /// Two-step Meta v1 resolution over an ordered host list: pick the build from
@@ -593,6 +780,113 @@ pub(crate) const NEOFORGE_PROFILE_FIXTURE: &str = r#"{
     "requires": [{ "uid": "net.minecraft", "equals": "1.21.4" }]
 }"#;
 
+/// Legacy Fabric 1.8.9 list entry: the stock Fabric v2 schema, but the
+/// loader build is upstream Fabric while `intermediary` comes from the
+/// legacyfabric maven.
+#[cfg(test)]
+pub(crate) const LEGACY_FABRIC_LIST_FIXTURE: &str = r#"[
+    {
+        "loader": {
+            "separator": ".",
+            "build": 1,
+            "maven": "net.fabricmc:fabric-loader:0.20.1",
+            "version": "0.20.1",
+            "stable": true
+        },
+        "intermediary": {
+            "maven": "net.legacyfabric:intermediary:1.8.9",
+            "version": "1.8.9",
+            "stable": true
+        },
+        "launcherMeta": {
+            "version": 2,
+            "min_java_version": 8,
+            "libraries": {
+                "common": [
+                    { "name": "org.ow2.asm:asm:9.10.1", "url": "https://maven.fabricmc.net/", "sha1": "ada2141c0cc52ee8f5c48cd5fa4ce0e794f22236" },
+                    { "name": "net.fabricmc:sponge-mixin:0.17.5+mixin.0.8.7", "url": "https://maven.fabricmc.net/" }
+                ],
+                "client": [],
+                "server": []
+            }
+        }
+    },
+    {
+        "loader": { "version": "0.19.5", "stable": false },
+        "intermediary": { "maven": "net.legacyfabric:intermediary:1.8.9" },
+        "launcherMeta": { "libraries": { "common": [], "client": [], "server": [] } }
+    }
+]"#;
+
+/// CleanroomMC component patch (`patches/net.minecraftforge.json` inside the
+/// published `cleanroom-<version>.zip`): a 1.12.2 Forge fork bootstrapped by
+/// `top.outlands.foundation.boot.Foundation` on Java 25.
+#[cfg(test)]
+pub(crate) const CLEANROOM_PROFILE_FIXTURE: &str = r#"{
+    "formatVersion": 1,
+    "name": "Cleanroom",
+    "uid": "net.minecraftforge",
+    "version": "0.7.14-alpha",
+    "requires": [
+        { "uid": "net.minecraft", "equals": "1.12.2" },
+        { "uid": "org.lwjgl", "equals": "3.4.3" }
+    ],
+    "mainClass": "top.outlands.foundation.boot.Foundation",
+    "compatibleJavaMajors": [25],
+    "compatibleJavaName": "java-runtime-epsilon",
+    "+tweakers": ["net.minecraftforge.fml.common.launcher.FMLTweaker"],
+    "+traits": ["FirstThreadOnMacOS"],
+    "libraries": [
+        {
+            "name": "com.cleanroommc:cleanroom:0.7.14-alpha:universal",
+            "downloads": { "artifact": {
+                "url": "https://maven.cleanroommc.com/com/cleanroommc/cleanroom/0.7.14-alpha/cleanroom-0.7.14-alpha-universal.jar",
+                "sha1": "9e7ed10176074d58903f72358d4f54dba0c50677",
+                "size": 12795007
+            } }
+        },
+        {
+            "name": "com.cleanroommc:cleanmix:0.9.0",
+            "downloads": { "artifact": {
+                "url": "https://maven.cleanroommc.com/com/cleanroommc/cleanmix/0.9.0/cleanmix-0.9.0.jar",
+                "sha1": "ff362d6091772d816873457336659c8f6f29e70c",
+                "size": 1130554
+            } }
+        },
+        {
+            "name": "org.lwjgl:lwjgl:3.4.3",
+            "downloads": { "artifact": {
+                "url": "https://repo.maven.apache.org/maven2/org/lwjgl/lwjgl/3.4.3/lwjgl-3.4.3.jar",
+                "sha1": "0000000000000000000000000000000000000005"
+            } }
+        },
+        {
+            "name": "org.lwjgl:lwjgl:3.4.3",
+            "downloads": { "classifiers": {
+                "natives-windows": { "url": "https://repo.maven.apache.org/maven2/org/lwjgl/lwjgl/3.4.3/lwjgl-3.4.3-natives-windows.jar" }
+            } }
+        }
+    ]
+}"#;
+
+/// `maven-metadata.xml` as repo.cleanroommc.com serves it.
+#[cfg(test)]
+pub(crate) const CLEANROOM_METADATA_FIXTURE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+  <groupId>com.cleanroommc</groupId>
+  <artifactId>cleanroom</artifactId>
+  <versioning>
+    <latest>0.7.15-alpha</latest>
+    <release>0.7.14-alpha</release>
+    <versions>
+      <version>0.7.12-alpha</version>
+      <version>0.7.13-alpha</version>
+      <version>0.7.14-alpha</version>
+      <version>0.7.15-alpha</version>
+    </versions>
+  </versioning>
+</metadata>"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -654,7 +948,111 @@ mod tests {
             ModLoader::from_token(" NeoForge "),
             Some(ModLoader::NeoForge)
         );
+        assert_eq!(
+            ModLoader::from_token("Legacy Fabric"),
+            Some(ModLoader::LegacyFabric)
+        );
+        assert_eq!(
+            ModLoader::from_token("legacy-fabric"),
+            Some(ModLoader::LegacyFabric)
+        );
+        assert_eq!(
+            ModLoader::from_token("legacyfabric"),
+            Some(ModLoader::LegacyFabric)
+        );
+        assert_eq!(
+            ModLoader::from_token("Cleanroom"),
+            Some(ModLoader::Cleanroom)
+        );
+        assert_eq!(
+            ModLoader::from_token("CleanroomMC"),
+            Some(ModLoader::Cleanroom)
+        );
         assert_eq!(ModLoader::from_token("liteloader"), None);
+    }
+
+    #[test]
+    fn legacy_fabric_rides_the_fabric_v2_schema() {
+        assert_eq!(
+            profile_url(
+                LEGACY_FABRIC_META_BASE,
+                ModLoader::LegacyFabric,
+                "1.8.9",
+                None
+            ),
+            "https://meta.legacyfabric.net/v2/versions/loader/1.8.9"
+        );
+        assert_eq!(
+            profile_url(
+                LEGACY_FABRIC_META_BASE,
+                ModLoader::LegacyFabric,
+                "1.12.2",
+                Some("0.20.1")
+            ),
+            "https://meta.legacyfabric.net/v2/versions/loader/1.12.2/0.20.1"
+        );
+        assert_eq!(
+            ModLoader::LegacyFabric.maven_base(),
+            "https://maven.legacyfabric.net/"
+        );
+        assert_eq!(
+            ModLoader::LegacyFabric.maven_fallbacks()[0],
+            "https://maven.fabricmc.net/",
+            "legacy fabric's support jars come from upstream fabric"
+        );
+        assert_eq!(
+            ModLoader::LegacyFabric
+                .loader_coordinate("0.20.1")
+                .as_deref(),
+            Some("net.fabricmc:fabric-loader:0.20.1"),
+            "the loader artifact itself is unmodified fabric"
+        );
+        assert_eq!(ModLoader::LegacyFabric.mapping_field(), "intermediary");
+        assert!(ModLoader::LegacyFabric.is_fabric_family());
+        assert_eq!(ModLoader::LegacyFabric.to_string(), "legacyfabric");
+    }
+
+    #[test]
+    fn cleanroom_declares_its_modern_java_and_pinned_game_version() {
+        assert_eq!(ModLoader::Cleanroom.fixed_game_version(), Some("1.12.2"));
+        let majors = ModLoader::Cleanroom
+            .required_java_majors()
+            .expect("cleanroom overrides the manifest java");
+        assert_eq!(majors, CLEANROOM_JAVA_MAJORS);
+        assert!(
+            majors.iter().all(|major| *major >= 21),
+            "cleanroom must never pick Java 8: {majors:?}"
+        );
+        assert!(
+            !majors.contains(&8),
+            "the 1.12.2 manifest's Java 8 requirement must be overridden"
+        );
+        // every other loader defers to the manifest
+        assert_eq!(ModLoader::Forge.required_java_majors(), None);
+        assert_eq!(ModLoader::Fabric.required_java_majors(), None);
+        assert_eq!(ModLoader::LegacyFabric.fixed_game_version(), None);
+    }
+
+    #[test]
+    fn cleanroom_release_resolution_reads_the_maven_metadata() {
+        assert_eq!(
+            parse_cleanroom_release(CLEANROOM_METADATA_FIXTURE).as_deref(),
+            Some("0.7.14-alpha"),
+            "<release> wins over the newer <latest>"
+        );
+        assert_eq!(
+            cleanroom_pack_url("0.7.14-alpha"),
+            "https://github.com/CleanroomMC/Cleanroom/releases/download/0.7.14-alpha/cleanroom-0.7.14-alpha.zip"
+        );
+        // no <release> tag: the last <version> answers
+        assert_eq!(
+            parse_cleanroom_release(
+                "<metadata><versioning><versions><version>1.0</version><version>2.0</version></versions></versioning></metadata>"
+            )
+            .as_deref(),
+            Some("2.0")
+        );
+        assert_eq!(parse_cleanroom_release("<metadata/>"), None);
     }
 
     #[test]
@@ -929,6 +1327,39 @@ mod tests {
             matches!(err, LoaderError::NoStableProfile { ref loader } if loader == "neoforge 1.6.4"),
             "{err:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn legacy_fabric_resolves_over_the_loopback_endpoints() {
+        let routes: HashMap<String, (u16, Vec<u8>)> = HashMap::from([(
+            "v2/versions/loader/1.8.9".to_owned(),
+            (200u16, LEGACY_FABRIC_LIST_FIXTURE.as_bytes().to_vec()),
+        )]);
+        let addr = spawn(routes).await;
+        let base = format!("http://{addr}");
+        let list = fetch_profile(
+            &Client::new(),
+            ModLoader::LegacyFabric,
+            &profile_url(&base, ModLoader::LegacyFabric, "1.8.9", None),
+        )
+        .await
+        .unwrap();
+        assert_eq!(list.loader_version, "0.20.1");
+        assert_eq!(
+            list.main_class,
+            "net.fabricmc.loader.impl.launch.knot.KnotClient"
+        );
+        // intermediary leads, then the synthesized loader jar, then common
+        assert_eq!(
+            list.libraries[0].name,
+            "net.legacyfabric:intermediary:1.8.9"
+        );
+        assert_eq!(
+            list.libraries[0].url,
+            "https://maven.legacyfabric.net/net/legacyfabric/intermediary/1.8.9/intermediary-1.8.9.jar",
+            "the legacy mapping jar resolves against the legacyfabric maven"
+        );
+        assert_eq!(list.libraries[1].name, "net.fabricmc:fabric-loader:0.20.1");
     }
 
     #[tokio::test]

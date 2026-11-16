@@ -16,3 +16,6 @@ twilight-downloader = { path = "../twilight-downloader" }
 # part of the modding spec surface: the composite component rides on the
 # manifest crate's primitives for future launchermeta/adapters integrations
 twilight-manifest = { path = "../twilight-manifest" }
+# CleanroomMC publishes its launch component as an MMC pack: the `.mrpack`
+# engine's pure-Rust ZIP/DEFLATE reader extracts it without a new dependency
+twilight-modrinth = { path = "../twilight-modrinth" }

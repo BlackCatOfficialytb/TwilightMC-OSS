@@ -23,6 +23,9 @@ pub struct InstanceInfo {
     pub name: String,
     /// Absolute icon file path when artwork exists on disk, else `None`.
     pub icon_path: Option<String>,
+    /// Stored icon key (`prism:<name>` / `twemoji:<cp>` / bare Prism key);
+    /// the UI renders bundled keys without touching the filesystem.
+    pub icon_key: Option<String>,
     pub minecraft_version: String,
     /// Display loader: `Vanilla` / `Fabric` / `Quilt` / `Horizon` / other.
     pub loader_type: String,
@@ -47,6 +50,8 @@ pub(crate) fn display_loader(token: Option<&str>) -> &'static str {
             "horizon" | "horizon-rust" => "Horizon",
             "forge" => "Forge",
             "neoforge" => "NeoForge",
+            "legacyfabric" | "legacy-fabric" => "Legacy Fabric",
+            "cleanroom" | "cleanroommc" => "Cleanroom",
             _ => "Vanilla",
         },
     }
@@ -181,7 +186,7 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 
 /// Extracts `(minecraft_version, Some((loader_token, loader_version)))` from
 /// an `mmc-pack.json` value; the loader uids it speaks are fabric, quilt,
-/// forge and neoforge.
+/// legacy fabric, forge, neoforge and cleanroom.
 pub(crate) fn parse_mmc_pack(
     raw: &serde_json::Value,
 ) -> (Option<String>, Option<(String, String)>) {
@@ -207,7 +212,15 @@ pub(crate) fn parse_mmc_pack(
             "net.minecraft" => minecraft = version(),
             "net.fabricmc.fabric-loader" => loader = Some(("fabric", version())),
             "org.quiltmc.quilt-loader" => loader = Some(("quilt", version())),
-            "net.minecraftforge" => loader = Some(("forge", version())),
+            "net.legacyfabric.legacy-fabric-loader" => loader = Some(("legacyfabric", version())),
+            // Cleanroom reuses Forge's uid: real Forge 1.12.2 builds are
+            // `14.23.5.*`, while Cleanroom publishes `0.x.y-alpha` for the
+            // same game version
+            "net.minecraftforge" => {
+                let is_cleanroom = version().is_some_and(|v| v.trim().starts_with("0."));
+                loader = Some((if is_cleanroom { "cleanroom" } else { "forge" }, version()));
+            }
+            "com.cleanroommc" => loader = Some(("cleanroom", version())),
             "net.neoforged" => loader = Some(("neoforge", version())),
             _ => {}
         }
@@ -428,7 +441,8 @@ async fn native_info(dir: &Path, id: &str, group: Option<String>) -> Option<Inst
         meta.name.clone()
     };
     Some(InstanceInfo {
-        icon_path: icon_for(dir, None, dir),
+        icon_path: icon_for(dir, meta.icon_key.as_deref(), dir),
+        icon_key: meta.icon_key,
         id: id.to_owned(),
         name: if name.is_empty() { id.to_owned() } else { name },
         minecraft_version: meta.version,
@@ -464,6 +478,10 @@ fn prism_info(dir: &Path, id: &str, root: &Path, group: Option<String>) -> Optio
 
     Some(InstanceInfo {
         icon_path: icon_for(dir, cfg_get("iconKey"), root),
+        icon_key: cfg_get("iconKey")
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+            .map(str::to_owned),
         id: id.to_owned(),
         name: name.to_owned(),
         minecraft_version: minecraft.unwrap_or_else(|| "unknown".to_owned()),

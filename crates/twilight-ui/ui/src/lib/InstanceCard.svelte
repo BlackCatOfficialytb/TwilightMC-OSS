@@ -4,6 +4,7 @@
   // context panel), double click or Enter/Space launches; interactions
   // bubbles up as callbacks.
   import Twemoji from './Twemoji.svelte';
+  import { iconKeyAsset } from './twemoji.js';
 
   let {
     instance,
@@ -36,8 +37,11 @@
     }
   });
 
-  // Absolute icon through the asset protocol, else the brand mark.
+  // Absolute icon through the asset protocol, else the brand mark. A bundled
+  // icon key (`prism:` / `twemoji:`) renders straight from public assets.
   function iconSrc() {
+    const bundled = iconKeyAsset(instance.icon_key);
+    if (bundled) return bundled;
     const convert = window.__TAURI__?.core?.convertFileSrc;
     return instance.icon_path && convert ? convert(instance.icon_path) : '/logo.png';
   }

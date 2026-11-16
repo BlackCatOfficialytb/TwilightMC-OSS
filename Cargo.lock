@@ -4190,6 +4190,7 @@ dependencies = [
  "tokio",
  "twilight-downloader",
  "twilight-manifest",
+ "twilight-modrinth",
 ]
 
 [[package]]

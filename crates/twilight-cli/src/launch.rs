@@ -392,6 +392,8 @@ fn build_diagnostics(
             ModLoader::Quilt => ("Quilt Loader", "net.quiltmc.quilt-loader"),
             ModLoader::Forge => ("Forge Loader", "net.minecraftforge"),
             ModLoader::NeoForge => ("NeoForge Loader", "net.neoforged"),
+            ModLoader::LegacyFabric => ("Legacy Fabric Loader", "net.legacyfabric.fabric-loader"),
+            ModLoader::Cleanroom => ("Cleanroom Loader", "net.minecraftforge"),
         };
         components.push(format!("{display} ({uid}) {}", profile.loader_version));
     }
@@ -495,10 +497,23 @@ pub async fn run_launch_with(
     })?;
     let ctx = RuntimeContext::host();
     let paths = resolve_paths(&cfg, &version);
-    let java = resolve_java(cfg.java.clone(), &version.compatible_java_majors).await?;
 
-    // ---- loader overlay: resolve Knot launch data for `--loader`
+    // ---- loader overlay: resolve the composite launch data for `--loader`
+    //      first, because a loader may override the Java requirement (Cleanroom
+    //      runs 1.12.2 on modern JDKs, not the manifest's Java 8)
     let loader_token = parse_loader_token(cfg.loader.as_deref())?;
+    // a loader pinned to one game version (Cleanroom targets 1.12.2 only)
+    // rejects a mismatched manifest instead of composing a broken launch
+    if let Some(loader) = loader_token
+        && let Some(fixed) = loader.fixed_game_version()
+        && !meta.id.trim().eq_ignore_ascii_case(fixed)
+    {
+        return Err(CliError::LoaderGameMismatch {
+            loader: loader.to_string(),
+            required: fixed.to_owned(),
+            given: meta.id.clone(),
+        });
+    }
     let loader_profile: Option<LoaderProfile> = match loader_token {
         Some(loader) => Some(
             resolve_loader_profile(&client, loader, &meta.id, cfg.loader_version.as_deref())
@@ -506,6 +521,12 @@ pub async fn run_launch_with(
         ),
         None => None,
     };
+    let required_majors = loader_profile
+        .as_ref()
+        .map(|profile| profile.required_java_majors(&version.compatible_java_majors))
+        .unwrap_or(&version.compatible_java_majors)
+        .to_vec();
+    let java = resolve_java(cfg.java.clone(), &required_majors).await?;
 
     // ---- authlib-injector: Ely.by (first-class) and custom Yggdrasil
     //      accounts launch through the agent jar, auto-fetched + SHA-256
@@ -1341,6 +1362,31 @@ mod tests {
             matches!(err, CliError::UnknownLoader { ref given } if given == "liteloader"),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn legacy_and_cleanroom_tokens_resolve() {
+        assert_eq!(
+            parse_loader_token(Some("Legacy Fabric")).unwrap(),
+            Some(ModLoader::LegacyFabric)
+        );
+        assert_eq!(
+            parse_loader_token(Some("cleanroom")).unwrap(),
+            Some(ModLoader::Cleanroom)
+        );
+    }
+
+    #[test]
+    fn cleanroom_pins_the_game_version_and_modern_java() {
+        // the loader declares 1.12.2 + Java 21/25; the CLI guard compares
+        // these against the resolved manifest before composing a launch
+        let cleanroom = ModLoader::Cleanroom;
+        assert_eq!(cleanroom.fixed_game_version(), Some("1.12.2"));
+        let majors = cleanroom
+            .required_java_majors()
+            .expect("cleanroom overrides the manifest java");
+        assert!(!majors.contains(&8), "never selects Java 8: {majors:?}");
+        assert!(majors.iter().all(|major| *major >= 21));
     }
 
     #[test]

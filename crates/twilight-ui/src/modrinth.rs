@@ -19,27 +19,39 @@ pub(crate) const API_BASE: &str = "https://api.modrinth.com/v2";
 const FABRIC_API_ID: &str = "P7dR8mSH";
 const QFAPI_ID: &str = "qvIfYCYJ";
 
+/// Modrinth project id of Legacy Fabric API (`legacy-fabric-api`).
+const LEGACY_FABRIC_API_ID: &str = "9CJED7xi";
+
 /// Loaders a version search covers, native-first. Quilt runs Fabric mods
 /// through QFAPI, so quilt searches resolve both `quilt` AND `fabric`
-/// builds (native quilt preferred, fabric as fallback); everything else
-/// resolves its own loader only.
+/// builds (native quilt preferred, fabric as fallback). Legacy Fabric is the
+/// mirror image: it prefers its own `legacy-fabric` tag and falls back to the
+/// plain `fabric` tag for mods that never retagged. Everything else resolves
+/// its own loader only.
 fn loader_candidates(loader: &str) -> Vec<String> {
     let tag = loader.trim().to_ascii_lowercase();
-    if tag == "quilt" {
-        vec!["quilt".to_owned(), "fabric".to_owned()]
-    } else {
-        vec![tag]
+    match tag.as_str() {
+        "quilt" => vec!["quilt".to_owned(), "fabric".to_owned()],
+        "legacyfabric" | "legacy-fabric" => {
+            vec!["legacy-fabric".to_owned(), "fabric".to_owned()]
+        }
+        _ => vec![tag],
     }
 }
 
-/// Dependency substitution for Quilt instances: a Fabric mod's `fabric-api`
-/// requirement is rewired to `qfapi` so Quilt never ends up with the
-/// conflicting raw Fabric API jar.
+/// Dependency substitution for compatibility layers: a Fabric mod's
+/// `fabric-api` requirement is rewired to `qfapi` on Quilt and to
+/// `legacy-fabric-api` on Legacy Fabric, so neither instance ends up with the
+/// conflicting modern Fabric API jar.
 fn substitute_dependency<'a>(project_id: &'a str, loader: &str) -> &'a str {
-    if loader.trim().eq_ignore_ascii_case("quilt") && project_id == FABRIC_API_ID {
-        QFAPI_ID
-    } else {
-        project_id
+    let tag = loader.trim().to_ascii_lowercase();
+    if project_id != FABRIC_API_ID {
+        return project_id;
+    }
+    match tag.as_str() {
+        "quilt" => QFAPI_ID,
+        "legacyfabric" | "legacy-fabric" => LEGACY_FABRIC_API_ID,
+        _ => project_id,
     }
 }
 

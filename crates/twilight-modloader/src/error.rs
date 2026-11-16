@@ -15,4 +15,6 @@ pub enum LoaderError {
     BadCoordinate { name: String },
     #[error("no stable {loader} profile in the metadata list")]
     NoStableProfile { loader: String },
+    #[error("loader component pack failed")]
+    Pack(#[from] twilight_modrinth::ModrinthError),
 }

@@ -751,8 +751,12 @@ mod tests {
     use super::*;
 
     async fn test_dir() -> (PathBuf, PathBuf) {
+        // tests run in parallel: a per-process counter keeps the dirs distinct
+        // even when two land in the same nanosecond
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let dir = std::env::temp_dir().join(format!(
-            "twi-ui-test-{}-{}",
+            "twi-ui-test-{}-{}-{seq}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

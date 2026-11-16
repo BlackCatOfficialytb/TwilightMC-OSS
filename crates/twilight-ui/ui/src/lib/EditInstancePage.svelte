@@ -7,6 +7,8 @@
   import { onMount } from 'svelte';
   import Twemoji from './Twemoji.svelte';
   import { pushOverlay, popOverlay } from './overlays.js';
+  import { iconKeyAsset } from './twemoji.js';
+  import InstanceIconPicker from './InstanceIconPicker.svelte';
   import ModrinthBrowserModal from './ModrinthBrowserModal.svelte';
 
   let { instance, storage = null, blindMode = false, deafMode = false, onback, onopenconsole } = $props();
@@ -26,6 +28,51 @@
   let modsMsg = $state('');
   let modsQuery = $state('');
   let browserOpen = $state(false);
+
+  // ---- icon state ----
+  let iconPickerOpen = $state(false);
+  let iconKey = $state(instance.icon_key ?? '');
+  let iconNotice = $state('');
+
+  function iconSrc() {
+    const bundled = iconKeyAsset(iconKey);
+    if (bundled) return bundled;
+    return instance.icon_path ? assetSrc(instance.icon_path) : '/logo.png';
+  }
+
+  async function applyIconKey(key) {
+    iconNotice = '';
+    try {
+      await window.__TAURI__.core.invoke('set_instance_icon_key', {
+        instanceId: instance.id,
+        iconKey: key,
+      });
+      iconKey = key;
+      instance.icon_key = key;
+      instance.icon_path = null;
+    } catch (e) {
+      iconNotice = String(e);
+    }
+  }
+
+  async function applyCustomIcon() {
+    const open = window.__TAURI__?.dialog?.open;
+    if (!open) throw new Error('Image picker unavailable in this build.');
+    const picked = await open({
+      multiple: false,
+      title: 'Choose an instance icon',
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'ico'] }],
+    });
+    if (!picked) return null;
+    const path = await window.__TAURI__.core.invoke('set_instance_icon', {
+      instanceId: instance.id,
+      imagePath: String(picked),
+    });
+    iconKey = '';
+    instance.icon_key = null;
+    instance.icon_path = path;
+    return path;
+  }
 
   // ---- screenshots / logs state ----
   let screenshots = $state([]);
@@ -491,11 +538,71 @@
             <div class="break-all">Game folder: {gamePath()}</div>
             <div class="break-all">Mods folder: {gamePath('mods')}</div>
           </div>
-          <p class="mt-3 text-[11px] text-(--text-muted)">Renaming, icon and per-instance java overrides land in a later milestone; use the context panel for groups, copies and exports.</p>
         </div>
+
+        <div class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px]">
+          <div class="font-medium">Instance icon</div>
+          <p class="mt-1 text-[11px] text-(--text-muted)">
+            Pick a bundled launcher icon, a Twemoji, or a custom image.
+          </p>
+          <div class="mt-3 flex items-center gap-3">
+            <span
+              class="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded border border-(--border) bg-(--accent)/10"
+            >
+              <img src={iconSrc()} alt="" draggable="false" class="h-full w-full object-cover" />
+            </span>
+            <button
+              type="button"
+              class="rounded border border-(--accent) bg-(--accent)/15 px-3 py-1.5 text-[12px] font-medium text-(--accent) hover:bg-(--accent)/25"
+              onclick={() => (iconPickerOpen = true)}
+            >
+              Change icon…
+            </button>
+            {#if iconKey}
+              <button
+                type="button"
+                class="rounded px-2.5 py-1.5 text-[11px] text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main)"
+                onclick={() => applyIconKey('')}
+              >
+                Reset
+              </button>
+            {/if}
+          </div>
+          {#if iconNotice}
+            <p role="alert" class="mt-2 text-[11px] text-red-400">{iconNotice}</p>
+          {/if}
+        </div>
+
+        {#if instance.loader_type === 'Cleanroom'}
+          <div
+            role="alert"
+            class="mt-4 rounded border border-red-500/40 bg-red-500/10 p-3 text-[11px] leading-relaxed text-red-300"
+          >
+            <p class="font-semibold text-red-400">Warning (Advanced Users)</p>
+            <p class="mt-1">
+              CleanroomMC runs 1.12.2 on modern Java (21+). Do NOT use it unless you understand how
+              it works — it is prone to crashes and only a limited subset of Forge mods support it.
+            </p>
+          </div>
+        {/if}
+
+        <p class="mt-3 text-[11px] text-(--text-muted)">Renaming, loader switching and per-instance java overrides land in a later milestone; use the context panel for groups, copies and exports.</p>
       {/if}
     </div>
   </div>
+
+  {#if iconPickerOpen}
+    <InstanceIconPicker
+      currentKey={iconKey}
+      currentPath={iconKey ? '' : iconSrc()}
+      onpick={(key) => {
+        applyIconKey(key);
+        iconPickerOpen = false;
+      }}
+      oncustom={applyCustomIcon}
+      onclose={() => (iconPickerOpen = false)}
+    />
+  {/if}
 
   {#if browserOpen}
     <!-- stacked above the page; Escape pops this one first -->

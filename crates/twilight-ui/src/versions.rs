@@ -102,16 +102,36 @@ pub(crate) fn parse_meta_versions(
 }
 
 /// Lists the builds a loader published for one Minecraft version (the
-/// wizard's loader-version dropdown). Fabric/Quilt answer from their own meta
-/// APIs; Forge/NeoForge filter the Meta v1 index across its failover hosts.
+/// wizard's loader-version dropdown). Fabric/Quilt/Legacy Fabric answer from
+/// their own meta APIs; Forge/NeoForge filter the Meta v1 index across its
+/// failover hosts; Cleanroom lists its maven releases.
 #[tauri::command]
 pub async fn fetch_loader_versions(
     loader: String,
     game_version: String,
 ) -> Result<Vec<LoaderVersionRow>, String> {
-    let loader = ModLoader::from_token(&loader)
-        .ok_or_else(|| format!("unsupported loader {loader:?} (fabric, quilt, forge, neoforge)"))?;
+    let loader = ModLoader::from_token(&loader).ok_or_else(|| {
+        format!("unsupported loader {loader:?} (fabric, quilt, forge, neoforge, legacyfabric, cleanroom)")
+    })?;
     let client = reqwest::Client::new();
+
+    if loader == ModLoader::Cleanroom {
+        // Cleanroom only ships 1.12.2 builds; the maven metadata lists them
+        if !game_version.trim().is_empty() && !game_version.trim().eq_ignore_ascii_case("1.12.2") {
+            return Ok(Vec::new());
+        }
+        let text = client
+            .get(twilight_modloader::CLEANROOM_METADATA_URL)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?
+            .error_for_status()
+            .map_err(|e| e.to_string())?
+            .text()
+            .await
+            .map_err(|e| e.to_string())?;
+        return Ok(parse_cleanroom_versions(&text));
+    }
 
     if loader.meta_uid().is_some() {
         let mut last = String::new();
@@ -152,6 +172,28 @@ pub async fn fetch_loader_versions(
         .await
         .map_err(|e| e.to_string())?;
     Ok(parse_loader_versions(&raw))
+}
+
+/// Cleanroom's maven metadata → dropdown rows, newest first (the list is
+/// ascending upstream). The `<release>` tag is the newest stable build.
+pub(crate) fn parse_cleanroom_versions(xml: &str) -> Vec<LoaderVersionRow> {
+    let release = twilight_modloader::parse_cleanroom_release(xml);
+    let mut versions: Vec<String> = xml
+        .split("<version>")
+        .skip(1)
+        .filter_map(|tail| tail.split("</version>").next())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_owned)
+        .collect();
+    versions.reverse();
+    versions
+        .into_iter()
+        .map(|version| LoaderVersionRow {
+            stable: release.as_deref() == Some(version.as_str()),
+            version,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -230,6 +272,33 @@ mod tests {
             "other game versions are filtered out; recommended maps to stable"
         );
         assert!(parse_meta_versions(&raw, "1.8.9").is_empty());
+    }
+
+    #[test]
+    fn cleanroom_versions_list_newest_first() {
+        let rows = parse_cleanroom_versions(
+            "<metadata><versioning><release>0.7.14-alpha</release><versions>\
+             <version>0.7.12-alpha</version><version>0.7.13-alpha</version>\
+             <version>0.7.14-alpha</version></versions></versioning></metadata>",
+        );
+        assert_eq!(
+            rows,
+            vec![
+                LoaderVersionRow {
+                    version: "0.7.14-alpha".into(),
+                    stable: true
+                },
+                LoaderVersionRow {
+                    version: "0.7.13-alpha".into(),
+                    stable: false
+                },
+                LoaderVersionRow {
+                    version: "0.7.12-alpha".into(),
+                    stable: false
+                },
+            ],
+            "newest first, <release> flagged stable"
+        );
     }
 
     #[test]

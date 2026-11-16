@@ -147,13 +147,15 @@ async fn fetch_http(url: &str) -> Result<Vec<u8>, CliError> {
 fn detect_loader(
     dependencies: &BTreeMap<String, String>,
 ) -> Result<Option<(ModLoader, Option<String>)>, CliError> {
-    // spec keys for the Forge family are `forge` / `neoforge`; the `-loader`
-    // spellings of fabric/quilt keep their historic names
-    const KEYS: [(&str, ModLoader); 4] = [
+    // spec keys for the Forge family are `forge` / `neoforge`; legacy fabric
+    // publishes under `legacy-fabric`. Cleanroom has no mrpack key: it ships as
+    // an MMC component pack, not a Modrinth pack.
+    const KEYS: [(&str, ModLoader); 5] = [
         ("fabric-loader", ModLoader::Fabric),
         ("quilt-loader", ModLoader::Quilt),
         ("forge", ModLoader::Forge),
         ("neoforge", ModLoader::NeoForge),
+        ("legacy-fabric", ModLoader::LegacyFabric),
     ];
     let claimed: Vec<(ModLoader, Option<String>)> = KEYS
         .iter()

@@ -45,6 +45,12 @@ govern those snapshots themselves.
 - **Fabric** — meta v2 (`meta.fabricmc.net`), `maven.fabricmc.net` and the
   Knot loader that Fabric and Quilt launches compose through.
 - **Quilt** — meta v3 (`meta.quiltmc.org`) and `maven.quiltmc.org`.
+- **Legacy Fabric** — meta v2 at `meta.legacyfabric.net` and
+  `maven.legacyfabric.net`, the pre-1.14 Fabric backport stack.
+- **CleanroomMC** — [github.com/CleanroomMC/Cleanroom](https://github.com/CleanroomMC/Cleanroom),
+  a 1.12.2 Forge fork that boots on modern Java; its published MMC component
+  packs (`cleanroom-<version>.zip`) and `maven.cleanroommc.com` supply the
+  launch data.
 - **Modrinth** — the v2 API, the `.mrpack` pack format and
   `cdn.modrinth.com` power the in-app mods browser and the drag-and-drop
   pack installer. The planned **Minecraft Access** integration for the Blind
@@ -80,6 +86,21 @@ by the theme ground; a missing glyph always falls back to Twemoji.
   [github.com/jdecked/twemoji](https://github.com/jdecked/twemoji)), licensed
   under the **Creative Commons Attribution 4.0 International (CC-BY 4.0)**
   license. Attribution is kept here as long as any Twemoji glyphs ship.
+
+### Instance icons
+
+The instance icon picker (`crates/twilight-ui/ui/public/instance-icons/`) and its
+Twemoji tab reuse the same upstream art:
+
+- **Prism / MultiMC classic instance icons**
+  [github.com/PrismLauncher/PrismLauncher](https://github.com/PrismLauncher/PrismLauncher)
+  (`launcher/resources/multimc/scalable/instances`) — the grass/dirt/stone/
+  diamond/creeper/enderman/netherstar/loader-brand set, GPL-3.0, credited to the
+  Prism Launcher and MultiMC contributors. Vendored verbatim under
+  `public/instance-icons/prism/` so the picker works fully offline.
+- **Twemoji instance tab** — the curated gaming/Minecraft subset (crossed swords,
+  shield, pickaxe, bow, gem, fire, rocket, crab, star, compass, dragon, …) ships
+  from the same CC-BY 4.0 set described above, under `public/twemoji/`.
 
 ## Community Inspiration & Special Thanks
 

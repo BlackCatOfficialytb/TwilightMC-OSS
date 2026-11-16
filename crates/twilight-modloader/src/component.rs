@@ -51,9 +51,21 @@ pub struct LoaderProfile {
     /// Files staged into the library store but kept off the classpath
     /// (Forge/NeoForge `mavenFiles`: installers, universal jars, tooling).
     pub maven_files: Vec<ResolvedLoaderLib>,
+    /// Java majors the loader patch itself declares. `None` defers to the
+    /// vanilla manifest. Cleanroom declares 25 here, which is what lets a
+    /// 1.12.2 instance launch on a modern JDK instead of Java 8.
+    pub compatible_java_majors: Option<Vec<i32>>,
 }
 
 impl LoaderProfile {
+    /// Java majors this profile requires, loader first then manifest.
+    pub fn required_java_majors<'a>(&'a self, manifest: &'a [i32]) -> &'a [i32] {
+        match &self.compatible_java_majors {
+            Some(majors) if !majors.is_empty() => majors,
+            _ => manifest,
+        }
+    }
+
     /// Loader jars as downloader requests rooted at the shared library store.
     /// `mavenFiles` stage alongside the classpath entries: the Forge wrapper
     /// locates them inside the libraries directory, not on the classpath.
@@ -112,6 +124,9 @@ pub(crate) struct RawProfile {
     /// Meta v1: library-store files kept off the classpath.
     #[serde(default)]
     maven_files: Vec<RawMetaLib>,
+    /// MMC patch field: the Java majors the component was built for.
+    #[serde(default)]
+    compatible_java_majors: Option<Vec<i32>>,
 }
 
 /// `loader: { version: "...", stable: true|false }` — fabric wording.
@@ -164,6 +179,17 @@ struct RawMetaLib {
     downloads: Option<RawDownloads>,
 }
 
+impl RawMetaLib {
+    /// A natives-only sibling has no `artifact`, only OS classifiers: those
+    /// jars are extracted by the vanilla natives pass, never put on the
+    /// classpath.
+    fn is_natives_only(&self) -> bool {
+        self.downloads
+            .as_ref()
+            .is_none_or(|downloads| downloads.artifact.is_none())
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct RawDownloads {
     #[serde(default)]
@@ -186,14 +212,19 @@ impl RawProfile {
     /// Builds the composite [`LoaderProfile`] from one raw profile object.
     pub(crate) fn into_profile(self, loader: ModLoader) -> Result<LoaderProfile, LoaderError> {
         match loader {
-            ModLoader::Forge | ModLoader::NeoForge => self.into_meta_profile(loader),
-            ModLoader::Fabric | ModLoader::Quilt => self.into_knot_profile(loader),
+            ModLoader::Forge | ModLoader::NeoForge | ModLoader::Cleanroom => {
+                self.into_meta_profile(loader)
+            }
+            ModLoader::Fabric | ModLoader::Quilt | ModLoader::LegacyFabric => {
+                self.into_knot_profile(loader)
+            }
         }
     }
 
-    /// Prism/Freesm Meta v1 (Forge, NeoForge): the profile owns its main class,
-    /// classpath entries and library-store files. Nothing is synthesized — the
-    /// published payload is already the complete wrapper launch data.
+    /// Prism/Freesm Meta v1 (Forge, NeoForge) and CleanroomMC component
+    /// patches: the profile owns its main class, classpath entries and
+    /// library-store files. Nothing is synthesized — the published payload is
+    /// already the complete launch data.
     fn into_meta_profile(self, loader: ModLoader) -> Result<LoaderProfile, LoaderError> {
         let loader_version = self
             .version
@@ -215,14 +246,19 @@ impl RawProfile {
             .unwrap_or_else(|| loader.knot_main_class())
             .to_owned();
 
+        // A patch may carry one entry per artifact *and* a natives-only sibling
+        // (Mojang `classifiers`): the natives belong to the vanilla manifest's
+        // extraction pass, so only classpath artifacts are kept here.
         let libraries = self
             .libraries
             .iter()
+            .filter(|lib| !lib.is_natives_only())
             .map(|lib| resolve_meta_lib(lib, loader.maven_base()))
             .collect::<Result<Vec<_>, _>>()?;
         let maven_files = self
             .maven_files
             .iter()
+            .filter(|lib| !lib.is_natives_only())
             .map(|lib| resolve_meta_lib(lib, loader.maven_base()))
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -239,6 +275,7 @@ impl RawProfile {
             traits: self.traits.into_iter().collect(),
             libraries,
             maven_files,
+            compatible_java_majors: self.compatible_java_majors,
         })
     }
 
@@ -259,9 +296,9 @@ impl RawProfile {
         };
 
         let mapping = match loader {
-            ModLoader::Fabric => self.intermediary,
+            ModLoader::Fabric | ModLoader::LegacyFabric => self.intermediary,
             ModLoader::Quilt => self.hashed,
-            ModLoader::Forge | ModLoader::NeoForge => {
+            ModLoader::Forge | ModLoader::NeoForge | ModLoader::Cleanroom => {
                 unreachable!("meta v1 profiles take the other branch")
             }
         }
@@ -325,6 +362,7 @@ impl RawProfile {
             traits: BTreeSet::new(),
             libraries,
             maven_files: Vec::new(),
+            compatible_java_majors: None,
         })
     }
 }
@@ -427,8 +465,9 @@ pub(crate) fn maven_storage_path(coordinate: &str) -> Result<String, LoaderError
 mod tests {
     use super::*;
     use crate::resolver::{
-        FABRIC_PROFILE_FIXTURE, FORGE_LEGACY_PROFILE_FIXTURE, FORGE_MODERN_PROFILE_FIXTURE,
-        FORGE_WRAPPER_MAIN, NEOFORGE_PROFILE_FIXTURE, QUILT_PROFILE_FIXTURE, parse_loader_meta,
+        CLEANROOM_JAVA_MAJORS, CLEANROOM_PROFILE_FIXTURE, FABRIC_PROFILE_FIXTURE,
+        FORGE_LEGACY_PROFILE_FIXTURE, FORGE_MODERN_PROFILE_FIXTURE, FORGE_WRAPPER_MAIN,
+        NEOFORGE_PROFILE_FIXTURE, QUILT_PROFILE_FIXTURE, parse_loader_meta,
     };
     use std::path::Path;
 
@@ -763,6 +802,67 @@ mod tests {
         assert!(
             matches!(err, LoaderError::MissingField { field: "version" }),
             "{err:?}"
+        );
+    }
+
+    #[test]
+    fn cleanroom_patch_parses_the_modern_java_bootstrap() {
+        let raw: serde_json::Value = serde_json::from_str(CLEANROOM_PROFILE_FIXTURE).unwrap();
+        let profile = parse_loader_meta(ModLoader::Cleanroom, &raw).unwrap();
+
+        assert_eq!(profile.loader, ModLoader::Cleanroom);
+        assert_eq!(profile.loader_version, "0.7.14-alpha");
+        assert_eq!(
+            profile.main_class, "top.outlands.foundation.boot.Foundation",
+            "Cleanroom boots through its own Foundation class"
+        );
+        assert_eq!(
+            profile.compatible_java_majors.as_deref(),
+            Some(&[25][..]),
+            "the published patch declares exactly Java 25"
+        );
+        assert_eq!(
+            profile.required_java_majors(&[8]),
+            &[25],
+            "the patch's Java 25 requirement overrides 1.12.2's Java 8"
+        );
+        assert!(
+            CLEANROOM_JAVA_MAJORS.iter().all(|major| *major >= 21),
+            "the loader's fallback majors accept modern runtimes only"
+        );
+        assert!(CLEANROOM_JAVA_MAJORS.contains(&21), "Java 21 also works");
+        assert_eq!(
+            profile.tweakers,
+            vec!["net.minecraftforge.fml.common.launcher.FMLTweaker".to_owned()],
+            "Cleanroom still boots Forge's launchwrapper tweaker"
+        );
+        assert!(profile.traits.contains("FirstThreadOnMacOS"));
+
+        // the natives-only sibling entry is dropped from the classpath
+        assert_eq!(
+            profile.libraries.len(),
+            3,
+            "classifier-only entries never reach the classpath: {:?}",
+            profile
+                .libraries
+                .iter()
+                .map(|lib| lib.name.as_str())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            profile.libraries[0].url,
+            "https://maven.cleanroommc.com/com/cleanroommc/cleanroom/0.7.14-alpha/cleanroom-0.7.14-alpha-universal.jar"
+        );
+    }
+
+    #[test]
+    fn non_cleanroom_profiles_defer_to_the_manifest_java() {
+        let profile = fabric_profile();
+        assert_eq!(profile.compatible_java_majors, None);
+        assert_eq!(
+            profile.required_java_majors(&[21]),
+            &[21],
+            "loaders without a java declaration keep the manifest majors"
         );
     }
 

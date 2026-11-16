@@ -5,6 +5,8 @@
   // group are stamped onto it.
   import { onMount } from 'svelte';
   import { pushOverlay, popOverlay } from './overlays.js';
+  import { iconKeyAsset } from './twemoji.js';
+  import InstanceIconPicker from './InstanceIconPicker.svelte';
 
   let { groups = [], blindMode = false, deafMode = false, onclose, oncreated } = $props();
 
@@ -20,15 +22,44 @@
     { id: '', label: 'None' },
     { id: 'neoforge', label: 'NeoForge' },
     { id: 'forge', label: 'Forge' },
+    { id: 'cleanroom', label: 'Cleanroom' },
     { id: 'fabric', label: 'Fabric' },
+    { id: 'legacyfabric', label: 'Legacy Fabric' },
     { id: 'quilt', label: 'Quilt' },
     { id: 'liteloader', label: 'LiteLoader' },
   ];
 
-  // The backend loader catalog covers fabric/quilt/forge/neoforge; LiteLoader
-  // still renders but cannot be created yet.
-  const SUPPORTED_LOADERS = ['', 'fabric', 'quilt', 'forge', 'neoforge'];
-  const BUILD_LOADERS = ['fabric', 'quilt', 'forge', 'neoforge'];
+  // The backend loader catalog covers fabric/quilt/forge/neoforge plus the
+  // legacy fabric and cleanroom forks; LiteLoader still renders but cannot be
+  // created yet.
+  const SUPPORTED_LOADERS = [
+    '',
+    'fabric',
+    'quilt',
+    'forge',
+    'neoforge',
+    'legacyfabric',
+    'cleanroom',
+  ];
+  const BUILD_LOADERS = ['fabric', 'quilt', 'forge', 'neoforge', 'legacyfabric', 'cleanroom'];
+
+  // Legacy Fabric targets the pre-1.14 era; auto-recommend it there.
+  const LEGACY_MAX = '1.13.2';
+
+  function versionAtMost(id, ceiling) {
+    const parse = (value) => String(value ?? '').split('.').map((n) => parseInt(n, 10) || 0);
+    const left = parse(id);
+    const right = parse(ceiling);
+    for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
+      const a = left[i] ?? 0;
+      const b = right[i] ?? 0;
+      if (a !== b) return a < b;
+    }
+    return true;
+  }
+
+  const legacyFabricRecommended = $derived(!!selectedVersion && versionAtMost(selectedVersion, LEGACY_MAX));
+  const cleanroomRequires1122 = $derived(loader === 'cleanroom' && selectedVersion !== '1.12.2');
 
   const HELP_URL = 'https://github.com/BlackCatOfficialytb/TwilightMC-OSS#readme';
 
@@ -42,6 +73,8 @@
   let name = $state('');
   let group = $state('');
   let iconPath = $state('');
+  let iconKey = $state('');
+  let iconPickerOpen = $state(false);
 
   let loader = $state('');
   let loaderVersion = $state('');
@@ -114,7 +147,11 @@
   const unsupportedLoader = $derived(!SUPPORTED_LOADERS.includes(loader));
   const needsBuilds = $derived(BUILD_LOADERS.includes(loader));
   const canCreate = $derived(
-    !!selectedVersion && !unsupportedLoader && !creating && !(needsBuilds && loaderBuildsState === 'loading')
+    !!selectedVersion &&
+      !unsupportedLoader &&
+      !cleanroomRequires1122 &&
+      !creating &&
+      !(needsBuilds && loaderBuildsState === 'loading')
   );
 
   function typeLabel(type) {
@@ -141,6 +178,8 @@
   }
 
   function iconSrc() {
+    const bundled = iconKeyAsset(iconKey);
+    if (bundled) return bundled;
     const convert = window.__TAURI__?.core?.convertFileSrc;
     return iconPath && convert ? convert(iconPath) : null;
   }
@@ -158,11 +197,14 @@
         filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'ico'] }],
       });
       if (picked) {
+        iconKey = '';
         iconPath = String(picked);
         createError = '';
       }
+      return picked ? String(picked) : null;
     } catch (e) {
       createError = String(e);
+      return null;
     }
   }
 
@@ -189,6 +231,12 @@
 
   async function chooseVersion(id) {
     selectedVersion = id;
+    // Legacy Fabric is the only loader that supports the pre-1.14 era; when
+    // nothing is chosen yet and the version needs it, preselect it. Cleanroom
+    // is 1.12.2-only, so it is never auto-picked over Fabric.
+    if (!loader && versionAtMost(id, LEGACY_MAX)) {
+      loader = 'legacyfabric';
+    }
     if (needsBuilds) await loadBuilds();
   }
 
@@ -226,7 +274,13 @@
         loaderVersion: loaderVersion.trim() || null,
       });
       let warning = '';
-      if (iconPath) {
+      if (iconKey) {
+        try {
+          await invoke('set_instance_icon_key', { instanceId: row.id, iconKey });
+        } catch (e) {
+          warning = `Instance created, but the icon could not be applied: ${e}`;
+        }
+      } else if (iconPath) {
         try {
           await invoke('set_instance_icon', { instanceId: row.id, imagePath: iconPath });
         } catch (e) {
@@ -294,7 +348,7 @@
       <button
         class="group relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-(--border) bg-(--accent)/10 text-(--text-muted) hover:border-(--accent)"
         title="Choose an instance icon"
-        onclick={pickIcon}
+        onclick={() => (iconPickerOpen = true)}
       >
         {#if iconSrc()}
           <img src={iconSrc()} alt="" draggable="false" class="h-full w-full object-cover" />
@@ -461,6 +515,42 @@
             <p class="mt-2 text-[11px] text-(--text-muted)">No mod loader is selected.</p>
           {/if}
 
+          {#if loader === 'cleanroom'}
+            <div
+              role="alert"
+              class="mt-2 rounded border border-red-500/40 bg-red-500/10 p-2.5 text-[11px] leading-relaxed text-red-300"
+            >
+              <p class="font-semibold text-red-400">Warning (Advanced Users)</p>
+              <p class="mt-1">
+                CleanroomMC runs 1.12.2 on modern Java (21+). Do NOT use it unless you understand how
+                it works — it is prone to crashes and only a limited subset of Forge mods support it.
+              </p>
+              {#if cleanroomRequires1122}
+                <p class="mt-1.5 font-medium">
+                  Cleanroom only runs Minecraft 1.12.2 — select that version to continue.
+                </p>
+              {/if}
+            </div>
+          {/if}
+
+          {#if loader === 'legacyfabric' && !legacyFabricRecommended}
+            <div
+              role="alert"
+              class="mt-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-400"
+            >
+              Legacy Fabric targets Minecraft {LEGACY_MAX} and older; newer versions should use
+              regular <strong>Fabric</strong>.
+            </div>
+          {:else if loader === '' && legacyFabricRecommended}
+            <p
+              role="status"
+              class="mt-2 rounded border border-amber-500/20 bg-amber-500/5 p-2 text-[11px] text-amber-400"
+            >
+              Minecraft {selectedVersion} predates modern Fabric — <strong>Legacy Fabric</strong> is
+              the recommended loader for it.
+            </p>
+          {/if}
+
           {#if blindMode && (loader === '' || loader === 'horizon')}
             <div
               role="alert"
@@ -567,3 +657,21 @@
     </div>
   </div>
 </div>
+
+{#if iconPickerOpen}
+  <InstanceIconPicker
+    currentKey={iconKey}
+    currentPath={iconSrc() ?? ''}
+    onpick={(key) => {
+      iconKey = key;
+      iconPath = '';
+      iconPickerOpen = false;
+    }}
+    oncustom={async () => {
+      const picked = await pickIcon();
+      if (picked) iconKey = '';
+      return picked;
+    }}
+    onclose={() => (iconPickerOpen = false)}
+  />
+{/if}

@@ -79,11 +79,12 @@ async fn load_pack(
 fn detect_loader(
     dependencies: &std::collections::BTreeMap<String, String>,
 ) -> Result<(String, String), String> {
-    const KEYS: [(&str, &str); 4] = [
+    const KEYS: [(&str, &str); 5] = [
         ("fabric-loader", "fabric"),
         ("quilt-loader", "quilt"),
         ("forge", "forge"),
         ("neoforge", "neoforge"),
+        ("legacy-fabric", "legacyfabric"),
     ];
     let claimed: Vec<(&str, String)> = KEYS
         .iter()
@@ -143,6 +144,7 @@ fn meta_from_index(
         loader_version: non_empty(loader_version),
         last_played: 0,
         total_time_played: 0,
+        icon_key: None,
     }
 }
 

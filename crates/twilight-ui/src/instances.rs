@@ -31,6 +31,10 @@ pub struct InstanceMeta {
     /// Accumulated play time in seconds.
     #[serde(default)]
     pub total_time_played: u64,
+    /// Instance icon key: `prism:<name>`, `twemoji:<codepoints>`, or a bare
+    /// Prism `iconKey` resolved from the shared `icons/` directory.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_key: Option<String>,
 }
 
 /// One row of the instance grid.
@@ -134,6 +138,7 @@ fn prism_launch_meta(instance_dir: &Path) -> Option<InstanceMeta> {
         loader_version: loader.map(|(_, version)| version),
         last_played: 0,
         total_time_played: 0,
+        icon_key: cfg.get("iconKey").cloned().filter(|k| !k.trim().is_empty()),
     })
 }
 
@@ -188,6 +193,7 @@ async fn get_instances_in(root: &Path) -> Result<Vec<InstanceRow>, String> {
             loader_version: None,
             last_played: 0,
             total_time_played: 0,
+            icon_key: None,
         });
         let id = path
             .file_name()
@@ -242,6 +248,7 @@ pub(crate) async fn create_instance_in(
                     .filter(|v| !v.is_empty()),
                 last_played: 0,
                 total_time_played: 0,
+                icon_key: None,
             };
             write_meta(&dir, &meta).await?;
             meta
@@ -468,6 +475,36 @@ pub async fn duplicate_instance(
         .into_iter()
         .find(|row| row.id == id)
         .ok_or_else(|| "copy vanished after staging".to_owned())
+}
+
+/// Stores a bundled icon key (`prism:<name>` / `twemoji:<cp>`) on the
+/// instance, clearing any custom `icon.*` artwork so the key wins. Passing an
+/// empty key clears the selection and restores the brand fallback.
+#[tauri::command]
+pub async fn set_instance_icon_key(
+    app: AppHandle,
+    instance_id: String,
+    icon_key: String,
+) -> Result<String, String> {
+    validate_instance_id(&instance_id)?;
+    let dir = instances_root(&app).await?.join(&instance_id);
+    if !dir.is_dir() {
+        return Err(format!("unknown instance {instance_id}"));
+    }
+    let key = icon_key.trim().to_owned();
+    let mut meta = read_meta(&dir)
+        .await
+        .ok_or_else(|| format!("no instance metadata in {instance_id}"))?;
+    meta.icon_key = if key.is_empty() {
+        None
+    } else {
+        Some(key.clone())
+    };
+    write_meta(&dir, &meta).await?;
+    for stale in ["icon.png", "icon.jpg", "icon.jpeg", "icon.ico", "icon.webp"] {
+        let _ = tokio::fs::remove_file(dir.join(stale)).await;
+    }
+    Ok(key)
 }
 
 /// Copies an image file into the instance directory as `icon.<ext>` and
