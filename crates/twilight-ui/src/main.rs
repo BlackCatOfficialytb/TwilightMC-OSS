@@ -11,6 +11,7 @@ mod modpack;
 mod modrinth;
 mod mods;
 mod prefs;
+mod servers;
 mod shortcut;
 mod storage;
 mod versions;
@@ -157,6 +158,21 @@ fn main() {
             java::probe_java_path,
             versions::fetch_vanilla_versions,
             versions::fetch_loader_versions,
+            servers::list_servers,
+            servers::open_server_folder,
+            servers::create_server,
+            servers::delete_server,
+            servers::start_server,
+            servers::stop_server,
+            servers::kill_server,
+            servers::restart_server,
+            servers::send_server_command,
+            servers::get_server_properties,
+            servers::update_server_properties,
+            servers::install_authme,
+            servers::install_connect,
+            servers::get_connect_status,
+            servers::fetch_server_versions,
             modrinth::search_modrinth_mods,
             modrinth::install_modrinth_mod,
             modrinth::install_mod_with_deps,

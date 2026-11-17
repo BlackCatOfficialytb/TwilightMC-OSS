@@ -9,6 +9,7 @@
   import AccountManagerModal from './lib/AccountManagerModal.svelte';
   import AccountsPage from './lib/AccountsPage.svelte';
   import ClientModePage from './lib/ClientModePage.svelte';
+  import ServersPage from './lib/ServersPage.svelte';
   import SkinFace from './lib/SkinFace.svelte';
   import LauncherIcon from './lib/LauncherIcon.svelte';
   import Twemoji from './lib/Twemoji.svelte';
@@ -94,7 +95,7 @@
 
   const sections = {
     instances: ['Instances', 'Your library — open the wizard or drop a pack.'],
-    worlds: ['Servers & P2P', 'Server and P2P management lands in a later milestone.'],
+    worlds: ['Servers & P2P', 'Create and run local servers with the Minekube Connect tunnel.'],
     downloads: ['Downloads', 'Direct downloads land in a later milestone.'],
   };
 
@@ -941,6 +942,8 @@
           onclosemenu={() => (menuFor = null)}
           onadd={openWizard}
         />
+      {:else if active === 'worlds'}
+        <ServersPage />
       {:else}
         <h2 class="text-lg font-semibold">{sections[active][0]}</h2>
         <p class="mt-1 text-(--text-muted)">{sections[active][1]}</p>
