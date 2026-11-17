@@ -19,13 +19,18 @@ use crate::resolver::{MINECRAFT_MAVEN_BASE, ModLoader};
 pub struct ResolvedLoaderLib {
     /// Original maven coordinate, e.g. `net.fabricmc:fabric-loader:0.16.9`.
     pub name: String,
-    /// Absolute artifact URL the loader jar can be fetched from.
+    /// Absolute artifact URL the loader jar can be fetched from. Empty for
+    /// `"MMC-hint": "local"` entries, which the component pack ships itself.
     pub url: String,
     /// Library-store path, e.g.
     /// `net/fabricmc/fabric-loader/0.16.9/fabric-loader-0.16.9.jar`.
+    /// Local entries are flat: `lwjgl-999999.0-empty.jar`.
     pub storage: String,
     /// Expected sha1 (hex) when the metadata carries one.
     pub sha1: Option<String>,
+    /// `true` for `MMC-hint: local` entries: never downloaded, resolved from
+    /// the bundled `libraries/` directory the pack shipped.
+    pub local: bool,
 }
 
 /// One full manifest-shaped library from a loader patch set: classpath and
@@ -77,6 +82,10 @@ pub struct LoaderProfile {
     /// `true` when the patch set ships LWJGL 3 (`org.lwjgl:*`), which retires
     /// every legacy `org.lwjgl.lwjgl:*` entry the vanilla manifest carries.
     pub replaces_legacy_lwjgl: bool,
+    /// Jars the component pack shipped under its own `libraries/` dir, as
+    /// `(flat filename, bytes)`. The launch pipeline writes these into the
+    /// instance's `libraries/` before spawning; nothing downloads them.
+    pub bundled_libraries: Vec<(String, Vec<u8>)>,
 }
 
 impl LoaderProfile {
@@ -125,6 +134,9 @@ impl LoaderProfile {
             .libraries
             .iter()
             .chain(self.maven_files.iter())
+            // `MMC-hint: local` entries are shipped by the component pack; a
+            // request for them would 404 against every maven
+            .filter(|lib| !lib.local)
             .map(|lib| DownloadRequest {
                 url: lib.url.clone(),
                 dest: library_root.join(&lib.storage),
@@ -308,6 +320,11 @@ pub(crate) fn build_test_pack(entries: &[(&str, &[u8])]) -> Vec<u8> {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RawProfile {
+    /// MMC patch: the component id the file declares (`org.lwjgl`). Two patch
+    /// files may carry the same uid (Legacy Fabric ships `org.lwjgl.json` and
+    /// `org.lwjgl.lwjgl.json` with identical content); the later one wins.
+    #[serde(default)]
+    uid: Option<String>,
     #[serde(default)]
     loader: Option<RawLoaderRecord>,
     #[serde(default)]
@@ -391,7 +408,7 @@ struct RawLibEntry {
 }
 
 /// One Meta v1 / MMC patch `libraries` entry (Mojang-shaped, plus the Prism
-/// `url`/`extract` extensions).
+/// `url`/`extract`/`MMC-hint` extensions).
 #[derive(Debug, Clone, Deserialize)]
 struct RawMetaLib {
     name: String,
@@ -410,6 +427,10 @@ struct RawMetaLib {
     extract: Option<RawExtract>,
     #[serde(default)]
     rules: Vec<twilight_manifest::Rule>,
+    /// Prism `MMC-hint`: `local` (shipped inside the component pack, never
+    /// downloaded) or `always-stale` (always re-fetched).
+    #[serde(default, rename = "MMC-hint")]
+    mmc_hint: Option<String>,
 }
 
 impl RawMetaLib {
@@ -491,7 +512,7 @@ impl RawMetaLib {
             url: self.url.clone(),
             absolute_url: self.absolute_url.clone(),
             filename: None,
-            hint: None,
+            hint: self.mmc_hint.clone(),
             natives: self.natives.clone(),
             rules: self.rules.clone(),
             downloads,
@@ -600,18 +621,21 @@ impl RawProfile {
         for entry in self.libraries.iter().chain(self.add_libraries.iter()) {
             if entry.is_native() {
                 // a natives-bearing entry may still carry a classpath artifact
-                // (LWJGL's `lwjgl-platform` does not, Cleanroom's `lwjgl` does)
-                if !entry.is_natives_only() {
+                // (Cleanroom's `lwjgl` does). Legacy Fabric's `lwjgl-platform`
+                // ships natives only: no `downloads` block at all, so the
+                // artifact must not land on the classpath — the classifier jar
+                // URL comes from the manifest resolver's implicit-maven path.
+                let has_artifact = entry
+                    .downloads
+                    .as_ref()
+                    .is_some_and(|downloads| downloads.artifact.is_some());
+                if has_artifact {
                     libraries.push(resolve_meta_lib(entry, loader.maven_base())?);
-                    // the natives of this same entry still need extracting
-                    native_libraries.push(LoaderLibrary {
-                        library: entry.to_library()?,
-                    });
-                } else {
-                    native_libraries.push(LoaderLibrary {
-                        library: entry.to_library()?,
-                    });
                 }
+                // the natives of this same entry still need extracting
+                native_libraries.push(LoaderLibrary {
+                    library: entry.to_library()?,
+                });
                 // Prism replaces by `group:artifact`, whatever the version
                 replacements.push(entry.name.clone());
                 continue;
@@ -624,7 +648,25 @@ impl RawProfile {
                 });
                 continue;
             }
+            if entry.mmc_hint.as_deref() == Some("local") {
+                // shipped inside the component pack's `libraries/` dir: no URL,
+                // no download, flat filename storage
+                let library = entry.to_library()?;
+                libraries.push(ResolvedLoaderLib {
+                    storage: library.local_storage(&twilight_manifest::RuntimeContext::host()),
+                    name: entry.name.clone(),
+                    url: String::new(),
+                    sha1: None,
+                    local: true,
+                });
+                continue;
+            }
             libraries.push(resolve_meta_lib(entry, loader.maven_base())?);
+            // Prism replaces by `group:artifact` here too: Legacy Fabric's
+            // patched `lwjgl:2.9.4+legacyfabric.17` must retire the vanilla
+            // manifest's `lwjgl:2.9.4-nightly-20150209` or both land on the
+            // classpath and LWJGL's classes disagree with themselves
+            replacements.push(entry.name.clone());
         }
         let maven_files = self
             .maven_files
@@ -663,6 +705,7 @@ impl RawProfile {
             native_libraries,
             replacements,
             replaces_legacy_lwjgl,
+            bundled_libraries: Vec::new(),
         })
     }
 
@@ -756,6 +799,7 @@ impl RawProfile {
             native_libraries: Vec::new(),
             replacements: Vec::new(),
             replaces_legacy_lwjgl: false,
+            bundled_libraries: Vec::new(),
         })
     }
 }
@@ -790,6 +834,7 @@ fn resolve_meta_lib(
         sha1: artifact
             .and_then(|artifact| artifact.sha1.as_deref())
             .map(str::to_owned),
+        local: false,
     })
 }
 
@@ -813,6 +858,7 @@ fn resolve_ref(
         url,
         storage,
         sha1: sha1.map(str::to_owned),
+        local: false,
     })
 }
 
@@ -896,6 +942,54 @@ pub struct ComponentPack {
     /// Loader build the pack document declares. Legacy Fabric ships no
     /// `patches/*fabric-loader.json`, so this is the only place its version is.
     pub loader_version: Option<String>,
+    /// Files the pack ships under `libraries/` — flat filename → bytes. Prism
+    /// extracts these into the instance's own `libraries/` dir; the patches
+    /// reference them with `"MMC-hint": "local"` and never download them.
+    pub bundled_libraries: Vec<(String, Vec<u8>)>,
+}
+
+/// Shape identity of a patch library entry: two entries are the same *file*
+/// only when every payload-bearing field matches. A name-only comparison is
+/// wrong because Mojang-style patches legitimately split one coordinate into
+/// an artifact entry plus a natives-only sibling (Cleanroom's
+/// `org.lwjgl:lwjgl:3.4.3` does exactly that) — both must survive the merge.
+fn library_shape_fingerprint(library: &RawMetaLib) -> String {
+    let mut out = String::new();
+    // role: natives carrier / classpath artifact / natives-only sibling
+    out.push_str(if library.is_native() { "N" } else { "-" });
+    out.push_str(if library.is_natives_only() { "o" } else { "a" });
+    if library.mmc_hint.as_deref() == Some("local") {
+        out.push_str("|local");
+    }
+    if let Some(url) = &library.absolute_url {
+        out.push_str("|abs=");
+        out.push_str(url);
+    } else if let Some(url) = &library.url {
+        out.push_str("|base=");
+        out.push_str(url);
+    }
+    if let Some(downloads) = &library.downloads {
+        if let Some(artifact) = &downloads.artifact {
+            out.push_str("|jar=");
+            out.push_str(artifact.url.as_deref().unwrap_or(""));
+            out.push('|');
+            out.push_str(artifact.sha1.as_deref().unwrap_or(""));
+            out.push('|');
+            out.push_str(artifact.path.as_deref().unwrap_or(""));
+        }
+        // classifiers are order-independent: sort by key
+        let mut classifiers: Vec<(&String, &RawArtifact)> = downloads.classifiers.iter().collect();
+        classifiers.sort_by(|a, b| a.0.cmp(b.0));
+        for (classifier, info) in classifiers {
+            out.push('|');
+            out.push_str(classifier);
+            out.push('=');
+            out.push_str(info.url.as_deref().unwrap_or(""));
+            out.push('|');
+            out.push_str(info.sha1.as_deref().unwrap_or(""));
+        }
+    }
+    out
 }
 
 impl ComponentPack {
@@ -903,6 +997,7 @@ impl ComponentPack {
     pub fn parse(archive: &[u8]) -> Result<Self, LoaderError> {
         let entries = twilight_modrinth::zip_entry_names(archive).map_err(LoaderError::Pack)?;
         let mut patches = Vec::new();
+        let mut bundled_libraries = Vec::new();
         // `mmc-pack.json` names the components *and* their versions; a patch
         // file often omits `version`, so the pack document is the authority
         let pack_versions = match entries.iter().find(|name| name.as_str() == "mmc-pack.json") {
@@ -920,6 +1015,16 @@ impl ComponentPack {
             .find(|(uid, _)| uid.ends_with("fabric-loader") || uid.ends_with("forge"))
             .map(|(_, version)| version.clone());
         for name in entries {
+            // the pack's own `libraries/` tree: flat jars the patches mark local
+            if let Some(file) = name.strip_prefix("libraries/")
+                && !file.is_empty()
+                && !file.ends_with('/')
+            {
+                let bytes =
+                    twilight_modrinth::zip_entry(archive, &name).map_err(LoaderError::Pack)?;
+                bundled_libraries.push((file.to_owned(), bytes));
+                continue;
+            }
             let Some(stem) = name
                 .strip_prefix("patches/")
                 .and_then(|rest| rest.strip_suffix(".json"))
@@ -932,11 +1037,22 @@ impl ComponentPack {
             if raw.version.is_none() {
                 raw.version = pack_versions.get(&stem).cloned();
             }
-            patches.push(PackPatch { uid: stem, raw });
+            let patch = PackPatch { uid: stem, raw };
+            // a component id may be declared by more than one file: the later
+            // one replaces the earlier, exactly as a component list would
+            let key = patch.raw.uid.clone().unwrap_or_else(|| patch.uid.clone());
+            if let Some(existing) = patches
+                .iter()
+                .position(|p: &PackPatch| p.raw.uid.as_deref().unwrap_or(&p.uid) == key)
+            {
+                patches.remove(existing);
+            }
+            patches.push(patch);
         }
         Ok(Self {
             patches,
             loader_version: pack_loader_version,
+            bundled_libraries,
         })
     }
 
@@ -968,11 +1084,31 @@ impl ComponentPack {
                 || patch.uid.ends_with("forge")
                 || patch.uid.ends_with("quilt-loader");
             // natives and replacement coordinates always merge: the LWJGL patch
-            // is a separate component from the loader patch
-            merged.libraries.extend(patch.raw.libraries.iter().cloned());
-            merged
-                .add_libraries
-                .extend(patch.raw.add_libraries.iter().cloned());
+            // is a separate component from the loader patch. A coordinate may
+            // repeat across patches — and even within one patch, as an
+            // artifact entry plus a natives-only sibling — so only an entry
+            // with an *identical payload shape* is a duplicate; a name-only
+            // check would drop the natives sibling of a split pair.
+            for library in patch.raw.libraries {
+                let fingerprint = library_shape_fingerprint(&library);
+                if merged.libraries.iter().any(|existing| {
+                    existing.name == library.name
+                        && library_shape_fingerprint(existing) == fingerprint
+                }) {
+                    continue;
+                }
+                merged.libraries.push(library);
+            }
+            for library in patch.raw.add_libraries {
+                let fingerprint = library_shape_fingerprint(&library);
+                if merged.add_libraries.iter().any(|existing| {
+                    existing.name == library.name
+                        && library_shape_fingerprint(existing) == fingerprint
+                }) {
+                    continue;
+                }
+                merged.add_libraries.push(library);
+            }
             if !is_primary {
                 continue;
             }
@@ -996,7 +1132,10 @@ impl ComponentPack {
             });
         }
         merged.version = loader_version.or(merged.version);
-        merged.into_profile(loader)
+        let bundled = self.bundled_libraries;
+        let mut profile = merged.into_profile(loader)?;
+        profile.bundled_libraries = bundled;
+        Ok(profile)
     }
 }
 
@@ -1313,6 +1452,28 @@ mod tests {
                 "net/neoforged/neoform/1.21.4-20241203.161809/neoform-1.21.4-20241203.161809.zip",
                 "net/fabricmc/sponge-mixin/0.15.2+mixin.0.8.7/sponge-mixin-0.15.2+mixin.0.8.7.jar",
             ]
+        );
+    }
+
+    #[test]
+    fn real_cleanroom_pack_downloads_lwjgl3_natives() {
+        // ground truth: the published 0.7.14-alpha pack zip, when available
+        let Ok(path) = std::env::var("CLEANROOM_REAL_ZIP") else {
+            return;
+        };
+        let bytes = std::fs::read(&path).unwrap();
+        let pack = ComponentPack::parse(&bytes).unwrap();
+        let profile = pack
+            .into_named_profile(ModLoader::Cleanroom, "net.minecraftforge")
+            .unwrap();
+        let requests = profile.native_download_requests(Path::new("S/libraries"));
+        assert!(
+            requests.iter().any(|r| r
+                .dest
+                .to_string_lossy()
+                .contains("lwjgl-3.4.3-natives-windows.jar")),
+            "no lwjgl3 natives-windows downloads: {:?}",
+            requests
         );
     }
 

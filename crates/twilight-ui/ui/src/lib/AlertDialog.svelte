@@ -36,8 +36,10 @@
   }
 
   function onKeydown(e) {
-    if (e.key === 'Enter' && dialog?.variant !== 'prompt') {
+    if (e.key === 'Enter') {
       e.preventDefault();
+      // prompts accept on Enter as well; empty values resolve unchanged and
+      // the caller treats them as no-ops
       accept();
     }
   }

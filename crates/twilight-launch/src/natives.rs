@@ -104,9 +104,17 @@ pub async fn extract_natives_with_fallback(
 ) -> Result<(), LaunchError> {
     tokio::fs::create_dir_all(natives_dir)
         .await
-        .map_err(LaunchError::ExtractIo)?;
+        .map_err(|source| LaunchError::ExtractIo {
+            path: natives_dir.display().to_string(),
+            source,
+        })?;
     for jar in native_jars {
-        let bytes = tokio::fs::read(jar).await.map_err(LaunchError::ExtractIo)?;
+        let bytes = tokio::fs::read(jar)
+            .await
+            .map_err(|source| LaunchError::ExtractIo {
+                path: jar.display().to_string(),
+                source,
+            })?;
         let jar_name = jar.display().to_string();
         let entries = twilight_modrinth::extract_archive(&bytes).map_err(|reason| {
             LaunchError::CorruptJar {
@@ -129,15 +137,33 @@ pub async fn extract_natives_with_fallback(
                     reason: format!("unsafe entry path {name}"),
                 });
             }
+            // directory entries (trailing `/`, or zero-byte with no filename)
+            // only create the folder — writing a *file* there fails on Windows
+            if relative.ends_with('/') || data.is_empty() && relative.is_empty() {
+                let dir = natives_dir.join(relative.trim_end_matches('/'));
+                tokio::fs::create_dir_all(&dir)
+                    .await
+                    .map_err(|source| LaunchError::ExtractIo {
+                        path: dir.display().to_string(),
+                        source,
+                    })?;
+                continue;
+            }
             let target = natives_dir.join(&relative);
             if let Some(parent) = target.parent() {
-                tokio::fs::create_dir_all(parent)
-                    .await
-                    .map_err(LaunchError::ExtractIo)?;
+                tokio::fs::create_dir_all(parent).await.map_err(|source| {
+                    LaunchError::ExtractIo {
+                        path: parent.display().to_string(),
+                        source,
+                    }
+                })?;
             }
             tokio::fs::write(&target, &data)
                 .await
-                .map_err(LaunchError::ExtractIo)?;
+                .map_err(|source| LaunchError::ExtractIo {
+                    path: target.display().to_string(),
+                    source,
+                })?;
         }
     }
     Ok(())

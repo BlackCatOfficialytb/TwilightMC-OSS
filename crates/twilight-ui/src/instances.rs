@@ -507,6 +507,64 @@ pub async fn set_instance_icon_key(
     Ok(key)
 }
 
+/// Updates the display name of an instance in place: `instance.json`'s `name`
+/// and, for foreign Prism layouts, the `name=` line of `instance.cfg`. The
+/// directory id, shortcuts, `instgroups.json` membership and running paths
+/// stay untouched — renaming is a metadata edit, never a directory move.
+#[tauri::command]
+pub async fn rename_instance(
+    app: AppHandle,
+    instance_id: String,
+    new_name: String,
+) -> Result<crate::instance::InstanceInfo, String> {
+    let root = instances_root(&app).await?;
+    rename_instance_in(&root, &instance_id, &new_name).await
+}
+
+/// Core of [`rename_instance`], rooted at an explicit instances directory so
+/// tests can drive it without an app handle.
+pub(crate) async fn rename_instance_in(
+    root: &Path,
+    instance_id: &str,
+    new_name: &str,
+) -> Result<crate::instance::InstanceInfo, String> {
+    validate_instance_id(instance_id)?;
+    let name = new_name.trim().to_owned();
+    if name.is_empty() {
+        return Err("instance name must not be empty".into());
+    }
+    if name.len() > 128 {
+        return Err("instance name must be at most 128 characters".into());
+    }
+    let dir = root.join(instance_id);
+    if !dir.is_dir() {
+        return Err(format!("unknown instance {instance_id}"));
+    }
+
+    if let Some(mut meta) = read_meta(&dir).await {
+        meta.name = name.clone();
+        write_meta(&dir, &meta).await?;
+    } else if dir.join("instance.cfg").is_file() {
+        // foreign Prism layout without our metadata: rewrite only the cfg
+        let path = dir.join("instance.cfg");
+        let text = tokio::fs::read_to_string(&path)
+            .await
+            .map_err(|e| e.to_string())?;
+        tokio::fs::write(&path, rewrite_cfg_name(&text, &name))
+            .await
+            .map_err(|e| e.to_string())?;
+    } else {
+        return Err(format!("no instance metadata in {instance_id}"));
+    }
+
+    // the fresh row straight from the scan engine (icon, group, meta)
+    crate::instance::scan_instances_in(root)
+        .await?
+        .into_iter()
+        .find(|row| row.id == instance_id)
+        .ok_or_else(|| "instance vanished after rename".to_owned())
+}
+
 /// Copies an image file into the instance directory as `icon.<ext>` and
 /// removes the other recognized icon variants, so the scan resolves
 /// exactly one artwork file afterwards.
@@ -758,6 +816,58 @@ mod tests {
         delete_instance_in(&root, &inst.id, false).await.unwrap();
         assert!(!root.join(&inst.id).exists());
         assert!(delete_instance_in(&root, "Nope", true).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn rename_updates_native_metadata_and_prism_cfg() {
+        let root = temp_root();
+
+        // native metadata path: instance.json's name flips, the file stays
+        let inst = create_instance_in(&root, "Sky Factory", "1.21.4", None, None)
+            .await
+            .unwrap();
+        let renamed = rename_instance_in(&root, &inst.id, "  Sky Renamed  ")
+            .await
+            .unwrap();
+        assert_eq!(renamed.name, "Sky Renamed");
+        let meta: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(root.join("sky-factory/instance.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(meta["name"], "Sky Renamed");
+        assert_eq!(meta["version"], "1.21.4", "other fields intact");
+
+        // foreign Prism path: only the `name=` line of instance.cfg flips
+        let prism = root.join("foreign-prism");
+        tokio::fs::create_dir_all(&prism).await.unwrap();
+        std::fs::write(
+            prism.join("instance.cfg"),
+            "InstanceType=OneSix\niconKey=chickens\nname=Old Prism Name\n",
+        )
+        .unwrap();
+        std::fs::write(
+            prism.join("mmc-pack.json"),
+            r#"{"components":[{"uid":"net.minecraft","version":"1.12.2"}]}"#,
+        )
+        .unwrap();
+        let renamed = rename_instance_in(&root, "foreign-prism", "Renamed Prism")
+            .await
+            .unwrap();
+        assert_eq!(renamed.name, "Renamed Prism");
+        let cfg = std::fs::read_to_string(prism.join("instance.cfg")).unwrap();
+        assert!(cfg.contains("name=Renamed Prism\n"), "{cfg}");
+        assert!(cfg.contains("InstanceType=OneSix\n"), "{cfg}");
+        assert!(cfg.contains("iconKey=chickens\n"), "{cfg}");
+        assert!(!cfg.contains("Old Prism Name"), "{cfg}");
+
+        // guards: unknown id, empty and whitespace-only names
+        assert!(rename_instance_in(&root, "missing", "X").await.is_err());
+        assert!(
+            rename_instance_in(&root, "sky-factory", "   ")
+                .await
+                .is_err()
+        );
+        assert!(rename_instance_in(&root, "sky-factory", "").await.is_err());
     }
 
     #[tokio::test]

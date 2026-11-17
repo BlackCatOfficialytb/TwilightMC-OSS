@@ -14,7 +14,7 @@
   import Twemoji from './lib/Twemoji.svelte';
   import AlertDialog from './lib/AlertDialog.svelte';
   import ToastContainer from './lib/ToastContainer.svelte';
-  import { toast } from './lib/alerts.svelte.js';
+  import { toast, promptAlert } from './lib/alerts.svelte.js';
   import { topOverlay } from './lib/overlays.js';
   import { isDarkTheme, loadSavedAccent, normalizeThemeId, applyTheme } from './lib/theme';
   import { syncIconTheme } from './lib/icons';
@@ -367,6 +367,39 @@
     } catch (e) {
       status = String(e);
       toast(`Copy failed: ${e}`, 'error');
+    }
+  }
+
+  async function renameInstance(target) {
+    // the context panel sends the new value directly; the card menu sends
+    // the instance row and gets the native prompt first
+    const inst = typeof target === 'string' ? selectedInst : target;
+    if (!inst) return;
+    let value = typeof target === 'string' ? target : null;
+    if (value == null) {
+      value = await promptAlert({
+        title: 'Rename instance',
+        message: `Choose a new display name for ${inst.name}.`,
+        value: inst.name,
+        placeholder: 'Instance name',
+        confirmLabel: 'Rename',
+      });
+      if (value == null || !value.trim() || value.trim() === inst.name) return;
+    }
+    const label = inst.name;
+    try {
+      const row = await api('rename_instance', {
+        instanceId: inst.id,
+        newName: value,
+      });
+      await loadInstances();
+      // keep the panel on this instance with its fresh row
+      selectedId = row.id;
+      status = `Renamed ${label} to ${row.name}.`;
+      toast(`Renamed to ${row.name}.`, 'success');
+    } catch (e) {
+      status = String(e);
+      toast(`Rename failed: ${e}`, 'error');
     }
   }
 
@@ -891,6 +924,7 @@
           onplay={launchInstance}
           ontogglemenu={(id) => (menuFor = menuFor === id ? null : id)}
           onedit={openEdit}
+          onrename={renameInstance}
           onopenfolder={openInstanceFolder}
           onviewlogs={() => (drawerOpen = true)}
           ondelete={requestDelete}
@@ -996,6 +1030,7 @@
       oncopy={copyInstance}
       ondelete={() => requestDelete(selectedInst.id)}
       onshortcut={shortcutInstance}
+      onrename={renameInstance}
       onclose={() => (selectedId = null)}
     />
   {/if}

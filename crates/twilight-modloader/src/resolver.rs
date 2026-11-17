@@ -9,7 +9,9 @@ use std::fmt;
 use reqwest::Client;
 use twilight_downloader::{FREESM_META_BASE, PRISM_META_BASE};
 
-use crate::component::{ComponentPack, LoaderProfile, RawProfile};
+use crate::component::{
+    ComponentPack, LoaderProfile, RawProfile, ResolvedLoaderLib, maven_storage_path,
+};
 use crate::error::LoaderError;
 
 /// Fabric metadata host (API v2).
@@ -18,6 +20,8 @@ pub const FABRIC_META_BASE: &str = "https://meta.fabricmc.net";
 pub const LEGACY_FABRIC_META_BASE: &str = "https://meta.legacyfabric.net";
 /// Legacy Fabric maven repository (intermediary + patched LWJGL2).
 pub const LEGACY_FABRIC_MAVEN_BASE: &str = "https://maven.legacyfabric.net/";
+/// Upstream Fabric maven repository (fabric-loader builds).
+pub const FABRIC_MAVEN_BASE: &str = "https://maven.fabricmc.net/";
 /// CleanroomMC maven repository (cleanroom, cleanmix, patched fork artifacts).
 pub const CLEANROOM_MAVEN_BASE: &str = "https://maven.cleanroommc.com/";
 /// CleanroomMC release channel publishing the MMC component packs.
@@ -405,10 +409,109 @@ pub async fn resolve_legacy_fabric(
     // the MMC pack names the build in `mmc-pack.json`, but keep the resolved
     // one authoritative when the pack leaves it out
     if profile.loader_version.trim().is_empty() {
-        profile.loader_version = resolved;
+        profile.loader_version = resolved.clone();
     }
     profile.main_class = ModLoader::LegacyFabric.knot_main_class().to_owned();
+
+    // The instance zip carries the patched LWJGL natives but not the loader's
+    // own support jars (ASM, sponge-mixin): Knot dies with "ASM not detected
+    // on the classpath" without them. The v2 profile json lists them — merge
+    // every coordinate the pack does not already provide.
+    let profile_json = format!(
+        "{LEGACY_FABRIC_META_BASE}/v2/versions/loader/{game_version}/{resolved}/profile/json"
+    );
+    if let Ok(raw) = fetch_json(client, &profile_json).await
+        && let Some(libraries) = raw.get("libraries").and_then(|value| value.as_array())
+    {
+        for entry in libraries {
+            let Some(name) = entry.get("name").and_then(|value| value.as_str()) else {
+                continue;
+            };
+            // the pack already supplies this coordinate (intermediary, the
+            // patched LWJGL trio, the loader itself once synthesized below).
+            // Natives-bearing pack entries live in `native_libraries`, so they
+            // must be skipped too: the json's natives-less artifact form would
+            // fabricate a classpath jar that no maven serves.
+            if profile.libraries.iter().any(|lib| lib.name == name)
+                || profile
+                    .native_libraries
+                    .iter()
+                    .any(|lib| lib.library.name.to_string() == name)
+            {
+                continue;
+            }
+            let Ok(storage) = maven_storage_path(name) else {
+                continue;
+            };
+            let base = entry
+                .get("url")
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|base| !base.is_empty())
+                .unwrap_or(LEGACY_FABRIC_MAVEN_BASE);
+            profile.libraries.push(ResolvedLoaderLib {
+                name: name.to_owned(),
+                url: format!("{}/{}", base.trim_end_matches('/'), storage),
+                storage,
+                sha1: entry
+                    .get("sha1")
+                    .and_then(|value| value.as_str())
+                    .filter(|sha1| !sha1.trim().is_empty())
+                    .map(str::to_owned),
+                local: false,
+            });
+        }
+    }
+
+    // The component pack never lists the loader artifact (no fabric-loader
+    // patch exists): without it Knot cannot load, so synthesize it just behind
+    // the mapping jar when the profile json could not supply it. The fork
+    // maven serves its patched LWJGL2/intermediary; `net.fabricmc:fabric-loader`
+    // builds live upstream — probe both bases.
+    let loader_version = profile.loader_version.clone();
+    let loader_coordinate = ModLoader::LegacyFabric
+        .loader_coordinate(&loader_version)
+        .ok_or(LoaderError::MissingField {
+            field: "loader artifact coordinate",
+        })?;
+    if !profile
+        .libraries
+        .iter()
+        .any(|lib| lib.name == loader_coordinate)
+    {
+        let storage = maven_storage_path(&loader_coordinate)?;
+        let mut loader_lib = None;
+        for base in [LEGACY_FABRIC_MAVEN_BASE, FABRIC_MAVEN_BASE] {
+            let candidate = format!("{}/{}", base.trim_end_matches('/'), storage);
+            if resolvable(client, &candidate).await {
+                loader_lib = Some(ResolvedLoaderLib {
+                    name: loader_coordinate.clone(),
+                    url: candidate,
+                    storage,
+                    sha1: None,
+                    local: false,
+                });
+                break;
+            }
+        }
+        let loader_lib = loader_lib.ok_or_else(|| LoaderError::HttpStatus {
+            url: format!("no maven serves {loader_coordinate}"),
+            status: 404,
+        })?;
+        profile.libraries.insert(1, loader_lib);
+    }
     Ok(profile)
+}
+
+/// `true` when a HEAD request reaches a success status; failover probing for
+/// artifact URLs across mirror maven bases.
+async fn resolvable(client: &Client, url: &str) -> bool {
+    client
+        .head(url)
+        .send()
+        .await
+        .map(|response| response.status().is_success())
+        .unwrap_or(false)
 }
 
 /// First stable `loader.version` of a fabric-family list endpoint, else the
@@ -995,7 +1098,9 @@ pub(crate) const CLEANROOM_METADATA_FIXTURE: &str = r#"<?xml version="1.0" encod
 </metadata>"#;
 
 /// Cleanroom's `patches/org.lwjgl.json`: the LWJGL 3 upgrade that replaces
-/// 1.12.2's LWJGL 2 (which crashes on Java 21+).
+/// 1.12.2's LWJGL 2 (which crashes on Java 21+). Each module ships as a
+/// same-name pair — an artifact-only entry plus a natives-only sibling with
+/// classifiers — exactly as the published pack does.
 #[cfg(test)]
 pub(crate) const LWJGL3_PATCH_FIXTURE: &str = r#"{
     "formatVersion": 1,
@@ -1009,7 +1114,12 @@ pub(crate) const LWJGL3_PATCH_FIXTURE: &str = r#"{
                 "artifact": {
                     "url": "https://repo.maven.apache.org/maven2/org/lwjgl/lwjgl/3.4.3/lwjgl-3.4.3.jar",
                     "sha1": "0000000000000000000000000000000000000005"
-                },
+                }
+            }
+        },
+        {
+            "name": "org.lwjgl:lwjgl:3.4.3",
+            "downloads": {
                 "classifiers": {
                     "natives-windows": {
                         "url": "https://repo.maven.apache.org/maven2/org/lwjgl/lwjgl/3.4.3/lwjgl-3.4.3-natives-windows.jar",

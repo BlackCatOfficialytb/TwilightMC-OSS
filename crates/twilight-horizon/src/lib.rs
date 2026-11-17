@@ -86,10 +86,16 @@ impl AssetStore {
 
     /// Composes download requests for the whole index from Mojang's content-
     /// addressed CDN; each already carries its own expected sha1.
+    ///
+    /// Asset indexes map many resource names onto one hash (the 1.8 index
+    /// reuses sounds hundreds of times); one request per unique hash — more
+    /// would have concurrent downloads racing on the same `.part` file.
     pub fn download_requests(&self, index: &AssetIndex) -> Vec<DownloadRequest> {
+        let mut seen = std::collections::HashSet::new();
         index
             .objects
             .values()
+            .filter(|AssetObject { hash, .. }| seen.insert(hash.clone()))
             .map(|AssetObject { hash, .. }| DownloadRequest {
                 url: format!("{MOJANG_RESOURCES_BASE}{}/{hash}", &hash[..2]),
                 dest: self.object_path(hash),

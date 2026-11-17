@@ -14,6 +14,7 @@
     onplay,
     ontogglemenu,
     onedit,
+    onrename,
     onopenfolder,
     onviewlogs,
     ondelete,
@@ -33,6 +34,7 @@
       onplay={() => onplay?.(inst.id)}
       ontogglemenu={() => ontogglemenu?.(inst.id)}
       onedit={() => onedit?.(inst)}
+      onrename={() => onrename?.(inst)}
       onopenfolder={() => onopenfolder?.(inst.id)}
       onviewlogs={onviewlogs}
       ondelete={() => ondelete?.(inst.id)}

@@ -15,6 +15,7 @@
     onplay,
     ontogglemenu,
     onedit,
+    onrename,
     onopenfolder,
     onviewlogs,
     ondelete,
@@ -128,6 +129,15 @@
         }}
       >
         ✎ Edit Instance
+      </button>
+      <button
+        class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--bg-subtle)"
+        onclick={() => {
+          onclosemenu();
+          onrename?.();
+        }}
+      >
+        ✎ Rename
       </button>
       <button
         class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--bg-subtle)"

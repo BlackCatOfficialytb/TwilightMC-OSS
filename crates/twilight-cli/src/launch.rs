@@ -36,6 +36,9 @@ pub struct LaunchPaths {
     pub work_dir: PathBuf,
     /// `libraries/` store root that every classpath entry roots at.
     pub library_root: PathBuf,
+    /// The instance's own `libraries/` dir: where Prism puts component-pack
+    /// files marked `"MMC-hint": "local"` (never the shared store).
+    pub instance_library_root: PathBuf,
     /// Horizon/vanilla assets root (`objects/xx/<sha>`, `indexes/<id>.json`).
     pub assets_root: PathBuf,
     /// Client jar of the version.
@@ -99,6 +102,7 @@ pub fn resolve_paths(cfg: &LaunchConfig, version: &VersionFile) -> LaunchPaths {
     LaunchPaths {
         shared_dir: shared_dir.clone(),
         library_root: shared_dir.join("libraries"),
+        instance_library_root: instance_dir.join("libraries"),
         instance_dir,
         work_dir,
         main_jar,
@@ -108,7 +112,6 @@ pub fn resolve_paths(cfg: &LaunchConfig, version: &VersionFile) -> LaunchPaths {
         assets_id,
     }
 }
-
 /// Resolves the java executable: an explicit `--java` wins (its version is
 /// probed best-effort, mismatches only warn), otherwise the whole system is
 /// discovered and `select_best_java` picks by manifest-required majors.
@@ -185,12 +188,20 @@ pub fn assemble_command(
         .collect();
     let (vanilla_entries, _native_jars) =
         active_paths(&vanilla_libraries, ctx, &paths.library_root, &none);
-    // loader jars come first so the Knot launcher wins class resolution
+    // loader jars come first so the Knot launcher wins class resolution.
+    // `MMC-hint: local` entries live in the instance's own `libraries/` dir,
+    // exactly where Prism extracts them from the component pack.
     let mut classpath_entries: Vec<PathBuf> = match loader {
         Some(profile) => profile
             .libraries
             .iter()
-            .map(|lib| paths.library_root.join(&lib.storage))
+            .map(|lib| {
+                if lib.local {
+                    paths.instance_library_root.join(&lib.storage)
+                } else {
+                    paths.library_root.join(&lib.storage)
+                }
+            })
             .collect(),
         None => Vec::new(),
     };
@@ -236,6 +247,15 @@ pub fn assemble_command(
         })
         .unwrap_or_default();
     jvm_args.extend(jvm_arguments(version, ctx, &none, &vars, None));
+    // legacy manifests (`minecraftArguments` era) have no `arguments.jvm`
+    // block: the era's own launcher carried the natives scratchpad onto
+    // java.library.path itself. Without it LWJGL 2/3 can never find its DLLs.
+    if version.arguments.is_none() {
+        jvm_args.push(format!(
+            "-Djava.library.path={}",
+            paths.natives_dir.display()
+        ));
+    }
     let manifest_supplies_classpath = jvm_args
         .iter()
         .any(|arg| arg == "-cp" || arg == "-classpath");
@@ -426,7 +446,14 @@ fn build_diagnostics(
         Some(profile) => profile
             .libraries
             .iter()
-            .map(|lib| paths.library_root.join(&lib.storage).display().to_string())
+            .map(|lib| {
+                let root = if lib.local {
+                    &paths.instance_library_root
+                } else {
+                    &paths.library_root
+                };
+                root.join(&lib.storage).display().to_string()
+            })
             .collect::<Vec<_>>(),
         None => Vec::new(),
     };
@@ -632,6 +659,27 @@ pub async fn run_launch_with(
     // the game cwd must exist before the JVM spawns inside it — foreign
     // Prism layouts and freshly created instances alike
     tokio::fs::create_dir_all(&paths.work_dir).await?;
+
+    // ---- component-pack libraries: Prism extracts the pack's own
+    //      `libraries/` tree into the instance dir and marks those entries
+    //      `MMC-hint: local`, so nothing downloads them. Writing them first
+    //      makes the classpath valid before the network pass runs.
+    if let Some(profile) = &loader_profile
+        && !profile.bundled_libraries.is_empty()
+    {
+        tokio::fs::create_dir_all(&paths.instance_library_root).await?;
+        for (name, bytes) in &profile.bundled_libraries {
+            // flat filenames only: a pack must not write outside the dir
+            let safe = std::path::Path::new(name)
+                .file_name()
+                .map(|leaf| leaf.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if safe.is_empty() {
+                continue;
+            }
+            tokio::fs::write(paths.instance_library_root.join(safe), bytes).await?;
+        }
+    }
 
     // ---- libraries + client jar (parallel, sha1-verified)
     let downloader = ParallelDownloader::new(client.clone(), 8);
@@ -916,9 +964,15 @@ mod tests {
     #[test]
     fn legacy_manifest_receives_launcher_owned_classpath() {
         let (plan, paths) = assemble_for(LEGACY);
-        assert!(
-            plan.jvm_args.is_empty(),
-            "legacy manifests carry no jvm list"
+        // the minecraftArguments era predates `arguments.jvm`: the launcher
+        // itself carries the natives scratchpad onto java.library.path
+        assert_eq!(
+            plan.jvm_args,
+            vec![format!(
+                "-Djava.library.path={}",
+                paths.natives_dir.display()
+            )],
+            "legacy manifests must still expose natives_directory"
         );
         assert!(!plan.classpath.is_empty());
         assert!(plan.classpath.contains(separator()));
@@ -941,11 +995,14 @@ mod tests {
             .get_args()
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
-        assert_eq!(argv[0], "-cp");
-        assert_eq!(argv[1], plan.classpath);
-        assert_eq!(argv[2], "yawk.mine.hull");
-        assert_eq!(argv[3], "--username");
-        assert_eq!(argv[4], "Steve");
+        // the launcher-owned natives flag leads, then the classpath switch
+        assert_eq!(argv[0], plan.jvm_args[0]);
+        assert!(argv[0].starts_with("-Djava.library.path="));
+        assert_eq!(argv[1], "-cp");
+        assert_eq!(argv[2], plan.classpath);
+        assert_eq!(argv[3], "yawk.mine.hull");
+        assert_eq!(argv[4], "--username");
+        assert_eq!(argv[5], "Steve");
         let last = argv.len();
         assert_eq!(argv[last - 2], "--gameDir");
         assert_eq!(argv[last - 1], plan.work_dir.display().to_string());

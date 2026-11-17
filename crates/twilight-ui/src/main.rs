@@ -169,6 +169,7 @@ fn main() {
             instances::get_instances,
             instances::create_instance,
             instances::duplicate_instance,
+            instances::rename_instance,
             instances::set_instance_icon,
             instances::set_instance_icon_key,
             instance::scan_instances,

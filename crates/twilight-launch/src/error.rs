@@ -26,6 +26,10 @@ pub enum LaunchError {
     },
     #[error("jar {jar} appears corrupt: {reason}")]
     CorruptJar { jar: String, reason: String },
-    #[error("natives extraction io failure: {0}")]
-    ExtractIo(std::io::Error),
+    #[error("natives extraction io failure on {path}")]
+    ExtractIo {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
 }

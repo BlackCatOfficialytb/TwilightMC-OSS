@@ -21,11 +21,30 @@
     oncopy,
     ondelete,
     onshortcut,
+    onrename,
     onclose,
   } = $props();
 
   let groupOpen = $state(false);
   let newGroup = $state('');
+  let renaming = $state(false);
+  let draftName = $state('');
+
+  function startRename() {
+    draftName = instance.name;
+    renaming = true;
+  }
+
+  function commitRename() {
+    if (!renaming) return;
+    const value = draftName.trim();
+    renaming = false;
+    if (value && value !== instance.name) onrename?.(value);
+  }
+
+  function cancelRename() {
+    renaming = false;
+  }
 
   // Loader pill treatment: cyan for the light modloaders, amber for the
   // native/heavy ones, slate for vanilla (mirrors InstanceCard).
@@ -129,7 +148,33 @@
       ✕
     </button>
   </div>
-  <h3 class="mt-2.5 truncate text-[14px] font-semibold" title={instance.name}>{instance.name}</h3>
+  <h3 class="mt-2.5 truncate text-[14px] font-semibold" title={instance.name}>
+    {#if renaming}
+      <input
+        class="h-7 w-full rounded border border-(--accent) bg-(--bg-surface) px-2 text-[13px] font-medium outline-none"
+        bind:value={draftName}
+        aria-label="Instance name"
+        onkeydown={(e) => {
+          if (e.key === 'Enter') commitRename();
+          else if (e.key === 'Escape') cancelRename();
+        }}
+        onblur={commitRename}
+      />
+    {:else}
+      <span class="group/name flex items-center gap-1">
+        <span class="truncate">{instance.name}</span>
+        <button
+          type="button"
+          class="shrink-0 rounded p-0.5 text-[10px] text-(--text-muted) opacity-0 transition-opacity hover:text-(--accent) focus-visible:opacity-100 group-hover/name:opacity-100"
+          title="Rename instance"
+          aria-label="Rename instance"
+          onclick={startRename}
+        >
+          ✎
+        </button>
+      </span>
+    {/if}
+  </h3>
   <div class="mt-1.5 flex flex-wrap gap-1.5">
     <span class="rounded bg-(--accent)/15 px-2 py-0.5 text-[10px] font-medium text-(--accent)">{instance.minecraft_version}</span>
     <span class="rounded px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide {loaderPill}">{instance.loader_type}</span>

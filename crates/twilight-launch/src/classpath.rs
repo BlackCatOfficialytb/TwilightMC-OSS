@@ -27,14 +27,36 @@ pub fn active_paths(
         if !library.is_active(ctx, features) {
             continue;
         }
-        let Some(spec) = library.storage_spec(ctx) else {
-            continue;
-        };
-        let path = library_root.join(spec.storage);
-        if library.is_native() {
-            natives.push(path);
+        // local libraries live flat by filename under the instance's own
+        // `libraries/` dir, exactly as Prism resolves them
+        let storages: Vec<String> = if library.is_local() {
+            let local = library.local_storage(ctx);
+            if local.is_empty() {
+                continue;
+            }
+            vec![local]
         } else {
-            classpath.push(path);
+            let Some(spec) = library.storage_spec(ctx) else {
+                continue;
+            };
+            // `${arch}` natives (1.8's twitch) download and extract as both
+            // word-size variants, mirroring `resolve_downloads`
+            if spec.storage.contains("${arch}") {
+                ["32", "64"]
+                    .iter()
+                    .map(|arch| spec.storage.replace("${arch}", arch))
+                    .collect()
+            } else {
+                vec![spec.storage]
+            }
+        };
+        for storage in storages {
+            let path = library_root.join(storage);
+            if library.is_native() {
+                natives.push(path);
+            } else {
+                classpath.push(path);
+            }
         }
     }
     (classpath, natives)

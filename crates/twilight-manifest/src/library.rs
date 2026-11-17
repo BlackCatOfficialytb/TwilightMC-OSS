@@ -95,7 +95,32 @@ impl Library {
         self.hint.as_deref() == Some("always-stale")
     }
 
-    /// Relative storage path under the library root for this context
+    /// Storage path of a `"hint": "local"` entry.
+    ///
+    /// Prism stores local libraries flat by **filename only** (never the maven
+    /// directory tree): `FS::PathCombine(overridePath, fileinfo.fileName())` in
+    /// `Library::getDownloads`. A local library is never downloaded, so this is
+    /// where the launcher looks for the jar the component pack shipped.
+    pub fn local_storage(&self, ctx: &RuntimeContext) -> String {
+        let spec = if self.is_native() {
+            let mut name = self.name.clone();
+            name.set_classifier(self.compatible_native(ctx).unwrap_or("INVALID"));
+            name
+        } else {
+            self.name.clone()
+        };
+        spec.to_path(self.filename.as_deref())
+            .map(|path| {
+                path.storage
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&path.storage)
+                    .to_owned()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Storage path under the library root for this context
     /// (`storageSuffix(storagePrefix())` in Qt terms).
     pub fn storage_spec(&self, ctx: &RuntimeContext) -> Option<crate::gradle::PathSpec> {
         let spec = if self.is_native() {
@@ -124,7 +149,13 @@ impl Library {
     /// Mirrors `Library::getDownloads`: decides which files must be present for
     /// this library in `ctx`, expanding `${arch}` natives into both 32/64 bit
     /// downloads and preferring Mojang-supplied checksums.
+    ///
+    /// `"hint": "local"` entries return nothing: Prism never downloads them,
+    /// it only checks that the component pack shipped the file.
     pub fn resolve_downloads(&self, ctx: &RuntimeContext) -> Vec<ResolvedDownload> {
+        if self.is_local() {
+            return Vec::new();
+        }
         let Some(spec) = self.storage_spec(ctx) else {
             return Vec::new();
         };

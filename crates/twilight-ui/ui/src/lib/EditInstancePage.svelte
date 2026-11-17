@@ -34,6 +34,28 @@
   let iconKey = $state(instance.icon_key ?? '');
   let iconNotice = $state('');
 
+  // ---- rename state ----
+  let draftName = $state(instance.name);
+  let nameNotice = $state('');
+
+  async function commitNameEdit() {
+    const value = draftName.trim();
+    if (!value || value === instance.name) return;
+    nameNotice = '';
+    try {
+      const row = await window.__TAURI__.core.invoke('rename_instance', {
+        instanceId: instance.id,
+        newName: value,
+      });
+      // the parent grid re-reads on navigation; mirror the accepted name
+      instance.name = row.name;
+      draftName = row.name;
+      nameNotice = `Renamed to ${row.name}.`;
+    } catch (e) {
+      nameNotice = String(e);
+    }
+  }
+
   function iconSrc() {
     const bundled = iconKeyAsset(iconKey);
     if (bundled) return bundled;
@@ -533,7 +555,31 @@
         <p class="mt-1 text-[12px] text-(--text-muted)">On-disk layout of this instance.</p>
 
         <div class="mt-6 rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px]">
-          <div class="font-medium">{instance.name}</div>
+          <div class="font-medium">Instance name</div>
+          <p class="mt-1 text-[11px] text-(--text-muted)">
+            The display name across the grid and context panel; the folder id stays put.
+          </p>
+          <div class="mt-3 flex items-center gap-2">
+            <input
+              class="h-8 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-2) px-2.5 text-(--step-body) text-(--fg-1) outline-none focus:border-(--accent-1)"
+              bind:value={draftName}
+              aria-label="Instance name"
+              onkeydown={(e) => {
+                if (e.key === 'Enter') commitNameEdit();
+              }}
+            />
+            <button
+              type="button"
+              class="rounded bg-(--accent-1) px-3 py-1.5 font-medium text-(--on-accent) hover:bg-(--accent-1-hover) disabled:opacity-40"
+              disabled={!draftName.trim() || draftName.trim() === instance.name}
+              onclick={commitNameEdit}
+            >
+              Rename
+            </button>
+          </div>
+          {#if nameNotice}
+            <p class="mt-2 text-[11px] text-(--fg-2)">{nameNotice}</p>
+          {/if}
           <div class="mt-2 space-y-1 font-mono text-[11px] text-(--text-muted)" title={gamePath()}>
             <div class="break-all">Game folder: {gamePath()}</div>
             <div class="break-all">Mods folder: {gamePath('mods')}</div>
