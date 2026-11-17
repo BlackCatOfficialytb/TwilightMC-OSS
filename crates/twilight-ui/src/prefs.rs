@@ -134,6 +134,32 @@ pub async fn set_mode_config(app: AppHandle, mode: String) -> Result<(), String>
     save_settings(&settings_path(&app).await?, &settings).await
 }
 
+/// The optional CurseForge API key (`None` = the zero-key FOSS flow).
+#[derive(Debug, Clone, Serialize)]
+pub struct CurseForgeKey {
+    pub configured: bool,
+}
+
+#[tauri::command]
+pub async fn get_curseforge_api_key(app: AppHandle) -> Result<CurseForgeKey, String> {
+    let settings = load_settings(&settings_path(&app).await?).await;
+    Ok(CurseForgeKey {
+        configured: settings
+            .curseforge_api_key
+            .as_deref()
+            .is_some_and(|k| !k.trim().is_empty()),
+    })
+}
+
+/// Persists (or clears, with an empty key) the CurseForge API key. The key is
+/// user-supplied through Settings — never bundled with the launcher.
+#[tauri::command]
+pub async fn set_curseforge_api_key(app: AppHandle, api_key: String) -> Result<(), String> {
+    let mut settings = load_settings(&settings_path(&app).await?).await;
+    settings.curseforge_api_key = Some(api_key.trim().to_owned()).filter(|k| !k.is_empty());
+    save_settings(&settings_path(&app).await?, &settings).await
+}
+
 /// Persisted accessibility flags shown in the Settings page.
 #[derive(Debug, Clone, Serialize)]
 pub struct AccessibilityConfig {

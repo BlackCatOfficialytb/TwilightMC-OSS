@@ -6,6 +6,7 @@ mod args;
 mod classpath;
 mod diagnostics;
 mod error;
+mod gate;
 mod natives;
 mod process;
 
@@ -19,6 +20,10 @@ pub use diagnostics::{
     header_lines, mask_access_token, render, resolve_service_hosts,
 };
 pub use error::LaunchError;
+pub use gate::{
+    BAREBONES_CURSEFORGE_URL, BAREBONES_MARKER_FILE, CLEANROOM_GATE_MESSAGE,
+    CLEANROOM_REQUIRED_MODS, check_cleanroom_gate,
+};
 pub use natives::{
     clean_natives_dir, extract_natives, extract_natives_with_7z, extract_natives_with_fallback,
     find_seven_zip, sevenzip_arguments,

@@ -4,16 +4,17 @@
 // stage downloads + overrides into a new managed instance and write its
 // `instance.json` metadata so the grid sees it.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
-use twilight_modrinth::Mrpack;
+use twilight_modrinth::{Mrpack, extract_archive};
 
 use twilight_cli::ModpackArgs;
 
+use crate::accounts::{load_settings, settings_path};
 use crate::instance::resolved_instances_root;
-use crate::instances::{self, InstanceMeta, slugify, write_meta};
+use crate::instances::{self, InstanceMeta, instances_root, slugify, write_meta};
 use crate::storage::shared_root;
 
 /// Pack facts shown by the drag-and-drop install modal.
@@ -244,6 +245,255 @@ pub async fn install_modpack(app: AppHandle, path_or_url: String) -> Result<Stri
     install_pack(&app, &path_or_url, "").await
 }
 
+/// The CurseForge `manifest.json` schema (subset; unknown fields ignored).
+#[derive(Debug, Deserialize)]
+struct CurseManifest {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    version: String,
+    #[serde(default)]
+    files: Vec<CurseFileRef>,
+    /// Folder the pack mirrors the game dir from (`overrides` by default).
+    #[serde(default)]
+    overrides: String,
+}
+
+/// One `files[]` entry: CurseForge project + file ids (no URLs in manifests).
+#[derive(Debug, Deserialize)]
+struct CurseFileRef {
+    #[serde(rename = "projectID", default)]
+    project_id: u64,
+    #[serde(rename = "fileID", default)]
+    file_id: u64,
+}
+
+/// What a CurseForge import did, shown in the gate dialog after it runs.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CurseImportReport {
+    pub name: String,
+    pub version: String,
+    pub overrides_extracted: usize,
+    pub files_listed: usize,
+    /// Mod jars fetched through the CurseForge API (needs the Settings key).
+    pub mods_downloaded: Vec<String>,
+    /// Manifest files not downloaded (no key, or the API fetch failed).
+    pub mods_skipped: usize,
+    /// True when the BareBones gate marker was written for this import.
+    pub barebones_marker: bool,
+}
+
+const CF_API_BASE: &str = "https://api.curseforge.com/v1";
+
+/// Resolves the instance `minecraft` dir a CurseForge pack extracts into.
+async fn game_dir_for(app: &AppHandle, instance_id: &str) -> Result<PathBuf, String> {
+    instances::validate_instance_id(instance_id)?;
+    let root = instances_root(app).await?;
+    Ok(root.join(instance_id).join("minecraft"))
+}
+
+/// Destination for one `overrides/` entry, or `None` when it does not belong
+/// to the overrides folder or escapes the game dir (zip-slip guard).
+fn override_dest(game_dir: &Path, overrides_dir: &str, name: &str) -> Option<PathBuf> {
+    let rest = name.strip_prefix(overrides_dir)?;
+    let rel = rest.strip_prefix(['/', '\\'])?;
+    if rel.is_empty() {
+        return None;
+    }
+    let mut dest = game_dir.to_path_buf();
+    for component in Path::new(rel).components() {
+        match component {
+            std::path::Component::Normal(part) => dest.push(part),
+            // `..`, absolute roots, Windows prefixes: never leave the game dir
+            _ => return None,
+        }
+    }
+    Some(dest)
+}
+
+/// Mod-jar file name for a CurseForge download: the API's `fileName` (or the
+/// URL's last segment), stripped of path/separator characters.
+fn curse_file_name(file_name: &str, url: &str) -> String {
+    let raw = if !file_name.is_empty() {
+        file_name.to_owned()
+    } else {
+        reqwest::Url::parse(url)
+            .ok()
+            .and_then(|u| {
+                u.path_segments()
+                    .and_then(|mut segments| segments.next_back().map(str::to_owned))
+            })
+            .unwrap_or_default()
+    };
+    raw.chars()
+        .filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+        .collect::<String>()
+        .trim()
+        .to_owned()
+}
+
+/// Fetches one CurseForge mod file into `mods_dir`; `Ok(None)` = skipped
+/// (fetch failed or no usable URL — the import itself stays successful).
+async fn fetch_curse_file(
+    client: &reqwest::Client,
+    api_key: &str,
+    project_id: u64,
+    file_id: u64,
+    mods_dir: &Path,
+) -> Result<Option<String>, String> {
+    let url = format!("{CF_API_BASE}/mods/{project_id}/files/{file_id}");
+    let Ok(meta) = client
+        .get(&url)
+        .header("x-api-key", api_key)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+    else {
+        return Ok(None);
+    };
+    let Ok(data) = meta.json::<serde_json::Value>().await else {
+        return Ok(None);
+    };
+    let download_url = data
+        .pointer("/data/downloadUrl")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if !download_url.starts_with("https://") {
+        return Ok(None);
+    }
+    let file_name = data
+        .pointer("/data/fileName")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let name = curse_file_name(file_name, download_url);
+    if name.is_empty() {
+        return Ok(None);
+    }
+    let Ok(resp) = client.get(download_url).send().await else {
+        return Ok(None);
+    };
+    let Ok(resp) = resp.error_for_status() else {
+        return Ok(None);
+    };
+    let Ok(bytes) = resp.bytes().await else {
+        return Ok(None);
+    };
+    std::fs::write(mods_dir.join(&name), &bytes).map_err(|e| e.to_string())?;
+    Ok(Some(name))
+}
+
+/// Imports a CurseForge modpack zip (manifest.json + overrides/) into an
+/// existing instance: `overrides/` lands in the instance's `minecraft` dir
+/// (zip-slip guarded) and the BareBones gate marker is written when the pack
+/// is the BareBones Template. Manifest mod files resolve through
+/// api.curseforge.com only when the user configured an API key in Settings —
+/// without a key they are reported as skipped, keeping the default flow FOSS.
+#[tauri::command]
+pub async fn import_curseforge_pack(
+    app: AppHandle,
+    zip_path: String,
+    instance_id: String,
+) -> Result<CurseImportReport, String> {
+    let bytes = std::fs::read(&zip_path).map_err(|e| format!("cannot read {zip_path}: {e}"))?;
+    let game_dir = game_dir_for(&app, &instance_id).await?;
+    let api_key = load_settings(&settings_path(&app).await?)
+        .await
+        .curseforge_api_key
+        .unwrap_or_default();
+    import_curseforge_pack_core(&game_dir, api_key.trim(), &bytes).await
+}
+
+/// AppHandle-free core of [`import_curseforge_pack`] for hermetic tests.
+pub(crate) async fn import_curseforge_pack_core(
+    game_dir: &Path,
+    api_key: &str,
+    bytes: &[u8],
+) -> Result<CurseImportReport, String> {
+    let entries = extract_archive(bytes).map_err(|e| e.to_string())?;
+    let manifest_raw = entries
+        .iter()
+        .find(|(name, _)| name == "manifest.json")
+        .map(|(_, data)| data)
+        .ok_or_else(|| "not a CurseForge modpack: manifest.json is missing".to_owned())?;
+    let manifest: CurseManifest = serde_json::from_slice(manifest_raw)
+        .map_err(|e| format!("malformed CurseForge manifest.json: {e}"))?;
+
+    let mods_dir = game_dir.join("mods");
+
+    let overrides_dir = if manifest.overrides.is_empty() {
+        "overrides".to_owned()
+    } else {
+        manifest.overrides.trim_matches(['/', '\\']).to_owned()
+    };
+    let mut overrides_extracted = 0usize;
+    for (name, data) in &entries {
+        let Some(dest) = override_dest(game_dir, &overrides_dir, name) else {
+            continue;
+        };
+        if name.ends_with('/') {
+            std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
+            continue;
+        }
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&dest, data).map_err(|e| e.to_string())?;
+        overrides_extracted += 1;
+    }
+
+    // the marker satisfies the BareBones gate on its own; only the BareBones
+    // pack earns it (its overrides/mods carry the real compat jars)
+    let barebones = manifest.name.to_ascii_lowercase().contains("barebones");
+    if barebones {
+        std::fs::create_dir_all(&mods_dir).map_err(|e| e.to_string())?;
+        std::fs::write(
+            mods_dir.join(twilight_launch::BAREBONES_MARKER_FILE),
+            format!("imported: {} {}\n", manifest.name, manifest.version),
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    // manifest files need the API to resolve URLs; zero-key flow lists them
+    // as skipped instead (the UI tells the user what to do about Scalar)
+    let mut downloaded = Vec::new();
+    let mut skipped = 0usize;
+    let listed: Vec<_> = manifest
+        .files
+        .iter()
+        .filter(|f| f.project_id != 0 && f.file_id != 0)
+        .collect();
+    if api_key.trim().is_empty() {
+        skipped = listed.len();
+    } else {
+        let client = reqwest::Client::new();
+        for file in &listed {
+            match fetch_curse_file(
+                &client,
+                api_key.trim(),
+                file.project_id,
+                file.file_id,
+                &mods_dir,
+            )
+            .await
+            {
+                Ok(Some(name)) => downloaded.push(name),
+                Ok(None) | Err(_) => skipped += 1,
+            }
+        }
+    }
+
+    Ok(CurseImportReport {
+        name: manifest.name,
+        version: manifest.version,
+        overrides_extracted,
+        files_listed: listed.len(),
+        mods_downloaded: downloaded,
+        mods_skipped: skipped,
+        barebones_marker: barebones,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -332,5 +582,174 @@ mod tests {
         assert_eq!(meta.version, "26.4-snapshot-8");
         assert_eq!(meta.loader, None, "vanilla pack");
         assert_eq!(meta.loader_version, None, "whitespace pin is not a pin");
+    }
+
+    /// Bitwise CRC-32 (reflected, 0xEDB88320): the zip reader verifies every
+    /// entry against this, so the test archive must carry real checksums.
+    fn crc32_of(data: &[u8]) -> u32 {
+        let mut crc: u32 = 0xFFFF_FFFF;
+        for &byte in data {
+            crc ^= u32::from(byte);
+            for _ in 0..8 {
+                let mask = (crc & 1).wrapping_neg();
+                crc = (crc >> 1) ^ (0xEDB8_8320 & mask);
+            }
+        }
+        !crc
+    }
+
+    /// Builds a minimal stored (uncompressed) ZIP from `(name, content)` pairs.
+    fn stored_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut out: Vec<u8> = Vec::new();
+        let mut central: Vec<u8> = Vec::new();
+        for (name, content) in entries {
+            let name_bytes = name.as_bytes();
+            let crc = crc32_of(content);
+            let offset = out.len() as u32;
+            // local file header
+            out.extend_from_slice(b"PK\x03\x04");
+            out.extend_from_slice(&20u16.to_le_bytes()); // version needed
+            out.extend_from_slice(&0u16.to_le_bytes()); // flags
+            out.extend_from_slice(&0u16.to_le_bytes()); // stored
+            out.extend_from_slice(&0u16.to_le_bytes()); // time
+            out.extend_from_slice(&0u16.to_le_bytes()); // date
+            out.extend_from_slice(&crc.to_le_bytes());
+            out.extend_from_slice(&(content.len() as u32).to_le_bytes());
+            out.extend_from_slice(&(content.len() as u32).to_le_bytes());
+            out.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes()); // extra len
+            out.extend_from_slice(name_bytes);
+            out.extend_from_slice(content);
+            // central directory record
+            central.extend_from_slice(b"PK\x01\x02");
+            central.extend_from_slice(&20u16.to_le_bytes()); // version made
+            central.extend_from_slice(&20u16.to_le_bytes()); // version needed
+            central.extend_from_slice(&0u16.to_le_bytes()); // flags
+            central.extend_from_slice(&0u16.to_le_bytes()); // stored
+            central.extend_from_slice(&0u16.to_le_bytes()); // time
+            central.extend_from_slice(&0u16.to_le_bytes()); // date
+            central.extend_from_slice(&crc.to_le_bytes());
+            central.extend_from_slice(&(content.len() as u32).to_le_bytes());
+            central.extend_from_slice(&(content.len() as u32).to_le_bytes());
+            central.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
+            central.extend_from_slice(&0u16.to_le_bytes()); // extra
+            central.extend_from_slice(&0u16.to_le_bytes()); // comment
+            central.extend_from_slice(&0u16.to_le_bytes()); // disk start
+            central.extend_from_slice(&0u16.to_le_bytes()); // internal attrs
+            central.extend_from_slice(&0u32.to_le_bytes()); // external attrs
+            central.extend_from_slice(&offset.to_le_bytes());
+            central.extend_from_slice(name_bytes);
+        }
+        let central_offset = out.len() as u32;
+        out.extend_from_slice(&central);
+        // end of central directory
+        out.extend_from_slice(b"PK\x05\x06");
+        out.extend_from_slice(&0u16.to_le_bytes()); // disk
+        out.extend_from_slice(&0u16.to_le_bytes()); // cd disk
+        out.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(central.len() as u32).to_le_bytes());
+        out.extend_from_slice(&central_offset.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes()); // comment len
+        out
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "cfpack-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn zero_key_import_extracts_overrides_and_earns_the_marker() {
+        let manifest = br#"{"manifestType":"minecraftModpack","manifestVersion":1,
+            "name":"BareBones Template (Cleanroom)","version":"1.3.0",
+            "files":[{"projectID":410222,"fileID":5123456,"required":true}],
+            "overrides":"overrides"}"#;
+        let zip = stored_zip(&[
+            ("manifest.json", manifest),
+            ("overrides/mods/fugue-1.0.jar", b"fugue jar"),
+            ("overrides/config/barebones.cfg", b"cfg"),
+            ("overrides/", b""),
+        ]);
+        let game_dir = scratch("import");
+        let report = import_curseforge_pack_core(&game_dir, "", &zip)
+            .await
+            .unwrap();
+        assert_eq!(report.name, "BareBones Template (Cleanroom)");
+        assert_eq!(report.version, "1.3.0");
+        assert_eq!(report.overrides_extracted, 2, "dir entry is not a write");
+        assert_eq!(report.mods_downloaded, Vec::<String>::new());
+        assert_eq!(report.mods_skipped, 1, "zero-key flow skips API files");
+        assert!(report.barebones_marker);
+        assert!(game_dir.join("mods/fugue-1.0.jar").exists());
+        assert!(game_dir.join("config/barebones.cfg").exists());
+        assert!(
+            game_dir
+                .join("mods/barebones-template-cleanroom.marker")
+                .exists()
+        );
+        std::fs::remove_dir_all(&game_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn zip_slip_entries_never_leave_the_game_dir() {
+        let manifest = br#"{"name":"BareBones Template (Cleanroom)","version":"1.0.0",
+            "files":[],"overrides":"overrides"}"#;
+        let zip = stored_zip(&[
+            ("manifest.json", manifest),
+            ("overrides/mods/ok.jar", b"ok"),
+            ("overrides/../evil.txt", b"escaped"),
+            ("overrides/../../worse.txt", b"more escaped"),
+        ]);
+        let game_dir = scratch("slip");
+        let report = import_curseforge_pack_core(&game_dir, "", &zip)
+            .await
+            .unwrap();
+        assert_eq!(report.overrides_extracted, 1, "only the safe entry");
+        assert!(game_dir.join("mods/ok.jar").exists());
+        assert!(!std::env::temp_dir().join("evil.txt").exists());
+        assert!(!std::env::temp_dir().join("worse.txt").exists());
+        std::fs::remove_dir_all(&game_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn non_barebones_packs_earn_no_marker() {
+        let manifest = br#"{"name":"Some Other Pack","version":"2.0.0",
+            "files":[],"overrides":"overrides"}"#;
+        let zip = stored_zip(&[
+            ("manifest.json", manifest),
+            ("overrides/config/x.cfg", b"x"),
+        ]);
+        let game_dir = scratch("other");
+        let report = import_curseforge_pack_core(&game_dir, "", &zip)
+            .await
+            .unwrap();
+        assert!(!report.barebones_marker);
+        assert!(
+            !game_dir
+                .join("mods/barebones-template-cleanroom.marker")
+                .exists()
+        );
+        assert_eq!(report.overrides_extracted, 1);
+        std::fs::remove_dir_all(&game_dir).ok();
+    }
+
+    #[tokio::test]
+    async fn archives_without_a_manifest_are_rejected() {
+        let zip = stored_zip(&[("readme.txt", b"no manifest")]);
+        let game_dir = scratch("nomanifest");
+        let err = import_curseforge_pack_core(&game_dir, "", &zip)
+            .await
+            .unwrap_err();
+        assert!(err.contains("manifest.json is missing"));
+        std::fs::remove_dir_all(&game_dir).ok();
     }
 }

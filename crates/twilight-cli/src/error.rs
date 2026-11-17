@@ -47,6 +47,14 @@ pub enum CliError {
     },
     #[error("the modpack declares more than one mod loader ({loaders:?})")]
     ModpackAmbiguousLoaders { loaders: Vec<String> },
+    #[error(
+        "{message} Missing: {missing}. Install them from {url} (or let the launcher install the Modrinth-hosted core mods)."
+    )]
+    CleanroomGate {
+        message: String,
+        missing: String,
+        url: String,
+    },
     #[error("account authentication failed")]
     Auth(#[from] twilight_auth::AuthError),
     #[error("io failure")]

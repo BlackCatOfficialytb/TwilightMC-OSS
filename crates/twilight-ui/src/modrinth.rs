@@ -881,6 +881,48 @@ pub async fn install_modrinth_batch(
         .collect())
 }
 
+/// Modrinth slugs of the BareBones core mods with keyless downloads; Scalar
+/// Legacy is CurseForge-only, so it is not part of the zero-key flow.
+pub(crate) const CLEANROOM_CORE_MODS: &[&str] = &["fugue", "mixinbooter", "configanytime"];
+
+/// One-click install of the Modrinth-hosted BareBones core mods (Fugue,
+/// MixinBooter, ConfigAnytime) for 1.12.2 forge: no keys, every fetch stays on
+/// api.modrinth.com / the Modrinth CDN. Marks the gate satisfied on success —
+/// Scalar Legacy is dropped (CurseForge-only); the UI tells the user.
+#[tauri::command]
+pub async fn install_cleanroom_core_mods(
+    app: AppHandle,
+    instance_id: String,
+) -> Result<Vec<String>, String> {
+    validate_instance_id(&instance_id)?;
+    let root = instances_root(&app).await?;
+    let dir = mods_dir(&root, &instance_id).await?;
+    let client = reqwest::Client::new();
+    let mut installed = Vec::new();
+    for slug in CLEANROOM_CORE_MODS {
+        installed.extend(
+            install_project_with_deps(
+                &client,
+                API_BASE,
+                &dir,
+                slug,
+                "1.12.2",
+                "forge",
+                &mut HashSet::new(),
+            )
+            .await?,
+        );
+    }
+    // the three core mods satisfy the gate on their own (Scalar dropped), so
+    // write the same verified-import marker the CurseForge importer writes
+    std::fs::write(
+        dir.join(twilight_launch::BAREBONES_MARKER_FILE),
+        "modrinth core mods\n",
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(installed)
+}
+
 #[tauri::command]
 pub async fn suggest_accessibility_mods(
     game_version: String,

@@ -106,11 +106,44 @@
     { id: 'appearance', label: 'Appearance', icon: '🎨' },
     { id: 'java', label: 'Java & Memory', icon: '☕' },
     { id: 'storage', label: 'Folders', icon: '📁' },
+    { id: 'apikeys', label: 'API Keys', icon: '🔑' },
     { id: 'accessibility', label: 'Accessibility', icon: '♿' },
     { id: 'about', label: 'About & Updates', icon: 'ℹ' },
   ];
   let section = $state('appearance');
   let iconPack = $state(getIconPack());
+
+  // ---- API keys (CurseForge, optional; the zero-key flow works without) ----
+  let apiKey = $state('');
+  let apiKeyConfigured = $state(false);
+  let apiKeyMsg = $state('');
+  let apiKeyError = $state('');
+
+  async function refreshApiKey() {
+    try {
+      const key = await window.__TAURI__.core.invoke('get_curseforge_api_key');
+      apiKeyConfigured = key.configured;
+    } catch (e) {
+      apiKeyError = String(e);
+    }
+  }
+  refreshApiKey();
+
+  async function saveApiKey() {
+    apiKeyError = '';
+    apiKeyMsg = '';
+    try {
+      await window.__TAURI__.core.invoke('set_curseforge_api_key', { apiKey });
+      const key = await window.__TAURI__.core.invoke('get_curseforge_api_key');
+      apiKeyConfigured = key.configured;
+      apiKey = '';
+      apiKeyMsg = key.configured
+        ? 'Saved. Imported CurseForge packs will resolve their mod downloads.'
+        : 'Cleared. The zero-key flow (Modrinth core mods + manual import) stays active.';
+    } catch (e) {
+      apiKeyError = String(e);
+    }
+  }
 
   // ---- custom themes (localStorage-backed) ----
   let customs = $state(listCustomThemes());
@@ -699,6 +732,46 @@
             </div>
           {/each}
         {/if}
+      {:else if section === 'apikeys'}
+        <h2 class="text-[16px] font-semibold">API Keys</h2>
+        <p class="mt-1 text-[12px] text-(--text-muted)">
+          Optional keys for third-party APIs. The launcher works fully without them —
+          every default flow is keyless.
+        </p>
+
+        <div class="mt-6 rounded border border-(--border) bg-(--bg-subtle) p-4">
+          <div class="text-[12px] font-medium">
+            CurseForge API key
+            <span class="font-normal text-(--text-muted)">{apiKeyConfigured ? '(configured)' : '(not set)'}</span>
+          </div>
+          <p class="mt-0.5 text-[11px] text-(--text-muted)">
+            Only used to auto-download mods from imported CurseForge packs. Your key is yours —
+            paste it here, it is saved locally and never bundled with the launcher.
+          </p>
+          <div class="mt-3 flex gap-2">
+            <input
+              type="password"
+              class="h-9 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-canvas) px-2.5 font-mono text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+              placeholder={apiKeyConfigured ? '•••••••••••• (saved — paste a new key to replace)' : 'Paste your CurseForge API key'}
+              bind:value={apiKey}
+              aria-label="CurseForge API key"
+              spellcheck="false"
+            />
+            <button
+              class="rounded bg-(--accent) px-4 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
+              title="Save the CurseForge API key (blank clears it)"
+              onclick={saveApiKey}
+            >
+              Save
+            </button>
+          </div>
+          {#if apiKeyMsg}
+            <p class="mt-2 text-[11px] text-green-500">{apiKeyMsg}</p>
+          {/if}
+          {#if apiKeyError}
+            <p class="mt-2 text-[11px] text-rose-400">{apiKeyError}</p>
+          {/if}
+        </div>
       {:else if section === 'accessibility'}
         <h2 class="text-[16px] font-semibold">Accessibility</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">

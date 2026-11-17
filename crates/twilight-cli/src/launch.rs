@@ -651,6 +651,21 @@ pub async fn run_launch_with(
         return Ok(0);
     }
 
+    // ---- mandatory BareBones gate: CleanroomMC cannot boot 1.12.2 on
+    //      Java 21/25+ without its core compatibility mods, so every real
+    //      (non dry-run) Cleanroom launch checks the instance mods dir first
+    if loader_token
+        .as_ref()
+        .is_some_and(|loader| *loader == twilight_modloader::ModLoader::Cleanroom)
+        && let Err(missing) = twilight_launch::check_cleanroom_gate(&paths.work_dir.join("mods"))
+    {
+        return Err(CliError::CleanroomGate {
+            message: twilight_launch::CLEANROOM_GATE_MESSAGE.to_owned(),
+            missing: missing.join(", "),
+            url: twilight_launch::BAREBONES_CURSEFORGE_URL.to_owned(),
+        });
+    }
+
     // ---- fresh staging: purge hook before every real launch
     let staging = ArtifactStaging::new(cfg.temp_dir.clone());
     staging.clean().await?;

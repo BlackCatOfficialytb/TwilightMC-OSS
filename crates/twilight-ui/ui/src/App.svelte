@@ -13,6 +13,7 @@
   import LauncherIcon from './lib/LauncherIcon.svelte';
   import Twemoji from './lib/Twemoji.svelte';
   import AlertDialog from './lib/AlertDialog.svelte';
+  import BareBonesGateModal from './lib/BareBonesGateModal.svelte';
   import ToastContainer from './lib/ToastContainer.svelte';
   import { toast, promptAlert } from './lib/alerts.svelte.js';
   import { topOverlay } from './lib/overlays.js';
@@ -127,6 +128,9 @@
 
   // ---- global .mrpack drag-and-drop ----
   let mrpackFor = $state(null);
+
+  // ---- BareBones gate (Cleanroom launches blocked by the pre-flight check) ----
+  let barebonesFor = $state(null);
 
   // ---- settings page state (full-page view on the `settings` nav route) ----
   let storage = $state(null);
@@ -293,7 +297,13 @@
       // drawer, never a silent no-op
       console.error('Launch failed:', e);
       logLine({ stream: 'stderr', line: `[ERROR] Launch failed: ${e}` });
-      toast(`Launch failed: ${e}`, 'error');
+      if (String(e).includes('BareBones Template')) {
+        // the mandatory Cleanroom gate: offer the install flows in a dialog
+        // instead of a bare toast
+        barebonesFor = id;
+      } else {
+        toast(`Launch failed: ${e}`, 'error');
+      }
       status = 'Launch failed';
     } finally {
       gameRunning = false;
@@ -1177,5 +1187,15 @@
 
   <!-- the one mounted alert dialog + toast stack (alerts.svelte.js drives both) -->
   <AlertDialog />
+  {#if barebonesFor}
+    <BareBonesGateModal
+      instanceId={barebonesFor}
+      onclose={() => (barebonesFor = null)}
+      onlaunch={(iid) => {
+        barebonesFor = null;
+        launchInstance(iid);
+      }}
+    />
+  {/if}
   <ToastContainer />
 </div>

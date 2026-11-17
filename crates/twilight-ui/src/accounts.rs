@@ -75,6 +75,10 @@ pub(crate) struct Settings {
     /// `<downloads_dir>\twilightmc_staging` instead of `%TEMP%\…`.
     #[serde(default)]
     pub(crate) downloads_dir: Option<String>,
+    /// Optional CurseForge API key for modpack imports; empty = the zero-key
+    /// FOSS flow (Modrinth core mods + manual zip import, no key needed).
+    #[serde(default)]
+    pub(crate) curseforge_api_key: Option<String>,
 }
 
 async fn app_dir(app: &AppHandle) -> Result<PathBuf, String> {
