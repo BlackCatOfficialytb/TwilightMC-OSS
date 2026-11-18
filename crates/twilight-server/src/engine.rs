@@ -1,6 +1,7 @@
 //! Artifact resolution from the official APIs: Mojang piston-meta (Vanilla),
-//! PaperMC Fill v3 (Paper/Velocity), Purpur API, Fabric meta, NeoForge maven
-//! and GitHub releases (Pumpkin/Steel + helpers for Connect/AuthMe plugins).
+//! PaperMC Fill v3 (Paper/Velocity), Purpur API, Fabric meta, Forge and
+//! NeoForge maven endpoints (with Prism Meta v1 fallbacks) and GitHub
+//! releases (Pumpkin/Steel + helpers for Connect/AuthMe plugins).
 
 use serde_json::Value;
 
@@ -131,9 +132,10 @@ pub fn fabric_download_url(game: &str, loader: &str) -> String {
 
 // ---- NeoForge (maven.neoforged.net) ----
 
-/// NeoForge `maven-metadata.xml` -> version ids, newest first. The maven
-/// lists versions alphabetically, so re-sort by natural version order.
-pub fn neoforge_versions(xml: &str) -> Vec<String> {
+/// Any `maven-metadata.xml` -> version ids, newest first. Maven lists
+/// versions alphabetically, so re-sort in natural version order (the
+/// combined `{mc}-{build}` ordering also sorts plain ids correctly).
+pub fn maven_metadata_versions(xml: &str) -> Vec<String> {
     let Some(body) = xml
         .split("<versions>")
         .nth(1)
@@ -147,15 +149,149 @@ pub fn neoforge_versions(xml: &str) -> Vec<String> {
         .filter_map(|chunk| chunk.split("</version>").next())
         .map(str::to_owned)
         .collect();
+    ids.sort_by(|a, b| compare_forge_ids(b, a));
+    ids
+}
+
+/// NeoForge `maven-metadata.xml` -> version ids, newest first.
+pub fn neoforge_versions(xml: &str) -> Vec<String> {
+    maven_metadata_versions(xml)
+}
+
+/// The official NeoForge maven API (`api/maven/versions/releases/…`)
+/// -> version ids, newest first. The endpoint lists versions ascending
+/// (oldest entry first), so re-sort by natural version order.
+pub fn neoforge_api_versions(api: &Value) -> Vec<String> {
+    let mut ids: Vec<String> = api
+        .get("versions")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
     ids.sort_by(|a, b| compare_versions(b, a));
+    ids.dedup();
+    ids
+}
+
+/// Legacy 1.20.1 targets: the `net.neoforged:forge` artifact carries the
+/// pre-1.20.2 NeoForge builds as combined `1.20.1-{build}` ids. Bare ids
+/// (e.g. `47.1.82`) never resolve on the legacy path and are skipped.
+pub fn neoforge_legacy_versions(api: &Value) -> Vec<String> {
+    let mut ids: Vec<String> = neoforge_api_versions(api)
+        .into_iter()
+        .filter(|id| id.starts_with("1.20.1"))
+        .collect();
+    ids.sort_by(|a, b| compare_forge_ids(b, a));
+    ids
+}
+
+/// Prism Meta v1 `net.neoforged` index -> NeoForge version ids (bare,
+/// e.g. `21.1.77`), newest first.
+pub fn neoforge_prism_versions(index: &Value) -> Vec<String> {
+    let mut ids: Vec<String> = index
+        .get("versions")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|e| e.get("version").and_then(Value::as_str))
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
+    ids.sort_by(|a, b| compare_versions(b, a));
+    ids.dedup();
     ids
 }
 
 /// The `--installServer` installer jar on the NeoForge releases maven.
+/// Pre-1.20.2 targets (`1.20.1-…`) are published under the
+/// `net.neoforged:forge` artifact, everything newer under `neoforge`.
 pub fn neoforge_installer_url(version: &str) -> String {
+    if version.starts_with("1.20.1") {
+        format!(
+            "https://maven.neoforged.net/releases/net/neoforged/forge/{version}/forge-{version}-installer.jar"
+        )
+    } else {
+        format!(
+            "https://maven.neoforged.net/releases/net/neoforged/neoforge/{version}/neoforge-{version}-installer.jar"
+        )
+    }
+}
+
+// ---- Forge (files.minecraftforge.net / maven.minecraftforge.net) ----
+
+/// Natural ordering for combined `{mc}-{build}` installer ids (Forge
+/// family): the Minecraft part first, then the loader build numerically —
+/// a plain string fallback would rank `47.10` below `47.9`.
+pub fn compare_forge_ids(a: &str, b: &str) -> std::cmp::Ordering {
+    let (am, ab) = a.split_once('-').unwrap_or((a, ""));
+    let (bm, bb) = b.split_once('-').unwrap_or((b, ""));
+    compare_versions(am, bm).then_with(|| compare_versions(ab, bb))
+}
+
+/// Forge `promotions_slim.json` -> combined `{mc}-{build}` installer ids,
+/// newest first. The promos carry a `-latest` and a `-recommended` key per
+/// Minecraft version; the builds usually differ, so both surface with the
+/// recommended one ranked right after the latest.
+pub fn forge_versions(promos: &Value) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    if let Some(map) = promos.get("promos").and_then(Value::as_object) {
+        for (key, build) in map {
+            let Some(mc) = key
+                .strip_suffix("-latest")
+                .or_else(|| key.strip_suffix("-recommended"))
+            else {
+                continue;
+            };
+            let Some(build) = build.as_str() else {
+                continue;
+            };
+            let id = format!("{mc}-{build}");
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+    }
+    ids.sort_by(|a, b| compare_forge_ids(b, a));
+    ids
+}
+
+/// The `--installServer` installer jar on the Forge maven.
+pub fn forge_installer_url(version: &str) -> String {
     format!(
-        "https://maven.neoforged.net/releases/net/neoforged/neoforge/{version}/neoforge-{version}-installer.jar"
+        "https://maven.minecraftforge.net/net/minecraftforge/forge/{version}/forge-{version}-installer.jar"
     )
+}
+
+/// Prism Meta v1 `net.minecraftforge` index -> combined `{mc}-{build}`
+/// installer ids, newest first. `requires[].equals` (uid `net.minecraft`)
+/// supplies the Minecraft version; `version` is the bare build number.
+pub fn forge_prism_versions(index: &Value) -> Vec<String> {
+    let mut ids: Vec<String> = index
+        .get("versions")
+        .and_then(Value::as_array)
+        .map(|list| {
+            list.iter()
+                .filter_map(|e| {
+                    let build = e.get("version").and_then(Value::as_str)?;
+                    let mc = e
+                        .get("requires")?
+                        .as_array()?
+                        .iter()
+                        .find(|r| r.get("uid").and_then(Value::as_str) == Some("net.minecraft"))
+                        .and_then(|r| r.get("equals").and_then(Value::as_str))?;
+                    Some(format!("{mc}-{build}"))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    ids.sort_by(|a, b| compare_forge_ids(b, a));
+    ids.dedup();
+    ids
 }
 
 // ---- GitHub releases (Pumpkin / Steel / plugins) ----
@@ -303,6 +439,25 @@ pub fn release_tag_names(releases: &Value) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// GitHub release tags as the wizard's version choices: official releases
+/// first (response order is newest first), then the rolling `canary` and
+/// `nightly` builds — so the top entry is always the latest stable.
+pub fn github_release_choices(releases: &Value) -> Vec<String> {
+    let tags = release_tag_names(releases);
+    let mut choices: Vec<String> = tags
+        .iter()
+        .filter(|t| *t != "canary" && *t != "nightly")
+        .cloned()
+        .collect();
+    if tags.iter().any(|t| t == "canary") {
+        choices.push("canary".to_owned());
+    }
+    if tags.iter().any(|t| t == "nightly") {
+        choices.push("nightly".to_owned());
+    }
+    choices
 }
 
 /// Picks the first asset whose name satisfies `want` (case-insensitive
@@ -627,6 +782,162 @@ mod tests {
         assert_eq!(
             release_tag_names(&releases),
             vec!["nightly", "0.2.2+26.3-26.60"]
+        );
+    }
+
+    #[test]
+    fn github_release_choices_stable_first() {
+        // Live Pumpkin release order: nightly, canary, then the official
+        // releases newest first — the choices reorder to stable-first.
+        let releases = json!([
+            {"tag_name": "nightly", "prerelease": true, "draft": false},
+            {"tag_name": "canary", "prerelease": true, "draft": false},
+            {"tag_name": "0.2.2+26.3-26.60", "prerelease": false, "draft": false},
+            {"tag_name": "0.2.1+26.3-26.51", "prerelease": false, "draft": false}
+        ]);
+        assert_eq!(
+            github_release_choices(&releases),
+            vec!["0.2.2+26.3-26.60", "0.2.1+26.3-26.51", "canary", "nightly"]
+        );
+        // A repo without the rolling tags just lists its releases.
+        assert_eq!(
+            github_release_choices(&json!([{"tag_name": "v0.17.0+mc26.3"}])),
+            vec!["v0.17.0+mc26.3"]
+        );
+        assert!(github_release_choices(&json!([])).is_empty());
+    }
+
+    #[test]
+    fn neoforge_official_api_and_legacy_artifact_parse() {
+        // Live shape of maven.neoforged.net api/maven/versions/releases/…
+        // (ascending, oldest entry first).
+        let api = json!({
+            "isSnapshot": false,
+            "versions": ["20.2.3-beta", "26.3.0.110", "26.3.0.113", "21.1.77"]
+        });
+        assert_eq!(
+            neoforge_api_versions(&api),
+            vec!["26.3.0.113", "26.3.0.110", "21.1.77", "20.2.3-beta"]
+        );
+
+        // Live shape of the legacy `net.neoforged:forge` artifact (the
+        // 1.20.1 targets); bare non-1.20.1 ids are skipped.
+        let legacy = json!({
+            "isSnapshot": false,
+            "versions": ["1.20.1-47.1.5", "1.20.1-47.1.106", "47.1.82"]
+        });
+        assert_eq!(
+            neoforge_legacy_versions(&legacy),
+            vec!["1.20.1-47.1.106", "1.20.1-47.1.5"]
+        );
+
+        // Pre-1.20.2 installers live under the `net.neoforged:forge` path,
+        // newer ones under `neoforge`.
+        assert_eq!(
+            neoforge_installer_url("1.20.1-47.1.106"),
+            "https://maven.neoforged.net/releases/net/neoforged/forge/1.20.1-47.1.106/forge-1.20.1-47.1.106-installer.jar"
+        );
+        assert_eq!(
+            neoforge_installer_url("26.3.0.113"),
+            "https://maven.neoforged.net/releases/net/neoforged/neoforge/26.3.0.113/neoforge-26.3.0.113-installer.jar"
+        );
+    }
+
+    #[test]
+    fn prism_index_fallbacks_parse_both_families() {
+        // Live shape of meta.prismlauncher.org/v1/net.minecraftforge.
+        let forge = json!({
+            "formatVersion": 1,
+            "uid": "net.minecraftforge",
+            "versions": [
+                {"version": "52.1.9", "type": "release",
+                 "requires": [{"uid": "net.minecraft", "equals": "1.21.1"}]},
+                {"version": "47.4.29", "type": "release",
+                 "requires": [{"uid": "net.minecraft", "equals": "1.20.1"}]},
+                {"version": "52.1.21", "type": "release",
+                 "requires": [{"uid": "net.minecraft", "equals": "1.21.1"}]}
+            ]
+        });
+        assert_eq!(
+            forge_prism_versions(&forge),
+            vec!["1.21.1-52.1.21", "1.21.1-52.1.9", "1.20.1-47.4.29"]
+        );
+
+        // Live shape of meta.prismlauncher.org/v1/net.neoforged: the
+        // versions are bare NeoForge ids.
+        let neo = json!({
+            "formatVersion": 1,
+            "uid": "net.neoforged",
+            "versions": [
+                {"version": "26.3.0.113", "type": "release",
+                 "requires": [{"uid": "net.minecraft", "equals": "26.3"}]},
+                {"version": "21.1.77", "type": "release",
+                 "requires": [{"uid": "net.minecraft", "equals": "21.1"}]}
+            ]
+        });
+        assert_eq!(neoforge_prism_versions(&neo), vec!["26.3.0.113", "21.1.77"]);
+        assert!(neoforge_prism_versions(&json!({"versions": []})).is_empty());
+    }
+
+    #[test]
+    fn forge_promos_parse_to_combined_ids() {
+        // Live shape of files.minecraftforge.net …/promotions_slim.json.
+        let promos = json!({
+            "homepage": "https://files.minecraftforge.net",
+            "promos": {
+                "1.21.1-latest": "52.1.21",
+                "1.21.1-recommended": "52.1.20",
+                "1.20.1-latest": "47.4.29",
+                "1.20.1-recommended": "47.3.22",
+                "26.3-latest": "66.1.8"
+            }
+        });
+        assert_eq!(
+            forge_versions(&promos),
+            vec![
+                "26.3-66.1.8",
+                "1.21.1-52.1.21",
+                "1.21.1-52.1.20",
+                "1.20.1-47.4.29",
+                "1.20.1-47.3.22"
+            ]
+        );
+        assert_eq!(
+            forge_installer_url("1.20.1-47.4.29"),
+            "https://maven.minecraftforge.net/net/minecraftforge/forge/1.20.1-47.4.29/forge-1.20.1-47.4.29-installer.jar"
+        );
+    }
+
+    #[test]
+    fn forge_ids_order_builds_numerically() {
+        assert_eq!(
+            compare_forge_ids("1.20.1-47.10.0", "1.20.1-47.9.0"),
+            std::cmp::Ordering::Greater
+        );
+        assert_eq!(
+            compare_forge_ids("26.3-66.1.8", "1.21.1-52.1.21"),
+            std::cmp::Ordering::Greater
+        );
+        assert_eq!(
+            compare_forge_ids("1.21.1-52.1.21", "1.21.1-52.1.9"),
+            std::cmp::Ordering::Greater
+        );
+    }
+
+    #[test]
+    fn forge_maven_metadata_sorts_combined_ids() {
+        let xml = "<metadata><versioning><versions>\
+            <version>1.21-51.0.33</version><version>26.3-66.1.8</version>\
+            <version>1.21-51.0.32</version><version>1.20.1-47.4.29</version>\
+            </versions></versioning></metadata>";
+        assert_eq!(
+            maven_metadata_versions(xml),
+            vec![
+                "26.3-66.1.8",
+                "1.21-51.0.33",
+                "1.21-51.0.32",
+                "1.20.1-47.4.29"
+            ]
         );
     }
 

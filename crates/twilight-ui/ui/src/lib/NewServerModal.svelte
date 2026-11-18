@@ -16,14 +16,10 @@
     { id: 'fabric', label: 'Fabric', note: 'Lightweight mod loader' },
     { id: 'pumpkin', label: 'PumpkinMC (Rust)', note: 'Multithreaded native server' },
     { id: 'velocity', label: 'Velocity', note: 'Modern proxy (no world)' },
-    { id: 'forge', label: 'Forge', note: 'Mod loader — manual installer' },
+    { id: 'forge', label: 'Forge', note: 'Mod loader — auto-installer' },
     { id: 'neoforge', label: 'NeoForge', note: 'Mod loader, auto-installer' },
     { id: 'steel', label: 'SteelMC (Rust)', note: 'Native server, auto-download' },
   ];
-
-  const MANUAL_NOTES = {
-    forge: 'TwilightMC cannot fetch Forge installers automatically — Next continues with a manual install; drop the launcher jar into the server folder before starting.',
-  };
 
   let step = $state(1);
   let software = $state('');
@@ -66,9 +62,6 @@
       if (token !== fetchToken) return; // stale response for a changed pick
       versions = list ?? [];
       if (id === 'fabric') versions = versions.slice(0, 80);
-      if (versions.length === 0 && MANUAL_NOTES[id]) {
-        versionError = MANUAL_NOTES[id];
-      }
     } catch (e) {
       if (token === fetchToken) versionError = String(e);
     } finally {

@@ -5,6 +5,7 @@
 
 pub mod config;
 pub mod engine;
+pub mod headers;
 pub mod process;
 
 use serde::{Deserialize, Serialize};
@@ -59,9 +60,60 @@ impl ServerSoftware {
         matches!(self, Self::Pumpkin | Self::Steel)
     }
 
-    /// Parses the snake_case string the webview sends.
+    /// Parses the string the webview sends, case-insensitively and
+    /// tolerant of the common spellings (`neoforge` / `neo_forge` /
+    /// `neo-forge` all resolve to NeoForge).
     pub fn parse(s: &str) -> Option<Self> {
-        serde_json::from_value(serde_json::Value::String(s.to_owned())).ok()
+        match s.trim().to_ascii_lowercase().as_str() {
+            "vanilla" => Some(Self::Vanilla),
+            "paper" => Some(Self::Paper),
+            "purpur" => Some(Self::Purpur),
+            "fabric" => Some(Self::Fabric),
+            "forge" => Some(Self::Forge),
+            "neoforge" | "neo_forge" | "neo-forge" => Some(Self::NeoForge),
+            "velocity" => Some(Self::Velocity),
+            "pumpkin" | "pumpkinmc" => Some(Self::Pumpkin),
+            "steel" | "steelmc" => Some(Self::Steel),
+            _ => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_is_case_insensitive_and_alias_tolerant() {
+        assert_eq!(
+            ServerSoftware::parse("neoforge"),
+            Some(ServerSoftware::NeoForge)
+        );
+        assert_eq!(
+            ServerSoftware::parse("NeoForge"),
+            Some(ServerSoftware::NeoForge)
+        );
+        assert_eq!(
+            ServerSoftware::parse("neo_forge"),
+            Some(ServerSoftware::NeoForge)
+        );
+        assert_eq!(
+            ServerSoftware::parse("neo-forge"),
+            Some(ServerSoftware::NeoForge)
+        );
+        assert_eq!(ServerSoftware::parse("Forge"), Some(ServerSoftware::Forge));
+        assert_eq!(
+            ServerSoftware::parse("PumpkinMC"),
+            Some(ServerSoftware::Pumpkin)
+        );
+        assert_eq!(ServerSoftware::parse("steel"), Some(ServerSoftware::Steel));
+        assert_eq!(ServerSoftware::parse("paper"), Some(ServerSoftware::Paper));
+        assert_eq!(
+            ServerSoftware::parse("  Vanilla  "),
+            Some(ServerSoftware::Vanilla)
+        );
+        assert_eq!(ServerSoftware::parse("nonsense"), None);
+        assert_eq!(ServerSoftware::parse(""), None);
     }
 }
 

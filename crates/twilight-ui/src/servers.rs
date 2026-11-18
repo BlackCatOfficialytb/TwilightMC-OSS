@@ -176,12 +176,11 @@ fn now_secs() -> u64 {
 // ---- artifact resolution ----
 
 fn http_client() -> reqwest::Client {
-    reqwest::Client::builder()
-        // GitHub 403s generic agents; PaperMC Fill v3 documents a UA with
-        // project/URL. Every external request flows through this client.
-        .user_agent("TwilightMC/0.6.0 (https://github.com/BlackCatOfficialytb/TwilightMC-OSS)")
-        .build()
-        .unwrap_or_default()
+    // Shared RFC-compliant identification for every external API request:
+    // the product-token `User-Agent` (never a spoofed browser prefix, so
+    // Cloudflare TLS fingerprinting never rejects rustls) plus the
+    // Sec-CH-UA client hints, versioned from CARGO_PKG_VERSION.
+    twilight_server::headers::api_client()
 }
 
 /// GETs `url` as text, surfacing HTTP errors with a body excerpt instead of
@@ -261,7 +260,7 @@ async fn resolve_fabric_loader(loader_version: Option<&str>) -> Result<String, S
 }
 
 /// Resolves (and caches on disk) the server artifact for `meta`. Installer
-/// flows (NeoForge) stream progress through `emit`.
+/// flows (Forge / NeoForge) stream progress through `emit`.
 async fn resolve_artifact(
     dir: &Path,
     meta: &ServerMeta,
@@ -325,14 +324,13 @@ async fn resolve_artifact(
             // GitHub `/releases/latest` 404s on prerelease-only repos —
             // query the list and pick: pinned tag, else newest stable, else
             // any release with a matching host asset.
-            let repo = if meta.software == ServerSoftware::Steel {
-                "Steel-Foundation/SteelMC"
-            } else {
-                "Pumpkin-MC/Pumpkin"
+            let (repo, per_page) = match meta.software {
+                ServerSoftware::Pumpkin => ("Pumpkin-MC/Pumpkin", 25),
+                _ => ("Steel-Foundation/SteelMC", 20),
             };
             let releases = fetch_json(
                 &client,
-                &format!("https://api.github.com/repos/{repo}/releases?per_page=20"),
+                &format!("https://api.github.com/repos/{repo}/releases?per_page={per_page}"),
             )
             .await?;
             let list = releases
@@ -370,11 +368,23 @@ async fn resolve_artifact(
             }
             Ok(installer)
         }
-        _ => Err(format!(
-            "{} has no automated fetch in TwilightMC — install the official launcher jar as {} and retry",
-            meta.software.label(),
-            name
-        )),
+        ServerSoftware::Forge => {
+            // Same installer flow as NeoForge: fetch the official installer
+            // jar, run `--installServer` once to assemble libraries + the
+            // run scripts, then launch via the generated run scripts.
+            let installer = fetch_artifact(
+                dir,
+                "forge-installer.jar",
+                &engine::forge_installer_url(&meta.version),
+                None,
+            )
+            .await?;
+            if !dir.join("libraries").is_dir() {
+                let java = find_java(&meta.software, &meta.version).await?;
+                run_installer(&java, &installer, dir, emit).await?;
+            }
+            Ok(installer)
+        }
     }
 }
 
@@ -1060,31 +1070,96 @@ pub async fn fetch_server_versions(software: String) -> Result<Vec<String>, Stri
         }
         ServerSoftware::Pumpkin | ServerSoftware::Steel => {
             // Releases list (not /releases/latest: it 404s on prerelease
-            // repos); nightly/canary tags surface as selectable versions.
-            let repo = if software == ServerSoftware::Steel {
-                "Steel-Foundation/SteelMC"
-            } else {
-                "Pumpkin-MC/Pumpkin"
+            // repos). Official releases surface first, then the rolling
+            // `canary` / `nightly` builds as selectable versions.
+            let (repo, per_page) = match software {
+                ServerSoftware::Pumpkin => ("Pumpkin-MC/Pumpkin", 25),
+                _ => ("Steel-Foundation/SteelMC", 20),
             };
             let releases = fetch_json(
                 &client,
-                &format!("https://api.github.com/repos/{repo}/releases?per_page=20"),
+                &format!("https://api.github.com/repos/{repo}/releases?per_page={per_page}"),
             )
             .await?;
-            let mut tags = engine::release_tag_names(&releases);
-            tags.retain(|t| t != "canary"); // testing build, nightly is the daily
-            tags
+            engine::github_release_choices(&releases)
         }
         ServerSoftware::NeoForge => {
-            let xml = fetch_text(
+            // Official maven API first (it lists ascending; the engine
+            // re-sorts), then the maven-metadata.xml, then Prism's Meta v1
+            // index as the last resort.
+            let mut ids = match fetch_json(
                 &client,
-                "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml",
+                "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge",
             )
-            .await?;
-            engine::neoforge_versions(&xml)
+            .await
+            {
+                Ok(api) => engine::neoforge_api_versions(&api),
+                Err(_) => {
+                    match fetch_text(
+                        &client,
+                        "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml",
+                    )
+                    .await
+                    {
+                        Ok(xml) => engine::neoforge_versions(&xml),
+                        Err(_) => {
+                            let prism = fetch_json(
+                                &client,
+                                "https://meta.prismlauncher.org/v1/net.neoforged/index.json",
+                            )
+                            .await?;
+                            engine::neoforge_prism_versions(&prism)
+                        }
+                    }
+                }
+            };
+            ids.truncate(120); // keep the dropdown sane; newest are first
+            // Legacy 1.20.1 targets merge in from the
+            // `net.neoforged:forge` artifact, best effort — they sort
+            // below the modern ids, so the cap never hides them.
+            if let Ok(legacy) = fetch_json(
+                &client,
+                "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/forge",
+            )
+            .await
+            {
+                ids.extend(engine::neoforge_legacy_versions(&legacy));
+            }
+            ids
         }
-        // Forge: manual installer, no automated fetch
-        _ => Vec::new(),
+        ServerSoftware::Forge => {
+            // Official promotions first (latest/recommended per Minecraft
+            // version), then the full maven-metadata.xml, then Prism's
+            // Meta v1 index as the last resort.
+            let mut ids = match fetch_json(
+                &client,
+                "https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json",
+            )
+            .await
+            {
+                Ok(promos) => engine::forge_versions(&promos),
+                Err(_) => {
+                    match fetch_text(
+                        &client,
+                        "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml",
+                    )
+                    .await
+                    {
+                        Ok(xml) => engine::maven_metadata_versions(&xml),
+                        Err(_) => {
+                            let prism = fetch_json(
+                                &client,
+                                "https://meta.prismlauncher.org/v1/net.minecraftforge/index.json",
+                            )
+                            .await?;
+                            engine::forge_prism_versions(&prism)
+                        }
+                    }
+                }
+            };
+            ids.truncate(120);
+            ids
+        }
     })
 }
 
