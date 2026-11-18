@@ -193,11 +193,26 @@ fn is_v3_build(name: &str) -> bool {
     name.to_ascii_lowercase().contains("-v3")
 }
 
-/// Asset predicate for the host target: OS tag required; arch tag required
-/// only when the asset name carries one (SteelMC names omit it, e.g.
-/// `steel-windows.exe`).
-pub fn host_asset_matches(name: &str) -> bool {
+/// Arch tokens release asset names carry, used to detect (and reject)
+/// foreign-arch assets while accepting archless names (SteelMC).
+const ARCH_TOKENS: &[&str] = &["x64", "x86_64", "amd64", "arm64", "aarch64"];
+
+/// Asset predicate for a concrete target (OS tags + our arch tags):
+/// OS tag required; arch tag required only when the asset name carries one
+/// (SteelMC names omit it, e.g. `steel-windows.exe`).
+pub fn asset_matches_for(name: &str, os_tags: &[&str], ours: &[&str]) -> bool {
     let n = name.to_ascii_lowercase();
+    if !os_tags.iter().any(|o| n.contains(o)) {
+        return false;
+    }
+    match ARCH_TOKENS.iter().find(|a| n.contains(*a)) {
+        Some(found) => ours.contains(found),
+        None => true,
+    }
+}
+
+/// Asset predicate for the host target.
+pub fn host_asset_matches(name: &str) -> bool {
     let os: &[&str] = if cfg!(target_os = "windows") {
         &["windows", ".exe"]
     } else if cfg!(target_os = "macos") {
@@ -205,9 +220,6 @@ pub fn host_asset_matches(name: &str) -> bool {
     } else {
         &["linux"]
     };
-    if !os.iter().any(|o| n.contains(o)) {
-        return false;
-    }
     let ours: &[&str] = if cfg!(target_arch = "x86_64") {
         &["x64", "x86_64", "amd64"]
     } else if cfg!(target_arch = "aarch64") {
@@ -215,27 +227,28 @@ pub fn host_asset_matches(name: &str) -> bool {
     } else {
         return false;
     };
-    let all = ["x64", "x86_64", "amd64", "arm64", "aarch64"];
-    match all.iter().find(|a| n.contains(*a)) {
-        Some(found) => ours.contains(found),
-        None => true,
+    asset_matches_for(name, os, ours)
+}
+
+/// Asset choice with explicit AVX2 preference: `prefer_v3` picks `-v3`
+/// builds first, falling back to plain; `!prefer_v3` is strictly plain
+/// (never a `-v3` build).
+pub fn pick_asset_for(
+    release: &Value,
+    prefer_v3: bool,
+    matches: impl Fn(&str) -> bool,
+) -> Option<String> {
+    if prefer_v3 {
+        pick_asset(release, |name| matches(name) && is_v3_build(name))
+            .or_else(|| pick_asset(release, matches))
+    } else {
+        pick_asset(release, |name| matches(name) && !is_v3_build(name))
     }
 }
 
-/// Host asset choice with explicit AVX2 preference: `prefer_v3` picks
-/// `-v3` builds first, falling back to plain; `!prefer_v3` is strictly
-/// plain (never a `-v3` build).
+/// Host asset choice, preference driven by `host_supports_avx2`.
 pub fn pick_host_asset(release: &Value, prefer_v3: bool) -> Option<String> {
-    if prefer_v3 {
-        pick_asset(release, |name| {
-            host_asset_matches(name) && is_v3_build(name)
-        })
-        .or_else(|| pick_asset(release, host_asset_matches))
-    } else {
-        pick_asset(release, |name| {
-            host_asset_matches(name) && !is_v3_build(name)
-        })
-    }
+    pick_asset_for(release, prefer_v3, host_asset_matches)
 }
 
 /// Pumpkin release binary URL matching the host OS/arch and CPU features.
@@ -244,12 +257,18 @@ pub fn pumpkin_asset_url(latest: &Value) -> Option<String> {
 }
 
 /// Picks the release to install from a GitHub releases list: the pinned
-/// tag when present, else the first stable release with a matching host
-/// asset, else the first release with one at all (nightly/canary count).
-pub fn pick_release<'a>(releases: &'a [Value], pinned_tag: &str) -> Option<&'a Value> {
+/// tag when present, else the first stable release with a matching asset,
+/// else the first release with one at all (nightly/canary count, drafts
+/// never). [`pick_release`] uses the host predicate and CPU features.
+pub fn pick_release_with<'a>(
+    releases: &'a [Value],
+    pinned_tag: &str,
+    prefer_v3: bool,
+    matches: impl Fn(&str) -> bool,
+) -> Option<&'a Value> {
     let usable = |r: &&Value| {
         r.get("draft").and_then(Value::as_bool) != Some(true)
-            && pick_host_asset(r, host_supports_avx2()).is_some()
+            && pick_asset_for(r, prefer_v3, &matches).is_some()
     };
     releases
         .iter()
@@ -262,6 +281,16 @@ pub fn pick_release<'a>(releases: &'a [Value], pinned_tag: &str) -> Option<&'a V
                 .find(|r| r.get("prerelease").and_then(Value::as_bool) != Some(true) && usable(r))
         })
         .or_else(|| releases.iter().find(usable))
+}
+
+/// [`pick_release_with`] with the host asset predicate.
+pub fn pick_release<'a>(releases: &'a [Value], pinned_tag: &str) -> Option<&'a Value> {
+    pick_release_with(
+        releases,
+        pinned_tag,
+        host_supports_avx2(),
+        host_asset_matches,
+    )
 }
 
 /// Tag names of a GitHub releases list, in response order (newest first).
@@ -460,9 +489,16 @@ mod tests {
         );
     }
 
+    /// Windows-x64 asset matcher passed explicitly so these tests are
+    /// independent of the host running them (CI is Linux x86_64, the dev
+    /// box Windows x64).
+    fn win_x64(name: &str) -> bool {
+        asset_matches_for(name, &["windows", ".exe"], &["x64", "x86_64", "amd64"])
+    }
+
     #[test]
-    fn host_asset_selection_prefers_v3_only_when_asked() {
-        // Live Pumpkin asset naming (X64 host, Windows CI/dev box).
+    fn asset_selection_prefers_v3_only_when_asked() {
+        // Live Pumpkin asset naming (X64 host, Windows).
         let release = json!({
             "assets": [
                 {"name": "pumpkin-ARM64-Linux", "browser_download_url": "https://x/arm"},
@@ -473,31 +509,42 @@ mod tests {
             ]
         });
         assert_eq!(
-            pick_host_asset(&release, false).unwrap(),
+            pick_asset_for(&release, false, win_x64).unwrap(),
             "https://x/plain.exe"
         );
-        assert_eq!(pick_host_asset(&release, true).unwrap(), "https://x/v3.exe");
+        assert_eq!(
+            pick_asset_for(&release, true, win_x64).unwrap(),
+            "https://x/v3.exe"
+        );
 
         // Without AVX2 a v3-only release must never be selected.
         let v3_only = json!({
-            "assets": [{"name": "pumpkin-X64-v3-Windows.exe", "browser_download_url": "https://x/v3.exe"}]
+            "assets": [
+                {"name": "pumpkin-X64-v3-Windows.exe", "browser_download_url": "https://x/v3.exe"}
+            ]
         });
-        assert!(pick_host_asset(&v3_only, false).is_none());
-        assert_eq!(pick_host_asset(&v3_only, true).unwrap(), "https://x/v3.exe");
+        assert!(pick_asset_for(&v3_only, false, win_x64).is_none());
+        assert_eq!(
+            pick_asset_for(&v3_only, true, win_x64).unwrap(),
+            "https://x/v3.exe"
+        );
 
         // With AVX2 a plain-only release falls back to plain.
         let plain_only = json!({
-            "assets": [{"name": "pumpkin-X64-Windows.exe", "browser_download_url": "https://x/plain.exe"}]
+            "assets": [
+                {"name": "pumpkin-X64-Windows.exe", "browser_download_url": "https://x/plain.exe"}
+            ]
         });
         assert_eq!(
-            pick_host_asset(&plain_only, true).unwrap(),
+            pick_asset_for(&plain_only, true, win_x64).unwrap(),
             "https://x/plain.exe"
         );
     }
 
     #[test]
-    fn host_asset_matches_archless_names() {
-        // SteelMC omits the arch token entirely.
+    fn asset_matches_os_and_arch_tokens() {
+        // SteelMC omits the arch token entirely: any OS-matching archless
+        // asset is accepted by every arch target.
         let steel = json!({
             "assets": [
                 {"name": "steel-linux", "browser_download_url": "https://x/linux"},
@@ -505,7 +552,26 @@ mod tests {
                 {"name": "steel-windows.exe", "browser_download_url": "https://x/win.exe"}
             ]
         });
-        assert_eq!(pick_host_asset(&steel, false).unwrap(), "https://x/win.exe");
+        assert_eq!(
+            pick_asset_for(&steel, false, win_x64).unwrap(),
+            "https://x/win.exe"
+        );
+        assert_eq!(
+            pick_asset_for(&steel, false, |name| {
+                asset_matches_for(name, &["linux"], &["x64", "x86_64", "amd64"])
+            })
+            .unwrap(),
+            "https://x/linux"
+        );
+        // Arch-tagged names are rejected when the arch is foreign.
+        let arm_linux = json!({
+            "assets": [
+                {"name": "pumpkin-ARM64-Linux", "browser_download_url": "https://x/arm"}
+            ]
+        });
+        assert!(pick_asset_for(&arm_linux, false, win_x64).is_none());
+        // The host wrapper rejects files without an OS tag.
+        assert!(!host_asset_matches("checksums.sha256"));
     }
 
     #[test]
@@ -522,11 +588,11 @@ mod tests {
         .unwrap()
         .clone();
         assert_eq!(
-            pick_release(&releases, "0.2.1").unwrap()["tag_name"],
+            pick_release_with(&releases, "0.2.1", false, win_x64).unwrap()["tag_name"],
             "0.2.1"
         );
         assert_eq!(
-            pick_release(&releases, "").unwrap()["tag_name"],
+            pick_release_with(&releases, "", false, win_x64).unwrap()["tag_name"],
             "0.2.2+26.3-26.60"
         );
         // Only prereleases usable -> fall through to the first one.
@@ -538,7 +604,7 @@ mod tests {
         .unwrap()
         .clone();
         assert_eq!(
-            pick_release(&only_nightly, "").unwrap()["tag_name"],
+            pick_release_with(&only_nightly, "", false, win_x64).unwrap()["tag_name"],
             "nightly"
         );
         // Drafts are never usable.
@@ -549,7 +615,7 @@ mod tests {
         .as_array()
         .unwrap()
         .clone();
-        assert!(pick_release(&drafts, "").is_none());
+        assert!(pick_release_with(&drafts, "", false, win_x64).is_none());
     }
 
     #[test]
