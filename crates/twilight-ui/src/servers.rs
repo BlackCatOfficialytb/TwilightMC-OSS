@@ -176,7 +176,32 @@ fn now_secs() -> u64 {
 // ---- artifact resolution ----
 
 fn http_client() -> reqwest::Client {
-    reqwest::Client::new()
+    reqwest::Client::builder()
+        // GitHub 403s generic agents; PaperMC Fill v3 documents a UA with
+        // project/URL. Every external request flows through this client.
+        .user_agent("TwilightMC/0.6.0 (https://github.com/BlackCatOfficialytb/TwilightMC-OSS)")
+        .build()
+        .unwrap_or_default()
+}
+
+/// GETs `url` as text, surfacing HTTP errors with a body excerpt instead of
+/// an opaque decode failure downstream.
+async fn fetch_text(client: &reqwest::Client, url: &str) -> Result<String, String> {
+    let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
+    let status = resp.status();
+    let raw = resp.text().await.map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        let excerpt: String = raw.chars().take(200).collect();
+        return Err(format!("HTTP {status} from {url}: {excerpt}"));
+    }
+    Ok(raw)
+}
+
+/// [`fetch_text`] + JSON parse; the raw body is read before parsing so a
+/// 403/404 page surfaces as a clear error, never as a decode failure.
+async fn fetch_json(client: &reqwest::Client, url: &str) -> Result<serde_json::Value, String> {
+    let raw = fetch_text(client, url).await?;
+    serde_json::from_str(&raw).map_err(|e| format!("invalid JSON from {url}: {e}"))
 }
 
 /// Deterministic artifact name per software inside the server dir.
@@ -219,23 +244,29 @@ async fn resolve_fabric_loader(loader_version: Option<&str>) -> Result<String, S
     if let Some(v) = loader_version.filter(|v| !v.trim().is_empty()) {
         return Ok(v.to_owned());
     }
-    let list: Vec<serde_json::Value> = http_client()
-        .get("https://meta.fabricmc.net/v2/versions/loader")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .json()
-        .await
-        .map_err(|e| e.to_string())?;
-    list.iter()
-        .find(|e| e.get("stable").and_then(serde_json::Value::as_bool) == Some(true))
-        .and_then(|e| e.get("version").and_then(serde_json::Value::as_str))
-        .map(str::to_owned)
+    let list = fetch_json(
+        &http_client(),
+        "https://meta.fabricmc.net/v2/versions/loader",
+    )
+    .await?;
+    list.as_array()
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|e| e.get("stable").and_then(serde_json::Value::as_bool) == Some(true))
+                .and_then(|e| e.get("version").and_then(serde_json::Value::as_str))
+                .map(str::to_owned)
+        })
         .ok_or_else(|| "no stable fabric loader found".to_owned())
 }
 
-/// Resolves (and caches on disk) the server artifact for `meta`.
-async fn resolve_artifact(dir: &Path, meta: &ServerMeta) -> Result<PathBuf, String> {
+/// Resolves (and caches on disk) the server artifact for `meta`. Installer
+/// flows (NeoForge) stream progress through `emit`.
+async fn resolve_artifact(
+    dir: &Path,
+    meta: &ServerMeta,
+    emit: &std::sync::Arc<dyn Fn(String) + Send + Sync>,
+) -> Result<PathBuf, String> {
     let client = http_client();
     let name = jar_name(&meta.software);
     let dest = dir.join(name);
@@ -245,48 +276,37 @@ async fn resolve_artifact(dir: &Path, meta: &ServerMeta) -> Result<PathBuf, Stri
     }
     match meta.software {
         ServerSoftware::Vanilla => {
-            let manifest: serde_json::Value = client
-                .get("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")
-                .send()
-                .await
-                .map_err(|e| e.to_string())?
-                .json()
-                .await
-                .map_err(|e| e.to_string())?;
+            let manifest = fetch_json(
+                &client,
+                "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
+            )
+            .await?;
             let (_, version_url, _) = engine::vanilla_entry(&manifest, &meta.version)
                 .ok_or_else(|| format!("unknown vanilla version {}", meta.version))?;
-            let version_json: serde_json::Value = client
-                .get(&version_url)
-                .send()
-                .await
-                .map_err(|e| e.to_string())?
-                .json()
-                .await
-                .map_err(|e| e.to_string())?;
+            let version_json = fetch_json(&client, &version_url).await?;
             let (url, sha1) = engine::vanilla_server_download(&version_json)
                 .ok_or_else(|| "mojang manifest has no server download".to_owned())?;
             fetch_artifact(dir, name, &url, sha1).await
         }
         ServerSoftware::Paper | ServerSoftware::Velocity => {
+            // Fill v3: builds arrive newest first; pick the latest stable.
             let project = if meta.software == ServerSoftware::Velocity {
                 "velocity"
             } else {
                 "paper"
             };
-            let builds: serde_json::Value = client
-                .get(format!(
-                    "https://api.papermc.io/v2/projects/{project}/versions/{}/builds",
+            let builds = fetch_json(
+                &client,
+                &format!(
+                    "https://fill.papermc.io/v3/projects/{project}/versions/{}/builds",
                     meta.version
-                ))
-                .send()
-                .await
-                .map_err(|e| e.to_string())?
-                .json()
-                .await
-                .map_err(|e| e.to_string())?;
-            let url = engine::papermc_download_url(&builds)
-                .ok_or_else(|| format!("no papermc build for {} {}", project, meta.version))?;
-            fetch_artifact(dir, name, &url, None).await
+                ),
+            )
+            .await?;
+            let (url, sha256) = engine::fill_download(&builds).ok_or_else(|| {
+                format!("no stable papermc build for {} {}", project, meta.version)
+            })?;
+            fetch_artifact(dir, name, &url, sha256).await
         }
         ServerSoftware::Purpur => {
             fetch_artifact(dir, name, &engine::purpur_download_url(&meta.version), None).await
@@ -301,18 +321,54 @@ async fn resolve_artifact(dir: &Path, meta: &ServerMeta) -> Result<PathBuf, Stri
             )
             .await
         }
-        ServerSoftware::Pumpkin => {
-            let release: serde_json::Value = client
-                .get("https://api.github.com/repos/Pumpkin-MC/Pumpkin/releases/latest")
-                .send()
-                .await
-                .map_err(|e| e.to_string())?
-                .json()
-                .await
-                .map_err(|e| e.to_string())?;
-            let url = engine::pumpkin_asset_url(&release)
-                .ok_or_else(|| "no pumpkin release binary for this host".to_owned())?;
+        ServerSoftware::Pumpkin | ServerSoftware::Steel => {
+            // GitHub `/releases/latest` 404s on prerelease-only repos —
+            // query the list and pick: pinned tag, else newest stable, else
+            // any release with a matching host asset.
+            let repo = if meta.software == ServerSoftware::Steel {
+                "Steel-Foundation/SteelMC"
+            } else {
+                "Pumpkin-MC/Pumpkin"
+            };
+            let releases = fetch_json(
+                &client,
+                &format!("https://api.github.com/repos/{repo}/releases?per_page=20"),
+            )
+            .await?;
+            let list = releases
+                .as_array()
+                .ok_or_else(|| "unexpected github releases response".to_owned())?;
+            let release = engine::pick_release(list, &meta.version).ok_or_else(|| {
+                format!(
+                    "no {} release binary matching this host",
+                    meta.software.label()
+                )
+            })?;
+            let url = engine::pick_host_asset(release, engine::host_supports_avx2())
+                .ok_or_else(|| format!("no {} asset matching this host", meta.software.label()))?;
+            emit(format!(
+                "[TwilightMC] selected {} asset {} ({})",
+                meta.software.label(),
+                url.rsplit('/').next().unwrap_or(&url),
+                engine::host_cpu_target()
+            ));
             fetch_artifact(dir, name, &url, None).await
+        }
+        ServerSoftware::NeoForge => {
+            // Step 1: the installer jar; step 2: run `--installServer` once
+            // to assemble libraries + the run scripts the launch uses.
+            let installer = fetch_artifact(
+                dir,
+                "neoforge-installer.jar",
+                &engine::neoforge_installer_url(&meta.version),
+                None,
+            )
+            .await?;
+            if !dir.join("libraries").is_dir() {
+                let java = find_java(&meta.software, &meta.version).await?;
+                run_installer(&java, &installer, dir, emit).await?;
+            }
+            Ok(installer)
         }
         _ => Err(format!(
             "{} has no automated fetch in TwilightMC — install the official launcher jar as {} and retry",
@@ -323,12 +379,18 @@ async fn resolve_artifact(dir: &Path, meta: &ServerMeta) -> Result<PathBuf, Stri
 }
 
 /// Consistent java majors per game version (1.20.5+ → 21, 1.18+ → 17, …).
+/// New-style ids without the `1.` prefix (e.g. NeoForge `26.3.0.110`) are
+/// modern Minecraft and also require 21.
 fn required_major(software: &ServerSoftware, version: &str) -> Vec<i32> {
     if software == &ServerSoftware::Velocity {
         return vec![17];
     }
     let mut parts = version.split('.');
-    if parts.next() == Some("1") {
+    let major: u32 = parts.next().and_then(|m| m.parse().ok()).unwrap_or(0);
+    if major > 1 {
+        return vec![21];
+    }
+    if major == 1 {
         let minor: u32 = parts.next().and_then(|m| m.parse().ok()).unwrap_or(0);
         let patch: u32 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
         if minor > 20 || (minor == 20 && patch >= 5) {
@@ -354,14 +416,7 @@ async fn find_java(software: &ServerSoftware, version: &str) -> Result<String, S
 // ---- connect / authme plugins ----
 
 async fn fetch_release(release_url: &str) -> Result<serde_json::Value, String> {
-    http_client()
-        .get(release_url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .json()
-        .await
-        .map_err(|e| e.to_string())
+    fetch_json(&http_client(), release_url).await
 }
 
 async fn install_plugin_jar(
@@ -390,6 +445,68 @@ async fn install_plugin_jar(
         .await
         .map_err(|e| e.to_string())?;
     Ok(dest)
+}
+
+// ---- installer-based loaders (Forge / NeoForge) ----
+
+/// Runs a Forge/NeoForge installer headlessly (`--installServer`) in the
+/// server dir; progress streams through `emit` as server log lines.
+async fn run_installer(
+    java: &str,
+    installer: &Path,
+    dir: &Path,
+    emit: &std::sync::Arc<dyn Fn(String) + Send + Sync>,
+) -> Result<(), String> {
+    emit("[TwilightMC] running installer --installServer (may take a few minutes)…".to_owned());
+    let mut cmd = tokio::process::Command::new(java);
+    cmd.args(["-jar", &installer.to_string_lossy(), "--installServer"])
+        .current_dir(dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    let out = cmd.output().await.map_err(|e| e.to_string())?;
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    for line in combined.lines().filter(|l| !l.trim().is_empty()) {
+        emit(line.to_owned());
+    }
+    if !out.status.success() {
+        return Err(format!(
+            "installer failed with {}",
+            out.status.code().unwrap_or(-1)
+        ));
+    }
+    emit("[TwilightMC] installer finished".to_owned());
+    Ok(())
+}
+
+/// Assembles the launch args for installer-based loaders: the installer's
+/// generated `run.bat` / `run.sh` carries the canonical java line; parse it
+/// and replace the `%*` / `"$@"` passthrough with `nogui`.
+fn launcher_args(dir: &Path, os_windows: bool) -> Result<Vec<String>, String> {
+    let script = if os_windows {
+        dir.join("run.bat")
+    } else {
+        dir.join("run.sh")
+    };
+    let raw = std::fs::read_to_string(&script)
+        .map_err(|e| format!("installer launch script missing ({e})"))?;
+    let line = raw
+        .lines()
+        .map(str::trim)
+        .find(|l| l.starts_with("java "))
+        .ok_or_else(|| "installer launch script has no java command".to_owned())?;
+    let mut args: Vec<String> = line["java ".len()..]
+        .split_whitespace()
+        .filter(|a| !matches!(*a, "%*" | "$@" | "\"$@\""))
+        .map(str::to_owned)
+        .collect();
+    args.push("nogui".into());
+    Ok(args)
 }
 
 // ---- spawn ----
@@ -455,8 +572,10 @@ async fn start_server_inner(app: &AppHandle, id: &str) -> Result<(), String> {
 
     set_state(app, id, "Starting");
 
+    let emit = make_emit(app, id);
+
     // resolve/download the artifact first (slow path: clean state on failure)
-    let artifact = match resolve_artifact(&dir, &meta).await {
+    let artifact = match resolve_artifact(&dir, &meta, &emit).await {
         Ok(a) => a,
         Err(e) => {
             set_state(app, id, "Stopped");
@@ -501,7 +620,6 @@ async fn start_server_inner(app: &AppHandle, id: &str) -> Result<(), String> {
         .await;
     }
 
-    let emit = make_emit(app, id);
     emit(format!(
         "[TwilightMC] starting {} {} (port {})",
         meta.software.label(),
@@ -521,6 +639,36 @@ async fn start_server_inner(app: &AppHandle, id: &str) -> Result<(), String> {
         process::ServerSpawn {
             program: artifact.to_string_lossy().to_string(),
             args: Vec::new(),
+            cwd: dir.clone(),
+        }
+    } else if meta.software == ServerSoftware::NeoForge {
+        // Installer-based launch: memory flags ride user_jvm_args.txt; the
+        // parsed script line carries classpath/module args.
+        if meta.min_memory_mb > 0 || meta.max_memory_mb > 0 {
+            tokio::fs::write(
+                dir.join("user_jvm_args.txt"),
+                config::user_jvm_args_txt(meta.min_memory_mb, meta.max_memory_mb),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+        let java = match find_java(&meta.software, &meta.version).await {
+            Ok(j) => j,
+            Err(e) => {
+                set_state(app, id, "Stopped");
+                return Err(e);
+            }
+        };
+        let args = match launcher_args(&dir, cfg!(windows)) {
+            Ok(a) => a,
+            Err(e) => {
+                set_state(app, id, "Stopped");
+                return Err(e);
+            }
+        };
+        process::ServerSpawn {
+            program: java,
+            args,
             cwd: dir.clone(),
         }
     } else {
@@ -855,56 +1003,42 @@ pub async fn fetch_server_versions(software: String) -> Result<Vec<String>, Stri
     let client = http_client();
     Ok(match software {
         ServerSoftware::Vanilla => {
-            let manifest: serde_json::Value = client
-                .get("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")
-                .send()
-                .await
-                .map_err(|e| e.to_string())?
-                .json()
-                .await
-                .map_err(|e| e.to_string())?;
+            let manifest = fetch_json(
+                &client,
+                "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json",
+            )
+            .await?;
             engine::vanilla_version_ids(&manifest)
         }
         ServerSoftware::Paper | ServerSoftware::Velocity => {
+            // Fill v3: `versions` is a map of groups; flatten + sort.
             let project = if software == ServerSoftware::Velocity {
                 "velocity"
             } else {
                 "paper"
             };
-            let v: serde_json::Value = client
-                .get(format!("https://api.papermc.io/v2/projects/{project}"))
-                .send()
-                .await
-                .map_err(|e| e.to_string())?
-                .json()
-                .await
-                .map_err(|e| e.to_string())?;
-            v.get("versions")
-                .and_then(serde_json::Value::as_array)
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|x| x.as_str().map(str::to_owned))
-                        .collect()
-                })
-                .unwrap_or_default()
+            let project_json = fetch_json(
+                &client,
+                &format!("https://fill.papermc.io/v3/projects/{project}"),
+            )
+            .await?;
+            let mut ids = engine::fill_versions(&project_json);
+            ids.truncate(80);
+            ids
         }
         ServerSoftware::Purpur => {
-            let v: serde_json::Value = client
-                .get("https://api.purpurmc.org/v2/purpur")
-                .send()
-                .await
-                .map_err(|e| e.to_string())?
-                .json()
-                .await
-                .map_err(|e| e.to_string())?;
-            v.get("versions")
+            let v = fetch_json(&client, "https://api.purpurmc.org/v2/purpur").await?;
+            let mut ids: Vec<String> = v
+                .get("versions")
                 .and_then(serde_json::Value::as_array)
                 .map(|a| {
                     a.iter()
                         .filter_map(|x| x.as_str().map(str::to_owned))
                         .collect()
                 })
-                .unwrap_or_default()
+                .unwrap_or_default();
+            ids.reverse(); // upstream lists oldest first
+            ids
         }
         ServerSoftware::Fabric => {
             let v: Vec<serde_json::Value> = client
@@ -924,24 +1058,38 @@ pub async fn fetch_server_versions(software: String) -> Result<Vec<String>, Stri
                 })
                 .collect()
         }
-        ServerSoftware::Pumpkin => {
-            let v: Vec<serde_json::Value> = client
-                .get("https://api.github.com/repos/Pumpkin-MC/Pumpkin/releases")
-                .send()
-                .await
-                .map_err(|e| e.to_string())?
-                .json()
-                .await
-                .map_err(|e| e.to_string())?;
-            v.iter()
-                .filter_map(|r| {
-                    r.get("tag_name")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_owned)
-                })
-                .collect()
+        ServerSoftware::Pumpkin | ServerSoftware::Steel => {
+            // Releases list (not /releases/latest: it 404s on prerelease
+            // repos); nightly/canary tags surface as selectable versions.
+            let repo = if software == ServerSoftware::Steel {
+                "Steel-Foundation/SteelMC"
+            } else {
+                "Pumpkin-MC/Pumpkin"
+            };
+            let releases = fetch_json(
+                &client,
+                &format!("https://api.github.com/repos/{repo}/releases?per_page=20"),
+            )
+            .await?;
+            let mut tags = engine::release_tag_names(&releases);
+            tags.retain(|t| t != "canary"); // testing build, nightly is the daily
+            tags
         }
-        // Forge/NeoForge/Steel: manual installer, no automated fetch
+        ServerSoftware::NeoForge => {
+            let xml = fetch_text(
+                &client,
+                "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml",
+            )
+            .await?;
+            engine::neoforge_versions(&xml)
+        }
+        // Forge: manual installer, no automated fetch
         _ => Vec::new(),
     })
+}
+
+/// The detected host CPU microarch target, shown in the server wizard.
+#[tauri::command]
+pub fn get_cpu_target() -> String {
+    engine::host_cpu_target().to_owned()
 }

@@ -173,6 +173,7 @@ fn main() {
             servers::install_connect,
             servers::get_connect_status,
             servers::fetch_server_versions,
+            servers::get_cpu_target,
             modrinth::search_modrinth_mods,
             modrinth::install_modrinth_mod,
             modrinth::install_mod_with_deps,

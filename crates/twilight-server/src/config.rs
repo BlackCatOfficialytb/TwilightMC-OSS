@@ -113,6 +113,19 @@ pub fn pumpkin_toml(port: u16) -> String {
     format!("[server]\nport = {port}\n")
 }
 
+/// `user_jvm_args.txt` for installer-based loaders (Forge/NeoForge): the
+/// installer-generated run scripts feed it to java as an @argfile.
+pub fn user_jvm_args_txt(min_memory_mb: u32, max_memory_mb: u32) -> String {
+    let mut out = String::from("# Managed by TwilightMC\n");
+    if min_memory_mb > 0 {
+        out.push_str(&format!("-Xms{min_memory_mb}M\n"));
+    }
+    if max_memory_mb > 0 {
+        out.push_str(&format!("-Xmx{max_memory_mb}M\n"));
+    }
+    out
+}
+
 /// Sets one `key = value` inside a single `[section]` of a TOML file,
 /// preserving everything else; appends the section when missing.
 pub fn update_toml_value(raw: &str, section: &str, key: &str, value: &str) -> String {
@@ -199,6 +212,15 @@ mod tests {
         assert!(default_server_properties(25565).contains("server-port=25565"));
         assert!(default_server_properties(25565).contains("online-mode=true"));
         assert_eq!(pumpkin_toml(25566), "[server]\nport = 25566\n");
+    }
+
+    #[test]
+    fn user_jvm_args_txt_flags() {
+        assert_eq!(
+            user_jvm_args_txt(1024, 4096),
+            "# Managed by TwilightMC\n-Xms1024M\n-Xmx4096M\n"
+        );
+        assert_eq!(user_jvm_args_txt(0, 0), "# Managed by TwilightMC\n");
     }
 
     #[test]

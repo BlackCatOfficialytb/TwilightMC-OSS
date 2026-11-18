@@ -2,6 +2,9 @@
   // The New Server wizard: Step 1 software → Step 2 version (live fetch) →
   // Step 3 settings (name/port/RAM) → Step 4 networking (Local Only vs
   // Minekube Connect tunnel + offline mode with the AuthMe recommendation).
+  // Option clicks ONLY select/highlight — advancing happens exclusively via
+  // the footer Next button, and a full-size Back button sits right next to
+  // it on every step after the first.
   import { toast } from './alerts.svelte.js';
 
   let { onclose, oncreated } = $props();
@@ -14,9 +17,13 @@
     { id: 'pumpkin', label: 'PumpkinMC (Rust)', note: 'Multithreaded native server' },
     { id: 'velocity', label: 'Velocity', note: 'Modern proxy (no world)' },
     { id: 'forge', label: 'Forge', note: 'Mod loader — manual installer' },
-    { id: 'neoforge', label: 'NeoForge', note: 'Mod loader — manual installer' },
-    { id: 'steel', label: 'SteelMC (Rust)', note: 'Native server — manual installer' },
+    { id: 'neoforge', label: 'NeoForge', note: 'Mod loader, auto-installer' },
+    { id: 'steel', label: 'SteelMC (Rust)', note: 'Native server, auto-download' },
   ];
+
+  const MANUAL_NOTES = {
+    forge: 'TwilightMC cannot fetch Forge installers automatically — Next continues with a manual install; drop the launcher jar into the server folder before starting.',
+  };
 
   let step = $state(1);
   let software = $state('');
@@ -32,43 +39,75 @@
   let offlineMode = $state(false);
   let busy = $state('');
   let error = $state('');
+  let cpuTarget = $state('');
+  let fetchToken = 0;
 
-  const SOFTWARE_NOTES = {
-    forge: 'TwilightMC cannot fetch Forge installers automatically — create the folder and run the installer yourself.',
-    neoforge: 'TwilightMC cannot fetch NeoForge installers automatically — create the folder and run the installer yourself.',
-    steel: 'SteelMC publishes no releases yet — create the folder and build it from source.',
-  };
-
-  async function pickSoftware(id) {
-    software = id;
-    version = '';
-    versions = [];
-    versionError = '';
-    step = 2;
-    loadingVersions = true;
-    try {
-      versions = await window.__TAURI__.core.invoke('fetch_server_versions', { software: id });
-      if (id === 'paper' || id === 'velocity') versions = [...versions].reverse().slice(0, 80);
-      if (id === 'fabric') versions = versions.slice(0, 80);
-      if (versions.length === 0 && SOFTWARE_NOTES[id]) {
-        versionError = SOFTWARE_NOTES[id];
-      }
-    } catch (e) {
-      versionError = String(e);
-    } finally {
-      loadingVersions = false;
-    }
-  }
-
-  function pickVersion(v) {
-    version = v;
-    if (!name.trim()) name = `${labelOf(software)} ${v.split('+')[0]}`;
-    step = 3;
-  }
+  // Detected host CPU microarch target (x86_64-v3 (AVX2) vs x86_64) —
+  // native server builds are matched against it during download.
+  window.__TAURI__
+    ?.core.invoke('get_cpu_target')
+    .then((t) => (cpuTarget = t))
+    .catch(() => {});
 
   function labelOf(id) {
     return SOFTWARE.find((s) => s.id === id)?.label ?? id;
   }
+
+  async function selectSoftware(id) {
+    if (software === id) return;
+    const token = ++fetchToken;
+    software = id;
+    version = '';
+    versions = [];
+    versionError = '';
+    loadingVersions = true;
+    try {
+      const list = await window.__TAURI__.core.invoke('fetch_server_versions', { software: id });
+      if (token !== fetchToken) return; // stale response for a changed pick
+      versions = list ?? [];
+      if (id === 'fabric') versions = versions.slice(0, 80);
+      if (versions.length === 0 && MANUAL_NOTES[id]) {
+        versionError = MANUAL_NOTES[id];
+      }
+    } catch (e) {
+      if (token === fetchToken) versionError = String(e);
+    } finally {
+      if (token === fetchToken) loadingVersions = false;
+    }
+  }
+
+  function selectVersion(v) {
+    version = v;
+  }
+
+  // The only way forward: the explicit Next button in the footer.
+  function next() {
+    if (step === 1) {
+      if (!software) return;
+      step = 2;
+    } else if (step === 2) {
+      if (loadingVersions) return;
+      if (!version && versions.length > 0) return;
+      if (!version) version = 'manual';
+      if (!name.trim()) name = `${labelOf(software)} ${version.split('+')[0]}`;
+      step = 3;
+    } else if (step === 3) {
+      step = 4;
+    }
+  }
+
+  function back() {
+    if (busy || step <= 1) return;
+    step -= 1;
+  }
+
+  const canNext = $derived(
+    (step === 1 && !!software && !loadingVersions) ||
+      (step === 2 && !loadingVersions && (version !== '' || versions.length === 0)) ||
+      step === 3
+  );
+
+  const cpuLabel = $derived(cpuTarget.includes('v3') ? 'AVX2' : 'baseline');
 
   async function create() {
     error = '';
@@ -129,18 +168,24 @@
               class="rounded border px-3 py-2.5 text-left transition-colors {software === s.id
                 ? 'border-(--accent) bg-(--brand-tint)'
                 : 'border-(--border) hover:border-(--accent)'}"
-              onclick={() => pickSoftware(s.id)}
+              onclick={() => selectSoftware(s.id)}
             >
               <span class="block text-[12.5px] font-medium">{s.label}</span>
               <span class="mt-0.5 block text-[11px] text-(--text-muted)">{s.note}</span>
             </button>
           {/each}
         </div>
+        {#if loadingVersions}
+          <p class="mt-3 text-[11px] text-(--text-muted)">Checking available versions…</p>
+        {/if}
+        {#if cpuTarget}
+          <p class="mt-3 text-[11px] text-(--text-muted)">
+            Host CPU target: <span class="text-(--text-main)">{cpuTarget}</span> — native builds
+            are matched to it ({cpuLabel}).
+          </p>
+        {/if}
       {:else if step === 2}
-        <div class="flex items-center justify-between">
-          <p class="text-[12px] text-(--text-muted)">Pick the version for {labelOf(software)}.</p>
-          <button class="text-[11px] text-(--accent) hover:underline" onclick={() => (step = 1)}>back</button>
-        </div>
+        <p class="text-[12px] text-(--text-muted)">Pick the version for {labelOf(software)}.</p>
         {#if loadingVersions}
           <p class="mt-4 text-[12px] text-(--text-muted)">Fetching versions…</p>
         {:else if versionError}
@@ -152,7 +197,7 @@
                 class="rounded border px-2 py-1.5 text-[11.5px] transition-colors {version === v
                   ? 'border-(--accent) bg-(--brand-tint) font-medium text-(--accent)'
                   : 'border-(--border) hover:border-(--accent)'}"
-                onclick={() => pickVersion(v)}
+                onclick={() => selectVersion(v)}
               >
                 {v.split('+')[0]}
               </button>
@@ -160,10 +205,7 @@
           </div>
         {/if}
       {:else if step === 3}
-        <div class="flex items-center justify-between">
-          <p class="text-[12px] text-(--text-muted)">Name, port and memory.</p>
-          <button class="text-[11px] text-(--accent) hover:underline" onclick={() => (step = 2)}>back</button>
-        </div>
+        <p class="text-[12px] text-(--text-muted)">Name, port and memory.</p>
         <label for="ns-name" class="mt-4 block text-[11px] font-medium text-(--text-muted)">Server name</label>
         <input
           id="ns-name"
@@ -186,19 +228,8 @@
         {#if maxMem < minMem}
           <p class="mt-1 text-[11px] text-amber-500">Max memory is below min — the flag is skipped.</p>
         {/if}
-        <div class="mt-4 flex justify-end">
-          <button
-            class="rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
-            onclick={() => (step = 4)}
-          >
-            Next: Networking
-          </button>
-        </div>
       {:else}
-        <div class="flex items-center justify-between">
-          <p class="text-[12px] text-(--text-muted)">Who can reach the server?</p>
-          <button class="text-[11px] text-(--accent) hover:underline" onclick={() => (step = 3)}>back</button>
-        </div>
+        <p class="text-[12px] text-(--text-muted)">Who can reach the server?</p>
         <div class="mt-3 grid gap-2">
           <button
             class="rounded border px-3 py-2.5 text-left transition-colors {localOnly
@@ -229,7 +260,8 @@
               Allows cracked / third-party clients. TwilightMC recommends AuthMeReloaded for these servers.
             </span>
           </span>
-        </label>        {#if offlineMode}
+        </label>
+        {#if offlineMode}
           <div class="mt-2 rounded border border-amber-500/40 bg-amber-500/10 p-2.5 text-[11px] text-amber-500">
             Offline Server Notice: With online-mode=false, anyone can connect using any username or spoof administrator UUIDs.
             You can 1-click install AuthMeReloaded from the server card afterwards.
@@ -249,15 +281,34 @@
       >
         Cancel
       </button>
-      {#if step === 4}
-        <button
-          class="rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
-          disabled={busy !== '' || !name.trim()}
-          onclick={create}
-        >
-          {busy === 'create' ? 'Creating…' : 'Create Server'}
-        </button>
-      {/if}
+      <div class="flex items-center gap-2">
+        {#if step > 1}
+          <button
+            class="rounded border border-(--border) px-4 py-1.5 text-[12px] font-medium text-(--text-main) hover:border-(--accent) disabled:opacity-40"
+            disabled={busy !== ''}
+            onclick={back}
+          >
+            ← Back
+          </button>
+        {/if}
+        {#if step === 4}
+          <button
+            class="rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
+            disabled={busy !== '' || !name.trim()}
+            onclick={create}
+          >
+            {busy === 'create' ? 'Creating…' : 'Create Server'}
+          </button>
+        {:else}
+          <button
+            class="rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
+            disabled={busy !== '' || !canNext}
+            onclick={next}
+          >
+            {step === 3 ? 'Next: Networking' : 'Next →'}
+          </button>
+        {/if}
+      </div>
     </div>
   </div>
 </div>
