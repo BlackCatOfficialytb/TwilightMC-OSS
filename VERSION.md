@@ -60,7 +60,8 @@ carries no version information itself: the **release title** spells the full
 identity (`TwilightMC Snapshot vX.Y.Z-ddmmyyyy-<commit>`) and every artifact
 or archive is named with the same full identity
 (`twilight-snapshot-vX.Y.Z-ddmmyyyy-<commit>-<platform-toolchain>`), plus a
-`checksums.sha256` alongside them.
+`checksums.sha256` alongside them. Archives ship as `.zip` on Windows and
+macOS and as `.tar.zst` (Zstandard) on Linux and FreeBSD.
 
 ### Ascending order for the same milestone
 
@@ -141,6 +142,11 @@ below (identical matrices in `snapshot.yml` and `release.yml`):
 | `aarch64-unknown-linux-gnu`   | **Linux ARM64** — Raspberry Pi 4/5, Radxa Rock 5, Orange Pi and other SBCs, cross-compiled with `gcc-aarch64-linux-gnu` |
 | `aarch64-apple-darwin`        | macOS on Apple Silicon                            |
 | `x86_64-unknown-freebsd`      | FreeBSD 64-bit (native VM build)                  |
+
+Archive formats per platform: `.zip` on Windows (all three toolchains) and
+macOS, `.tar.zst` (Zstandard) on Linux (x86_64 and ARM64) and FreeBSD —
+unpack the tarballs with `tar -xf <archive>.tar.zst`; minimal Linux
+containers need the `zstd` package for that.
 
 A target earns official support only when its build job is green in the CI
 matrix; ad-hoc local builds of other targets are best-effort and untested.

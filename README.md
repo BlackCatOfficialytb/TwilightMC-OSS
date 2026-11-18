@@ -48,7 +48,7 @@ original work (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 Grab a platform archive from the
 [releases page](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/releases)
 (or the rolling `snapshot` pre-release for the newest build). Every archive
-unpacks flat — no nested folder — and contains:
+unpacks into a single `twilight-…-<platform>` folder and contains:
 
 | File | Purpose |
 | --- | --- |
@@ -56,6 +56,14 @@ unpacks flat — no nested folder — and contains:
 | `twilight-ui` / `twilight-ui.exe` | The **desktop GUI** (Tauri v2 + Svelte 5 frontend). |
 | Runtime libraries *(when required)* | e.g. `WebView2Loader.dll` and the MinGW-w64 GCC runtime DLLs (`libgcc_s_seh-1.dll`, `libstdc++-6.dll`, `libwinpthread-1.dll`) in the Windows MinGW archive — keep them next to the executables. |
 | `README.md`, `VERSION.md`, `CREDITS.md`, `LICENSE.md`, `LICENSE_AGPL`, `LICENSE_APACHE` | Governance & licensing docs. |
+
+**Archive formats** — Windows and macOS ship `.zip`; Linux (x86_64 and
+aarch64) and FreeBSD ship `.tar.zst` (Zstandard-compressed tarballs).
+Unpack the tarballs with `tar -xf <archive>.tar.zst` — minimal Linux
+containers first need the `zstd` package (`apt install zstd`,
+`apk add zstd`, `pacman -S zstd`, …), since both GNU tar and bsdtar call
+it for the compression step. The `.zip` archives open with any standard
+unzip tool.
 
 Run the GUI with `twilight-ui`, drive everything from scripts with `twilight`.
 
@@ -229,9 +237,11 @@ Pushes to `main` (or manual `workflow_dispatch` runs) start the pipeline in
    immediately if either binary is missing on Windows/Linux/macOS; FreeBSD
    builds both binaries natively against WebKitGTK 4.1 and only falls back to
    CLI-only (`PLATFORM_NOTES.txt` inside its archive) if the GUI stack breaks.
-    Each result is packaged as
-   `twilight-snapshot-vX.Y.Z-ddmmyyyy-<commit>-<platform-toolchain>.zip/.tar.gz`
-   and a `checksums.sha256` of all archives is regenerated per build.
+   Each result is packaged as
+   `twilight-snapshot-vX.Y.Z-ddmmyyyy-<commit>-<platform-toolchain>` —
+   `.zip` on Windows and macOS, `.tar.zst` (Zstandard) on Linux and
+   FreeBSD — and a `checksums.sha256` of all archives is regenerated per
+   build.
 3. **Release** — push-hosted only: the rolling `snapshot` **pre-release** is
    refreshed on GitHub Releases, titled
    `TwilightMC Snapshot vX.Y.Z-ddmmyyyy-<commit>`, each build superseding the
@@ -242,8 +252,9 @@ Tagging a release on GitHub (`vX.Y.Z`; star / bolide channels keep their
 suffix) instead fires
 [`.github/workflows/release.yml`](.github/workflows/release.yml): the same
 gates run, then the same eight-target matrix generates
-`twilight-<tag>-<target>.zip/.tar.gz` archives and attaches them to the
-release — except the `snapshot` tag, whose files snapshot.yml supplies itself.
+`twilight-<tag>-<target>` archives (`.zip` on Windows/macOS, `.tar.zst`
+on Linux/FreeBSD) and attaches them to the release — except the
+`snapshot` tag, whose files snapshot.yml supplies itself.
 
 ## Security & unsigned binaries
 

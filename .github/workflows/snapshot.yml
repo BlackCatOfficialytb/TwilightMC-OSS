@@ -323,15 +323,29 @@ jobs:
       - name: Package single release archives
         run: |
           set -e
+          # zstd compresses the Linux/FreeBSD tarballs; the runner usually
+          # ships it, so install only when the check fails
+          if ! command -v zstd >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y zstd
+          fi
           mkdir -p release
           for dir in dist/*/; do
             name="$(basename "$dir")"
+            # download-artifact strips Unix exec bits: restore them on the
+            # binaries before packing (FreeBSD is the documented CLI-only
+            # exception and may legitimately lack twilight-ui)
             case "$name" in
-              *windows*)
-                (cd "$dir" && zip -qr "${GITHUB_WORKSPACE}/release/$name.zip" .)
+              *windows*) ;;
+              *) chmod +x "$dir/twilight" "$dir/twilight-ui" 2>/dev/null || true ;;
+            esac
+            # archives carry their top-level folder: .zip on Windows/macOS,
+            # .tar.zst (Zstandard) on Linux/FreeBSD
+            case "$name" in
+              *windows*|*macos*)
+                (cd dist && zip -qr -y "../release/$name.zip" "$name")
                 ;;
               *)
-                (cd "$dir" && tar -czf "${GITHUB_WORKSPACE}/release/$name.tar.gz" .)
+                (cd dist && tar --zstd -cf "../release/$name.tar.zst" "$name")
                 ;;
             esac
           done
