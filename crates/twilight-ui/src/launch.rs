@@ -6,11 +6,17 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
+use tokio::io::AsyncBufReadExt;
 use tokio::sync::mpsc;
 use twilight_cli::{LaunchConfig, run_launch_with};
+use twilight_downloader::{
+    AssetIndex, FREESM_META_BASE, PRISM_META_BASE, ParallelDownloader, fetch_json_failover,
+    resolve_vanilla_version, vanilla_sources,
+};
+use twilight_horizon::AssetStore;
 use twilight_launch::LaunchEvent;
 
-use crate::accounts::{active_account, load_settings, settings_path};
+use crate::accounts::{Settings, active_account, load_settings, settings_path};
 use crate::instance::resolved_instances_root;
 use crate::instances;
 
@@ -131,6 +137,160 @@ async fn kill_pid(pid: u32) -> Result<(), String> {
     }
 }
 
+/// Streams one child pipe line-by-line into the console drawer.
+async fn pump_lines<R: tokio::io::AsyncRead + Unpin>(
+    reader: R,
+    app: AppHandle,
+    stream: &'static str,
+) {
+    let mut lines = tokio::io::BufReader::new(reader).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        let _ = app.emit("launch-log", LaunchLine { stream, line });
+    }
+}
+
+/// Horizon (native Rust engine) launch path.
+///
+/// `twilight-cli`'s generic pipeline composes a JVM command and rejects the
+/// `horizon` loader token, while the native engine only needs its verified
+/// asset store plus a game directory. Assets are installed with the same
+/// [`AssetStore`] layout the CLI uses (`assets/objects/…` +
+/// `horizon-assets.json`), so one shared store serves both launchers.
+///
+/// Binary contract: `<horizon> --assets <store> --game-dir <dir>`.
+async fn run_horizon(
+    app: &AppHandle,
+    instance_dir: &Path,
+    meta: &instances::InstanceMeta,
+    settings: &Settings,
+) -> Result<i32, String> {
+    let horizon = settings
+        .horizon_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| {
+            "Horizon (Rust) is not configured. Open Settings -> Horizon Engine and set the \
+             Horizon binary path, then launch again."
+                .to_owned()
+        })?;
+    if !Path::new(horizon).is_file() {
+        return Err(format!(
+            "Horizon binary not found at {horizon}. Update Settings -> Horizon Engine."
+        ));
+    }
+
+    let log = |stream: &'static str, line: String| {
+        let _ = app.emit("launch-log", LaunchLine { stream, line });
+    };
+
+    // ---- version manifest -> asset index (same failover chain as the CLI)
+    let client = reqwest::Client::new();
+    let sources = vanilla_sources();
+    let meta_version = resolve_vanilla_version(&client, &sources, &meta.version)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut detail_chain = vec![meta_version.details_url.clone()];
+    for base in [PRISM_META_BASE, FREESM_META_BASE] {
+        let fallback = format!("{base}net.minecraft/{}.json", meta_version.id);
+        if !detail_chain.contains(&fallback) {
+            detail_chain.push(fallback);
+        }
+    }
+    let raw = fetch_json_failover(&client, &detail_chain)
+        .await
+        .map_err(|e| e.to_string())?;
+    let version_text = raw.to_string();
+    let version = twilight_manifest::parse_version_file(&version_text)
+        .map_err(|e| format!("cannot parse the {} manifest: {e}", meta_version.id))?;
+    let index_info = version
+        .effective_asset_index()
+        .ok_or_else(|| format!("{} declares no asset index", meta_version.id))?;
+    let index_raw = fetch_json_failover(&client, std::slice::from_ref(&index_info.url))
+        .await
+        .map_err(|e| e.to_string())?;
+    let index_text = index_raw.to_string();
+    let index = AssetIndex::parse(index_text.as_bytes()).map_err(|e| e.to_string())?;
+
+    // ---- verified asset store under the shared library
+    let shared_dir = crate::storage::shared_root(app).await?;
+    let assets_root = shared_dir.join("assets");
+    let index_dir = assets_root.join("indexes");
+    tokio::fs::create_dir_all(&index_dir)
+        .await
+        .map_err(|e| e.to_string())?;
+    tokio::fs::write(
+        index_dir.join(format!("{}.json", index_info.id)),
+        &index_text,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    log(
+        "stdout",
+        format!(
+            "Horizon: installing/verifying vanilla assets (index {})…",
+            index_info.id
+        ),
+    );
+    let store = AssetStore::new(&assets_root);
+    let downloader = ParallelDownloader::new(client, 8);
+    let manifest = store
+        .install(&index_info.id, &index, &downloader)
+        .await
+        .map_err(|e| e.to_string())?;
+    log(
+        "stdout",
+        format!(
+            "Horizon: assets ready ({} objects, {})",
+            manifest.entries.len(),
+            assets_root.display()
+        ),
+    );
+
+    // ---- spawn the native engine and stream both pipes
+    let game_dir = instance_dir.join("minecraft");
+    tokio::fs::create_dir_all(&game_dir)
+        .await
+        .map_err(|e| e.to_string())?;
+    log(
+        "stdout",
+        format!(
+            "Horizon: launching {} --assets {} --game-dir {}",
+            horizon,
+            assets_root.display(),
+            game_dir.display()
+        ),
+    );
+    let mut child = tokio::process::Command::new(horizon)
+        .arg("--assets")
+        .arg(&assets_root)
+        .arg("--game-dir")
+        .arg(&game_dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("cannot start Horizon ({horizon}): {e}"))?;
+    let pid = child.id().unwrap_or(0);
+    GAME_PID.store(pid, Ordering::SeqCst);
+    log("stdout", format!("Horizon process ID: {pid}"));
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Horizon stdout pipe unavailable".to_owned())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Horizon stderr pipe unavailable".to_owned())?;
+    let out = tokio::spawn(pump_lines(stdout, app.clone(), "stdout"));
+    let err = tokio::spawn(pump_lines(stderr, app.clone(), "stderr"));
+    let status = child.wait().await.map_err(|e| e.to_string())?;
+    let _ = out.await;
+    let _ = err.await;
+    Ok(status.code().unwrap_or(-1))
+}
+
 async fn run(app: &AppHandle, instance_id: &str, server: Option<String>) -> Result<i32, String> {
     // Prism/Freesm-style diagnostic header: the console drawer starts with the
     // launcher identity line, exactly like "Prism Launcher 8.0 (official)".
@@ -168,6 +328,49 @@ async fn run(app: &AppHandle, instance_id: &str, server: Option<String>) -> Resu
     }
     if settings.min_memory_mb > 0 {
         jvm_args.push(format!("-Xms{}M", settings.min_memory_mb));
+    }
+
+    // Deaf Mode: closed captions must be on before the game boots (Horizon
+    // and JVM launches share the same options.txt)
+    if settings.deaf_mode {
+        match ensure_deaf_subtitles(&instance_dir.join("minecraft")) {
+            Ok(_) => {
+                let _ = app.emit(
+                    "launch-log",
+                    LaunchLine {
+                        stream: "stdout",
+                        line:
+                            "Accessibility: Enforced showSubtitles:true in options.txt (Deaf Mode)"
+                                .to_owned(),
+                    },
+                );
+            }
+            Err(e) => {
+                let _ = app.emit(
+                    "launch-log",
+                    LaunchLine {
+                        stream: "stderr",
+                        line: format!("Accessibility: could not enforce Deaf Mode subtitles: {e}"),
+                    },
+                );
+            }
+        }
+    }
+
+    // Horizon is a native engine: no JVM, no classpath, no loader composition.
+    // It installs the verified asset store and runs its own binary.
+    if meta.loader.as_deref() == Some("horizon") {
+        let started = std::time::Instant::now();
+        let code = run_horizon(app, &instance_dir, &meta, &settings).await?;
+        instances::stamp_last_played(app, instance_id, started.elapsed().as_secs()).await;
+        let _ = app.emit(
+            "launch-log",
+            LaunchLine {
+                stream: "stdout",
+                line: format!("process exited (code {code})"),
+            },
+        );
+        return Ok(code);
     }
 
     // Pump pipeline events into the webview console drawer.
@@ -209,32 +412,6 @@ async fn run(app: &AppHandle, instance_id: &str, server: Option<String>) -> Resu
             }
         })
     };
-
-    // Deaf Mode: closed captions must be on before the game boots
-    if settings.deaf_mode {
-        match ensure_deaf_subtitles(&instance_dir.join("minecraft")) {
-            Ok(_) => {
-                let _ = app.emit(
-                    "launch-log",
-                    LaunchLine {
-                        stream: "stdout",
-                        line:
-                            "Accessibility: Enforced showSubtitles:true in options.txt (Deaf Mode)"
-                                .to_owned(),
-                    },
-                );
-            }
-            Err(e) => {
-                let _ = app.emit(
-                    "launch-log",
-                    LaunchLine {
-                        stream: "stderr",
-                        line: format!("Accessibility: could not enforce Deaf Mode subtitles: {e}"),
-                    },
-                );
-            }
-        }
-    }
 
     // artifacts (libraries/assets) always live in the shared library store,
     // wherever the instance itself is scanned from

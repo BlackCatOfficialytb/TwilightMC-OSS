@@ -5,6 +5,7 @@
   import MrpackInstallModal from './lib/MrpackInstallModal.svelte';
   import NewInstanceModal from './lib/NewInstanceModal.svelte';
   import InstanceContextPanel from './lib/InstanceContextPanel.svelte';
+  import TwpackInstallModal from './lib/TwpackInstallModal.svelte';
   import SettingsPage from './lib/SettingsPage.svelte';
   import AccountManagerModal from './lib/AccountManagerModal.svelte';
   import AccountsPage from './lib/AccountsPage.svelte';
@@ -127,8 +128,9 @@
   // over the whole main column ('instances' | 'settings' | 'edit').
   let currentView = $derived(editFor ? 'edit' : active);
 
-  // ---- global .mrpack drag-and-drop ----
+  // ---- global .mrpack / .twpack drag-and-drop ----
   let mrpackFor = $state(null);
+  let twpackFor = $state(null);
 
   // ---- BareBones gate (Cleanroom launches blocked by the pre-flight check) ----
   let barebonesFor = $state(null);
@@ -438,6 +440,33 @@
     }
   }
 
+  async function exportInstanceTwpack() {
+    if (!selectedInst) return;
+    const save = window.__TAURI__?.dialog?.save;
+    if (!save) {
+      status = 'File picker unavailable in this build.';
+      return;
+    }
+    try {
+      const dest = await save({
+        title: 'Export instance as .twpack',
+        defaultPath: `${selectedInst.name.replace(/[\\/:*?"<>|]/g, '_')}.twpack`,
+        filters: [{ name: 'Twilight pack', extensions: ['twpack'] }],
+      });
+      if (!dest) return;
+      status = 'Packing with 7z…';
+      const path = await api('export_instance_twpack', {
+        instanceId: selectedInst.id,
+        destPath: dest,
+      });
+      status = `Exported to ${path}.`;
+      toast(`Exported ${selectedInst.name} as .twpack.`, 'success');
+    } catch (e) {
+      status = String(e);
+      toast(`Export failed: ${e}`, 'error');
+    }
+  }
+
   async function shortcutInstance() {
     if (!selectedInst) return;
     try {
@@ -651,6 +680,8 @@
               // intercept into the dedicated install modal
               if (modpackOpen) modpackTarget = path;
               else mrpackFor = path;
+            } else if (path.endsWith('.twpack')) {
+              twpackFor = path;
             }
           }),
         );
@@ -1040,6 +1071,7 @@
       onchangegroup={changeGroup}
       onopenfolder={() => openInstanceFolder(selectedInst.id)}
       onexport={exportInstance}
+      ontwpack={exportInstanceTwpack}
       oncopy={copyInstance}
       ondelete={() => requestDelete(selectedInst.id)}
       onshortcut={shortcutInstance}
@@ -1057,6 +1089,19 @@
         await loadInstances();
         selectedId = id;
         status = 'Modpack installed.';
+      }}
+    />
+  {/if}
+
+  {#if twpackFor}
+    <TwpackInstallModal
+      path={twpackFor}
+      onclose={() => (twpackFor = null)}
+      oninstalled={async (id) => {
+        twpackFor = null;
+        await loadInstances();
+        selectedId = id;
+        status = '.twpack imported.';
       }}
     />
   {/if}
@@ -1112,7 +1157,7 @@
             }}
           >
             <span class="text-xl">⤓</span>
-            <span class="mt-2 text-[12px]">Drop an <span class="text-(--text-main)">.mrpack</span> here</span>
+            <span class="mt-2 text-[12px]">Drop an <span class="text-(--text-main)">.mrpack</span> or <span class="text-(--text-main)">.twpack</span> here</span>
             <span class="text-[11px]">or paste its path / URL below</span>
           </div>
           <input

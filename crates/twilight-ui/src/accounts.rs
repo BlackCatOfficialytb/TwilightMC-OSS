@@ -79,6 +79,10 @@ pub(crate) struct Settings {
     /// FOSS flow (Modrinth core mods + manual zip import, no key needed).
     #[serde(default)]
     pub(crate) curseforge_api_key: Option<String>,
+    /// Horizon (native Rust engine) binary; empty = Horizon instances refuse
+    /// to launch with a "set it in Settings" message. Never bundled.
+    #[serde(default)]
+    pub(crate) horizon_path: Option<String>,
 }
 
 async fn app_dir(app: &AppHandle) -> Result<PathBuf, String> {

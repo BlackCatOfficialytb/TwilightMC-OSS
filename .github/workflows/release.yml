@@ -1,11 +1,14 @@
 name: release
 
-# Creating a release on GitHub (stable-* / beta-* / alpha-* style tags per
-# VERSION.md) triggers this workflow, which runs the quality gates and then
-# generates the platform archives and attaches them to the release.
+# Stable channel. Creating a GitHub release whose tag is a plain `vX.Y[.Z]`
+# (or `stable-*`) tag per VERSION.md triggers this workflow, which runs the
+# quality gates and then generates the platform archives and attaches them to
+# the release. The release title convention is `TwilightMC Stable (<tag>)`.
 #
-# The rolling `snapshot` pre-release is excluded: snapshot.yml builds and
-# attaches its archives itself, so this hook would only duplicate it.
+# The Bolide (alpha), Star (beta) and rolling `snapshot` channels are excluded
+# by the job guards below — they never overlap: alpha.yml handles `alpha-*`,
+# beta.yml handles `beta-*`, snapshot.yml builds and attaches the `snapshot`
+# pre-release itself.
 
 on:
   release:
@@ -20,7 +23,7 @@ concurrency:
 
 jobs:
   verify:
-    if: github.event.release.tag_name != 'snapshot'
+    if: ${{ !startsWith(github.event.release.tag_name, 'alpha-') && !startsWith(github.event.release.tag_name, 'beta-') && github.event.release.tag_name != 'snapshot' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -38,7 +41,7 @@ jobs:
       - run: cargo test --workspace
 
   build:
-    if: github.event.release.tag_name != 'snapshot'
+    if: ${{ !startsWith(github.event.release.tag_name, 'alpha-') && !startsWith(github.event.release.tag_name, 'beta-') && github.event.release.tag_name != 'snapshot' }}
     needs: verify
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -309,7 +312,7 @@ jobs:
           if-no-files-found: error
 
   attach:
-    if: github.event.release.tag_name != 'snapshot'
+    if: ${{ !startsWith(github.event.release.tag_name, 'alpha-') && !startsWith(github.event.release.tag_name, 'beta-') && github.event.release.tag_name != 'snapshot' }}
     needs: build
     runs-on: ubuntu-latest
     permissions:

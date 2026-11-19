@@ -125,14 +125,21 @@ validators — so precedence is defined here:
   auto-fetch for custom Yggdrasil accounts, the account manager modal with a
   skinview3d 3D character viewer and skin/cape editors, the Launcher/Client
   mode toggle with the minimal client dashboard and `--server` quick-play
-  joining); Bolide builds carry no API-stability promises (§2).
+  joining). The Milestone-6.5 train adds the Horizon (Rust) engine option with
+  a Settings-managed binary path, Gruvbox Dark/Light presets, and the
+  `.twpack` 7z instance format; Bolide builds carry no API-stability
+  promises (§2).
+- Star (beta) line: `v0.5.0-star.N` once the `beta` branch is cut; Star
+  releases are built from that branch and published as
+  `TwilightMC Star (<tag>)` by `.github/workflows/beta.yml`.
 - Snapshot line: `v0.5.0-ddmmyyyy-<commit>`, built as rolling works land on
   `main`.
 
 ## 7. Supported build targets
 
 Every published build is compiled for the officially tier-supported targets
-below (identical matrices in `snapshot.yml` and `release.yml`):
+below (identical matrices in `snapshot.yml`, `alpha.yml`, `beta.yml` and
+`release.yml`):
 
 | Target                        | Platform                                          |
 |-------------------------------|---------------------------------------------------|

@@ -1892,6 +1892,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
 
 [[package]]
+name = "lzma-rust2"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef1d73c59a56771343712b22ea5615092c612c16ba291c0979e3105dfeec4890"
+
+[[package]]
 name = "markup5ever"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3176,6 +3182,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sevenz-rust2"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e5e465701779cbc6d0d10cf907f175035cfdd50b8d3cb628d7f1f435ef02972f"
+dependencies = [
+ "crc32fast",
+ "js-sys",
+ "lzma-rust2",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4207,6 +4225,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "twilight-pack"
+version = "0.5.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sevenz-rust2",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "twilight-runtime"
 version = "0.5.0"
 dependencies = [
@@ -4241,9 +4269,12 @@ dependencies = [
  "twilight-auth",
  "twilight-cli",
  "twilight-downloader",
+ "twilight-horizon",
  "twilight-launch",
+ "twilight-manifest",
  "twilight-modloader",
  "twilight-modrinth",
+ "twilight-pack",
  "twilight-runtime",
  "twilight-server",
 ]

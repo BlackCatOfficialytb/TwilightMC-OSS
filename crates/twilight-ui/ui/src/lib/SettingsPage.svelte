@@ -102,9 +102,69 @@
     if (Array.isArray(javaCustomPaths)) addedJava = javaCustomPaths;
   });
 
+  // ---- Horizon engine (native Rust binary; never bundled) ----
+  let horizonPath = $state('');
+  let horizonConfigured = $state(false);
+  let horizonMsg = $state('');
+  let horizonError = $state('');
+  let horizonBusy = $state(false);
+
+  async function refreshHorizon() {
+    try {
+      const prefs = await window.__TAURI__.core.invoke('get_horizon_prefs');
+      horizonPath = prefs.horizon_path ?? '';
+      horizonConfigured = !!prefs.configured;
+    } catch (e) {
+      horizonError = String(e);
+    }
+  }
+  refreshHorizon();
+
+  async function browseHorizon() {
+    const open = window.__TAURI__?.dialog?.open;
+    if (!open) {
+      horizonError = 'File picker unavailable in this build.';
+      return;
+    }
+    horizonError = '';
+    horizonMsg = '';
+    try {
+      const picked = await open({
+        multiple: false,
+        title: 'Select the Horizon engine binary',
+        filters: [{ name: 'Executable', extensions: ['exe', ''] }],
+      });
+      if (!picked) return;
+      horizonPath = String(picked);
+      await saveHorizon();
+    } catch (e) {
+      horizonError = String(e);
+    }
+  }
+
+  async function saveHorizon() {
+    horizonBusy = true;
+    horizonError = '';
+    horizonMsg = '';
+    try {
+      await window.__TAURI__.core.invoke('set_horizon_prefs', {
+        horizonPath: horizonPath.trim() || null,
+      });
+      await refreshHorizon();
+      horizonMsg = horizonConfigured
+        ? 'Saved. Horizon instances will launch with this binary.'
+        : 'Cleared. Horizon instances cannot launch until a binary is set.';
+    } catch (e) {
+      horizonError = String(e);
+    } finally {
+      horizonBusy = false;
+    }
+  }
+
   const sections = [
     { id: 'appearance', label: 'Appearance', icon: '🎨' },
     { id: 'java', label: 'Java & Memory', icon: '☕' },
+    { id: 'horizon', label: 'Horizon Engine', icon: '⚙' },
     { id: 'storage', label: 'Folders', icon: '📁' },
     { id: 'apikeys', label: 'API Keys', icon: '🔑' },
     { id: 'accessibility', label: 'Accessibility', icon: '♿' },
@@ -639,6 +699,63 @@
         >
           Save Java settings
         </button>
+      {:else if section === 'horizon'}
+        <h2 class="text-[16px] font-semibold">Horizon Engine</h2>
+        <p class="mt-1 text-[12px] text-(--text-muted)">
+          The native Rust engine. Instances created with the Horizon loader run vanilla worlds
+          without a JVM; the launcher downloads and verifies Mojang's assets into the shared store
+          (<span class="font-mono">assets/objects/…</span> + <span class="font-mono">horizon-assets.json</span>)
+          before every launch. The binary is never bundled — point the launcher at your own build.
+        </p>
+
+        <label
+          class="mt-5 block text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)"
+          for="horizon-path">Horizon binary</label
+        >
+        <div class="mt-1 flex gap-2">
+          <input
+            id="horizon-path"
+            class="h-8 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2.5 font-mono text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+            placeholder="C:\Horizon\horizon.exe (empty = not configured)"
+            bind:value={horizonPath}
+          />
+          <button
+            class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main) disabled:opacity-50"
+            disabled={horizonBusy}
+            onclick={browseHorizon}
+          >
+            {horizonBusy ? 'Checking…' : 'Browse…'}
+          </button>
+          <button
+            class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-50"
+            disabled={horizonBusy}
+            onclick={saveHorizon}
+          >
+            Save
+          </button>
+        </div>
+
+        <p class="mt-2 flex items-center gap-1.5 text-[11px] text-(--text-muted)">
+          <span
+            class="inline-block h-1.5 w-1.5 rounded-full {horizonConfigured ? 'bg-emerald-400' : 'bg-rose-400'}"
+          ></span>
+          {horizonConfigured ? 'Configured' : 'Not configured'}
+          {#if horizonPath && !horizonConfigured}
+            <span class="text-rose-400">(file not found)</span>
+          {/if}
+        </p>
+        {#if horizonMsg}
+          <p class="mt-1 text-[12px] text-(--accent)">{horizonMsg}</p>
+        {/if}
+        {#if horizonError}
+          <p role="alert" class="mt-1 text-[12px] text-rose-400">{horizonError}</p>
+        {/if}
+
+        <p class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-3 text-[11px] leading-relaxed text-(--text-muted)">
+          Launch contract: <span class="font-mono">horizon --assets &lt;store&gt; --game-dir &lt;dir&gt;</span>.
+          Horizon output streams into the console drawer; stopping the engine uses the same
+          process-tree kill as Java instances.
+        </p>
       {:else if section === 'storage'}
         <h2 class="text-[16px] font-semibold">Folders</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">

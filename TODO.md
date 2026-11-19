@@ -91,6 +91,15 @@
   - **CurseForge zip import** — `import_curseforge_pack` parses `manifest.json`, extracts `overrides/**` into the instance `minecraft` dir with a zip-slip guard, writes the marker only for BareBones packs, and resolves manifest `fileID`s through api.curseforge.com **only** when the user configured a key (Settings → API Keys, `curseforge_api_key` persisted locally — never bundled); without a key the files are listed as skipped and the FOSS flow stays intact; 4 hermetic tests (stored-zip builder with real CRC-32, zip-slip, marker rules, manifest rejection)
   - **UI gate dialog** — `BareBonesGateModal` replaces the bare error toast when a launch is blocked: 1-click Modrinth core mods, CurseForge pack zip picker, "Open BareBones Template on CurseForge" ↗ (host-validated `open_external_url`), import report with skip counts and a "Launch 1.12.2" relaunch button
 
+## Milestone 6.5 - Horizon UI exposure & `.twpack` format — complete
+
+- [x] Horizon UI exposure: the `twilight-horizon` native asset engine is surfaced in the desktop UI (engine selection and Horizon-aware instance flow), so the clean-room vanilla 26.3 extractor is reachable without the CLI. The launcher resolves the target version, installs/verifies the asset store (`assets/objects/…` + `horizon-assets.json`), spawns the user-configured binary (`Settings → Horizon Engine`, stored as `horizon_path` in `settings.json`) with `--assets <store> --game-dir <dir>` and streams both pipes into the console drawer; an unset path fails with an explicit pointer to Settings, and the kebab-case `horizon` token is also mapped by the instance grid (`display_loader`)
+- [x] `.twpack` (`.7z`) format: the TwilightMC instance container - a 7-Zip archive carrying `twilight-pack.json` plus the playable payload (`minecraft/` mods, configs, resource and shader packs; logs, crash reports and natives are skipped). Export shells out to `7z a -t7z -mx=7` when the CLI is on `PATH` and falls back to the pure-Rust `sevenz-rust2` encoder; import validates every entry path (zip-slip / traversal rejection) before writing. Available from the instance context panel, the edit page, and the global `.twpack` drag-and-drop target; the existing `.zip` export and `.mrpack` import are unchanged.
+
+> **`TwilightCoreMod` lives in a separate repository** — it is *not* part of this
+> workspace (`E:\TwilightMC-OSS`). Work on the core mod happens in its own repo
+> and is consumed here as an external artifact.
+
 ## Milestone 6 - Server Creator & Minekube Connect (next up)
 
 - [ ] Server Creator: first-class server instances alongside client instances — create Vanilla, Paper, Purpur, Fabric, Forge, NeoForge, Velocity, PumpkinMC (Rust) and SteelMC servers (version + build selection, eula/accept flow, memory and port defaults, start/stop console)
@@ -100,6 +109,7 @@
 ## Theme queue (milestone-polish backlog)
 - [x] Catppuccin Latte, Frappé, Macchiato and Mocha flavors (official `palette.json` hexes from the vendored submodule; canvas = base, surface = surface0, mauve accents)
 - [x] Nord, Tokyo Night and High Contrast presets alongside Twilight Dark/Light — Settings preset grid with swatch cards, topbar quick-toggle stays binary on the Twilight pair, user accent overrides every preset accent, High Contrast adds a yellow `:focus-visible` outline
+- [x] Gruvbox presets (dark and light) - retro-groove palette from the official hexes (`#282828`/`#3c3836`/`#504945`/`#665c54`/`#ebdbb2`/`#a89984` with `#fe8019` orange; light `#fbf1c7`/`#f2e5bc`/`#ebdbb2`/`#d5c4a1`/`#3c3836`/`#7c6f64` with `#d65d0e`), added to the Settings preset grid with the full Orange/Yellow/Green/Aqua/Blue/Purple/Red accent swatches
 
 ## Accessibility Suite (Chế độ Trợ Năng Chuyên Biệt)
 
@@ -113,3 +123,8 @@
 ## Community Inspiration & Special Thanks
 
 - Special thanks to `cheryy_on_top` and `mimoji` from `discord.gg/sabatank` for the hilarious late-night debate about the Minecraft Narrator jumpscare (listening to Lofi gone wrong) that sparked the idea for the Blind & Deaf accessibility modes.
+
+## Upcoming phases (queued)
+
+- [ ] **Optimization & `beta` Branch Transition (`TwilightMC Star`):** memory/performance hardening (startup time, download throughput, renderer/UI responsiveness) and cutting the `beta` branch that Star releases are built from.
+- [ ] **Symlink / Global CAS Storage Engine:** hardlinks/symlinks/junctions deduplicating `libraries/`, `assets/` and shared `mods/` across instances (like `uv`) — one global content-addressed store, per-instance link farms, with a Windows junction fallback when symlink privilege is unavailable.

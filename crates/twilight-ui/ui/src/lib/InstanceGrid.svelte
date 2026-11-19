@@ -53,7 +53,7 @@
       <div class="col-span-full flex flex-col items-center gap-3 rounded border border-dashed border-(--border) bg-(--bg-subtle) p-10 text-center">
         <img src="/logo.png" alt="" draggable="false" class="h-14 w-14 opacity-40" />
         <p class="text-[13px] font-medium">No instances yet</p>
-        <p class="text-[12px] text-(--text-muted)">Create one from a version list, or drop a .mrpack into the wizard.</p>
+        <p class="text-[12px] text-(--text-muted)">Create one from a version list, or drop a .mrpack / .twpack into the wizard.</p>
         <button
           class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
           onclick={() => onadd?.()}

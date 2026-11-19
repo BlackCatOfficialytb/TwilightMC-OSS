@@ -18,6 +18,7 @@
     onchangegroup,
     onopenfolder,
     onexport,
+    ontwpack,
     oncopy,
     ondelete,
     onshortcut,
@@ -273,6 +274,13 @@
       onclick={onexport}
     >
       <LauncherIcon name="export" size={13} /> Export
+    </button>
+    <button
+      class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+      title="Export this instance as a compressed .twpack (7z)"
+      onclick={ontwpack}
+    >
+      <LauncherIcon name="package" size={13} /> Export .twpack
     </button>
     <button
       class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"

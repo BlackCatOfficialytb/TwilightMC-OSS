@@ -20,6 +20,7 @@
 
   const LOADERS = [
     { id: '', label: 'None' },
+    { id: 'horizon', label: 'Horizon (Rust)' },
     { id: 'neoforge', label: 'NeoForge' },
     { id: 'forge', label: 'Forge' },
     { id: 'cleanroom', label: 'Cleanroom' },
@@ -34,6 +35,7 @@
   // created yet.
   const SUPPORTED_LOADERS = [
     '',
+    'horizon',
     'fabric',
     'quilt',
     'forge',
@@ -513,6 +515,14 @@
             </p>
           {:else if !loader}
             <p class="mt-2 text-[11px] text-(--text-muted)">No mod loader is selected.</p>
+          {/if}
+
+          {#if loader === 'horizon'}
+            <p class="mt-2 rounded border border-(--border) bg-(--bg-subtle) p-2 text-[11px] leading-relaxed text-(--text-muted)">
+              Native Rust engine: launches vanilla worlds without Java, using the verified asset
+              store. Set the Horizon binary path in <strong>Settings → Horizon Engine</strong> before
+              the first launch.
+            </p>
           {/if}
 
           {#if loader === 'cleanroom'}

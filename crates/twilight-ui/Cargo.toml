@@ -20,7 +20,10 @@ twilight-runtime = { path = "../twilight-runtime" }
 twilight-downloader = { path = "../twilight-downloader" }
 twilight-cli = { path = "../twilight-cli" }
 twilight-launch = { path = "../twilight-launch" }
+twilight-manifest = { path = "../twilight-manifest" }
 twilight-modloader = { path = "../twilight-modloader" }
 twilight-modrinth = { path = "../twilight-modrinth" }
 twilight-server = { path = "../twilight-server" }
+twilight-horizon = { path = "../twilight-horizon" }
+twilight-pack = { path = "../twilight-pack" }
 reqwest = { workspace = true }

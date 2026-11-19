@@ -170,6 +170,30 @@ html.preset-tokyo-night {
   --accent-2: #ff9e64; /* orange */
 }
 
+html.preset-gruvbox-dark {
+  --bg-1: #282828; /* bg0 */
+  --bg-2: #3c3836; /* bg1 */
+  --bg-3: #504945; /* bg2 */
+  --border-1: #665c54; /* bg3 */
+  --fg-1: #ebdbb2; /* fg1 */
+  --fg-2: #a89984; /* fg4 */
+  --accent-1: var(--user-accent, #fe8019); /* bright orange */
+  --accent-1-hover: color-mix(in srgb, var(--accent-1) 85%, #ffffff);
+  --accent-2: #fabd2f; /* bright yellow */
+}
+
+html.preset-gruvbox-light {
+  --bg-1: #fbf1c7; /* bg0 */
+  --bg-2: #f2e5bc; /* bg1 */
+  --bg-3: #ebdbb2; /* bg2 */
+  --border-1: #d5c4a1; /* bg3 */
+  --fg-1: #3c3836; /* fg1 */
+  --fg-2: #7c6f64; /* fg4 */
+  --accent-1: var(--user-accent, #d65d0e); /* deep orange */
+  --accent-1-hover: color-mix(in srgb, var(--accent-1) 85%, #000000);
+  --accent-2: #b57614; /* deep yellow */
+}
+
 html.preset-high-contrast {
   --bg-1: #000000;
   --bg-2: #0a0a0a;

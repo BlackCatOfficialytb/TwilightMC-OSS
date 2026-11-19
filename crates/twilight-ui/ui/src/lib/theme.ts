@@ -104,6 +104,31 @@ function catppuccinAccents(flavor) {
   return CATPPUCCIN_ACCENTS[flavor] ?? [];
 }
 
+/**
+ * Gruvbox's full seven-hue accent ramp, in the order the palette documents
+ * them. The dark theme takes the bright variants, the light theme the deep
+ * ones — each stays legible on its own ground.
+ */
+const GRUVBOX_DARK_ACCENTS = [
+  { name: 'Orange', hex: '#fe8019' },
+  { name: 'Yellow', hex: '#fabd2f' },
+  { name: 'Green', hex: '#b8bb26' },
+  { name: 'Aqua', hex: '#8ec07c' },
+  { name: 'Blue', hex: '#83a598' },
+  { name: 'Purple', hex: '#d3869b' },
+  { name: 'Red', hex: '#fb4934' },
+];
+
+const GRUVBOX_LIGHT_ACCENTS = [
+  { name: 'Orange', hex: '#d65d0e' },
+  { name: 'Yellow', hex: '#b57614' },
+  { name: 'Green', hex: '#79740e' },
+  { name: 'Aqua', hex: '#427b58' },
+  { name: 'Blue', hex: '#076678' },
+  { name: 'Purple', hex: '#8f3f71' },
+  { name: 'Red', hex: '#9d0006' },
+];
+
 /** Normalizes `#rgb` / `#rrggbb` to lowercase `#rrggbb`; null when invalid. */
 export function normalizeHex(input) {
   let hex = input.trim().replace(/^#/, '');
@@ -268,6 +293,24 @@ export const THEME_PRESETS = [
       { name: 'Orange', hex: '#ff9e64' },
       { name: 'Red', hex: '#f7768e' },
     ],
+  },
+  {
+    id: 'gruvbox-dark',
+    label: 'Gruvbox Dark',
+    dark: true,
+    cls: 'preset-gruvbox-dark',
+    swatch: ['#282828', '#3c3836', '#fe8019'],
+    accent: '#fe8019',
+    suggested: GRUVBOX_DARK_ACCENTS,
+  },
+  {
+    id: 'gruvbox-light',
+    label: 'Gruvbox Light',
+    dark: false,
+    cls: 'preset-gruvbox-light',
+    swatch: ['#fbf1c7', '#f2e5bc', '#d65d0e'],
+    accent: '#d65d0e',
+    suggested: GRUVBOX_LIGHT_ACCENTS,
   },
   {
     id: 'high-contrast',

@@ -34,6 +34,45 @@
   let iconKey = $state(instance.icon_key ?? '');
   let iconNotice = $state('');
 
+  // ---- export state ----
+  let exportNotice = $state('');
+  let exportBusy = $state(false);
+
+  async function exportAs(kind) {
+    const save = window.__TAURI__?.dialog?.save;
+    if (!save) {
+      exportNotice = 'File picker unavailable in this build.';
+      return;
+    }
+    exportBusy = true;
+    exportNotice = '';
+    try {
+      const base = instance.name.replace(/[\\/:*?"<>|]/g, '_');
+      const ext = kind === 'twpack' ? 'twpack' : 'zip';
+      const dest = await save({
+        title: kind === 'twpack' ? 'Export instance as .twpack' : 'Export instance as .zip',
+        defaultPath: `${base}.${ext}`,
+        filters: [
+          {
+            name: kind === 'twpack' ? 'Twilight pack' : 'Zip archive',
+            extensions: [ext],
+          },
+        ],
+      });
+      if (!dest) return;
+      const cmd = kind === 'twpack' ? 'export_instance_twpack' : 'export_instance_zip';
+      const path = await window.__TAURI__.core.invoke(cmd, {
+        instanceId: instance.id,
+        destPath: dest,
+      });
+      exportNotice = `Exported to ${path}.`;
+    } catch (e) {
+      exportNotice = String(e);
+    } finally {
+      exportBusy = false;
+    }
+  }
+
   // ---- rename state ----
   let draftName = $state(instance.name);
   let nameNotice = $state('');
@@ -619,6 +658,36 @@
           {/if}
         </div>
 
+        <div class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px]">
+          <div class="font-medium">Export</div>
+          <p class="mt-1 text-[11px] text-(--text-muted)">
+            A <span class="font-mono">.zip</span> keeps every file verbatim. A
+            <span class="font-mono">.twpack</span> is a 7z pack of mods, configs, resource and shader
+            packs — logs, crash reports and natives are skipped.
+          </p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main) disabled:opacity-50"
+              disabled={exportBusy}
+              onclick={() => exportAs('zip')}
+            >
+              Export .zip
+            </button>
+            <button
+              type="button"
+              class="rounded border border-(--accent) bg-(--accent)/15 px-3 py-1.5 text-[12px] font-medium text-(--accent) hover:bg-(--accent)/25 disabled:opacity-50"
+              disabled={exportBusy}
+              onclick={() => exportAs('twpack')}
+            >
+              Export .twpack
+            </button>
+          </div>
+          {#if exportNotice}
+            <p class="mt-2 break-all text-[11px] text-(--text-muted)">{exportNotice}</p>
+          {/if}
+        </div>
+
         {#if instance.loader_type === 'Cleanroom'}
           <div
             role="alert"
@@ -632,7 +701,7 @@
           </div>
         {/if}
 
-        <p class="mt-3 text-[11px] text-(--text-muted)">Renaming, loader switching and per-instance java overrides land in a later milestone; use the context panel for groups, copies and exports.</p>
+        <p class="mt-3 text-[11px] text-(--text-muted)">Renaming, loader switching and per-instance java overrides land in a later milestone; use the context panel for groups and copies.</p>
       {/if}
     </div>
   </div>

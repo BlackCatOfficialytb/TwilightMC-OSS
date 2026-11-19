@@ -160,6 +160,46 @@ pub async fn set_curseforge_api_key(app: AppHandle, api_key: String) -> Result<(
     save_settings(&settings_path(&app).await?, &settings).await
 }
 
+/// Persisted Horizon (native Rust engine) location shown in Settings.
+#[derive(Debug, Clone, Serialize)]
+pub struct HorizonPrefs {
+    /// Explicit Horizon binary; `None` = not configured.
+    pub horizon_path: Option<String>,
+    /// True when the configured path points at an existing file.
+    pub configured: bool,
+}
+
+#[tauri::command]
+pub async fn get_horizon_prefs(app: AppHandle) -> Result<HorizonPrefs, String> {
+    let settings = load_settings(&settings_path(&app).await?).await;
+    let path = settings.horizon_path.filter(|p| !p.trim().is_empty());
+    let configured = path
+        .as_deref()
+        .is_some_and(|p| std::path::Path::new(p).is_file());
+    Ok(HorizonPrefs {
+        horizon_path: path,
+        configured,
+    })
+}
+
+/// Persists (or clears, with an empty path) the Horizon binary location.
+/// A non-empty path must point at an existing file so a typo cannot silently
+/// break every Horizon launch later.
+#[tauri::command]
+pub async fn set_horizon_prefs(app: AppHandle, horizon_path: Option<String>) -> Result<(), String> {
+    let cleaned = horizon_path
+        .map(|p| p.trim().to_owned())
+        .filter(|p| !p.is_empty());
+    if let Some(path) = &cleaned
+        && !std::path::Path::new(path).is_file()
+    {
+        return Err(format!("Horizon binary not found: {path}"));
+    }
+    let mut settings = load_settings(&settings_path(&app).await?).await;
+    settings.horizon_path = cleaned;
+    save_settings(&settings_path(&app).await?, &settings).await
+}
+
 /// Persisted accessibility flags shown in the Settings page.
 #[derive(Debug, Clone, Serialize)]
 pub struct AccessibilityConfig {

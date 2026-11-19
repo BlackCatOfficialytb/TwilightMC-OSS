@@ -14,6 +14,7 @@ mod prefs;
 mod servers;
 mod shortcut;
 mod storage;
+mod twpack;
 mod versions;
 
 // Single source of truth for the header badge; falls out of the workspace
@@ -198,6 +199,9 @@ fn main() {
             shortcut::create_desktop_shortcut,
             shortcut::get_startup_launch,
             export::export_instance_zip,
+            twpack::export_instance_twpack,
+            twpack::inspect_twpack,
+            twpack::install_twpack,
             mods::list_instance_mods,
             mods::toggle_mod,
             mods::delete_mod,
@@ -219,6 +223,8 @@ fn main() {
             prefs::set_accessibility_config,
             prefs::get_curseforge_api_key,
             prefs::set_curseforge_api_key,
+            prefs::get_horizon_prefs,
+            prefs::set_horizon_prefs,
             storage::get_storage,
             storage::set_folder_dir,
             storage::clean_staging
