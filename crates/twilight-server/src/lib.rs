@@ -142,4 +142,18 @@ pub struct ServerMeta {
     /// Unix seconds of creation.
     #[serde(default)]
     pub created: u64,
+    /// Custom JVM flags (space-separated, inserted before the memory args).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jvm_flags: Option<String>,
+    /// Explicit java executable; none = auto-discovery per game version.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub java_path: Option<String>,
+    /// Auto-accept the Minecraft EULA on start; false leaves `eula.txt` at
+    /// `eula=false` so the first boot asks for acceptance.
+    #[serde(default = "default_true")]
+    pub auto_eula: bool,
+}
+
+fn default_true() -> bool {
+    true
 }

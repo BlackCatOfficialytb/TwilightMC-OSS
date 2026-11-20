@@ -27,3 +27,4 @@ twilight-server = { path = "../twilight-server" }
 twilight-horizon = { path = "../twilight-horizon" }
 twilight-pack = { path = "../twilight-pack" }
 reqwest = { workspace = true }
+sysinfo = "0.40.3"

@@ -51,6 +51,10 @@ pub struct StoragePaths {
     pub downloads_dir: String,
     /// True while staging uses the OS temp default.
     pub is_default_staging: bool,
+    /// Server manager root (one subdir per created server).
+    pub servers_dir: String,
+    /// True while `servers_dir` is the default app-data subdirectory.
+    pub is_default_servers: bool,
 }
 
 // ---- vendor launchers -------------------------------------------------------
@@ -256,6 +260,7 @@ pub async fn get_storage(app: AppHandle) -> Result<StoragePaths, String> {
     let (icons, icons_default) = folder(&app_data, settings.icons_dir.as_deref(), "icons");
     let (java, java_default) = folder(&app_data, settings.java_dir.as_deref(), "java");
     let (skins, skins_default) = folder(&app_data, settings.skins_dir.as_deref(), "skins");
+    let (servers, servers_default) = folder(&app_data, settings.servers_dir.as_deref(), "servers");
     let downloads_configured = configured(&settings.downloads_dir);
 
     // lazy creation: only the app-data defaults materialize on demand; a
@@ -275,6 +280,9 @@ pub async fn get_storage(app: AppHandle) -> Result<StoragePaths, String> {
     }
     if skins_default {
         let _ = tokio::fs::create_dir_all(&skins).await;
+    }
+    if servers_default {
+        let _ = tokio::fs::create_dir_all(&servers).await;
     }
     let _ = tokio::fs::create_dir_all(&app_data).await;
 
@@ -304,12 +312,14 @@ pub async fn get_storage(app: AppHandle) -> Result<StoragePaths, String> {
             .filter(|d| !d.is_empty())
             .unwrap_or_default(),
         is_default_staging: !downloads_configured,
+        servers_dir: servers.display().to_string(),
+        is_default_servers: servers_default,
     })
 }
 
 /// Persists one Folders-page directory. `kind` is one of `shared`,
-/// `instances`, `versions`, `mods`, `icons`, `java`, `skins`, `downloads`;
-/// `None`/empty resets that folder to its default.
+/// `instances`, `versions`, `mods`, `icons`, `java`, `skins`, `downloads`,
+/// `servers`; `None`/empty resets that folder to its default.
 #[tauri::command]
 pub async fn set_folder_dir(
     app: AppHandle,
@@ -327,6 +337,7 @@ pub async fn set_folder_dir(
         "java" => settings.java_dir = value,
         "skins" => settings.skins_dir = value,
         "downloads" => settings.downloads_dir = value,
+        "servers" => settings.servers_dir = value,
         _ => return Err(format!("unknown folder {kind}")),
     }
     save_settings(&settings_path(&app).await?, &settings).await
@@ -399,6 +410,7 @@ mod tests {
             "icons",
             "java",
             "skins",
+            "servers",
         ] {
             assert_eq!(
                 folder(base, None, name),

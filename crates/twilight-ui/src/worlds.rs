@@ -51,7 +51,7 @@ fn validate_world_name(name: &str) -> Result<(), String> {
 }
 
 /// `ddmmyyyy_HHMMSS` stamp of an epoch (UTC — the launcher stores no timezone).
-fn timestamp_label(secs: i64) -> String {
+pub(crate) fn timestamp_label(secs: i64) -> String {
     let (h, m, s) = {
         let rem = secs.rem_euclid(86_400);
         (rem / 3600, (rem % 3600) / 60, rem % 60)

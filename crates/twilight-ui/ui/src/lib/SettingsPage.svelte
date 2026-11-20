@@ -288,7 +288,7 @@
   }
 
   // ---- folders (the former Storage & Staging page) ----
-  // Eight configurable roots; blank inputs keep the default subdirectory
+  // Nine configurable roots; blank inputs keep the default subdirectory
   // under the app data folder (`io.github.blackcatofficialytb.twilightmc`).
   // Labels and hints come from the settings-folder-* messages.
   const FOLDERS = [
@@ -300,6 +300,7 @@
     { key: 'java' },
     { key: 'skins' },
     { key: 'downloads' },
+    { key: 'servers' },
   ];
 
   // Per-row editable text; blank = default. Re-seeded from the backend
@@ -318,6 +319,7 @@
       skins: storage.is_default_skins ? '' : storage.skins_dir,
       // the backend only reports the configured override here (empty = default)
       downloads: storage.downloads_dir || '',
+      servers: storage.is_default_servers ? '' : storage.servers_dir,
     };
   });
 

@@ -75,9 +75,34 @@ pub(crate) fn write_zip(dir: &Path, dest: &Path) -> Result<(), String> {
     let mut paths = Vec::new();
     collect(dir, dir, 0, &mut paths)?;
     paths.sort_by(|a, b| a.1.cmp(&b.1));
+    write_zip_paths(dest, paths)
+}
+
+/// Zips the given `rel` entries (files or whole directories) under `base`
+/// into `dest` — used by the server backup manager (world + configs).
+pub(crate) fn write_zip_entries(base: &Path, rels: &[&str], dest: &Path) -> Result<(), String> {
+    let mut paths = Vec::new();
+    for rel in rels {
+        let rel = rel.trim().trim_matches('/');
+        if rel.is_empty() {
+            continue;
+        }
+        let abs = base.join(rel);
+        if abs.is_dir() {
+            collect(base, &abs, 0, &mut paths)?;
+        } else if abs.is_file() {
+            paths.push((abs, rel.replace('\\', "/")));
+        }
+    }
+    paths.sort_by(|a, b| a.1.cmp(&b.1));
+    write_zip_paths(dest, paths)
+}
+
+/// Writes the STORE-method zip for pre-collected `(absolute, relative)` pairs.
+fn write_zip_paths(dest: &Path, paths: Vec<(PathBuf, String)>) -> Result<(), String> {
     if paths.len() > u16::MAX as usize {
         return Err(format!(
-            "instance has {} entries; archives over 65535 need zip64 (unsupported)",
+            "directory has {} entries; archives over 65535 need zip64 (unsupported)",
             paths.len()
         ));
     }
@@ -208,7 +233,7 @@ pub(crate) fn write_zip(dir: &Path, dest: &Path) -> Result<(), String> {
         cd.extend_from_slice(name_bytes);
     }
     if written + cd.len() as u64 > u32::MAX as u64 {
-        return Err("instance archive exceeds the 4 GiB zip limit (zip64 unsupported)".into());
+        return Err("archive exceeds the 4 GiB zip limit (zip64 unsupported)".into());
     }
     out.write_all(&cd).map_err(io_err)?;
 

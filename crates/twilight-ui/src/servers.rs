@@ -9,12 +9,17 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 use serde::Serialize;
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use tauri::{AppHandle, Emitter, Manager};
 use twilight_downloader::{DownloadRequest, ParallelDownloader};
+use twilight_modrinth::extract_archive;
 use twilight_runtime::{JavaInstallation, discover_java, select_best_java};
 use twilight_server::{ServerMeta, ServerSoftware, config, engine, process};
 
+use crate::accounts::{load_settings, settings_path};
+use crate::export::write_zip_entries;
 use crate::instances::slugify;
+use crate::worlds::timestamp_label;
 
 // ---- event payloads ----
 
@@ -41,6 +46,8 @@ struct ConnectEvent {
 struct Running {
     sender: tokio::sync::mpsc::UnboundedSender<String>,
     pid: u32,
+    /// Spawn time (unix seconds) for the uptime metric.
+    started_at: u64,
 }
 
 static RUNNING: OnceLock<Mutex<HashMap<String, Running>>> = OnceLock::new();
@@ -98,6 +105,9 @@ pub struct ServerRow {
     pub offline_mode: bool,
     pub connect: bool,
     pub created: u64,
+    pub jvm_flags: Option<String>,
+    pub java_path: Option<String>,
+    pub auto_eula: bool,
     pub state: String,
 }
 
@@ -114,16 +124,30 @@ fn to_row(meta: &ServerMeta, id: &str, state: String) -> ServerRow {
         offline_mode: meta.offline_mode,
         connect: meta.connect,
         created: meta.created,
+        jvm_flags: meta.jvm_flags.clone(),
+        java_path: meta.java_path.clone(),
+        auto_eula: meta.auto_eula,
         state,
     }
 }
 
 async fn servers_root(app: &AppHandle) -> Result<PathBuf, String> {
-    let root = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("servers");
+    // The Folders-page override wins; blank keeps `<app_data>/servers`.
+    let configured = load_settings(&settings_path(app).await?).await.servers_dir;
+    let root = configured
+        .as_deref()
+        .map(str::trim)
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            app.path()
+                .app_data_dir()
+                .map(|dir| dir.join("servers"))
+                .unwrap_or_default()
+        });
+    if root.as_os_str().is_empty() {
+        return Err("cannot resolve the servers directory".to_owned());
+    }
     tokio::fs::create_dir_all(&root)
         .await
         .map_err(|e| e.to_string())?;
@@ -423,6 +447,41 @@ async fn find_java(software: &ServerSoftware, version: &str) -> Result<String, S
     Ok(java.executable.to_string_lossy().to_string())
 }
 
+/// The launch java: the Startup-page override when set, else auto-discovery.
+async fn resolve_java(meta: &ServerMeta) -> Result<String, String> {
+    if let Some(path) = meta
+        .java_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    {
+        return Ok(path.to_owned());
+    }
+    find_java(&meta.software, &meta.version).await
+}
+
+/// Space-split custom JVM flags.
+fn jvm_flag_list(flags: &Option<String>) -> Vec<String> {
+    flags
+        .as_deref()
+        .unwrap_or_default()
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// `java <custom flags> -Xms… -Xmx… -jar <jar> nogui`; custom flags ride
+/// ahead of the memory args (Pterodactyl-style ordering).
+fn java_launch_args(meta: &ServerMeta, jar: &str) -> Vec<String> {
+    let mut args = jvm_flag_list(&meta.jvm_flags);
+    args.extend(process::java_args(
+        meta.min_memory_mb,
+        meta.max_memory_mb,
+        jar,
+    ));
+    args
+}
+
 // ---- connect / authme plugins ----
 
 async fn fetch_release(release_url: &str) -> Result<serde_json::Value, String> {
@@ -609,9 +668,20 @@ async fn start_server_inner(app: &AppHandle, id: &str) -> Result<(), String> {
                 .map_err(|e| e.to_string())?;
         }
     } else {
-        tokio::fs::write(dir.join("eula.txt"), config::eula_txt())
+        let eula = dir.join("eula.txt");
+        if meta.auto_eula {
+            tokio::fs::write(&eula, config::eula_txt())
+                .await
+                .map_err(|e| e.to_string())?;
+        } else if !eula.is_file() {
+            // acceptance stays pending; the server stops until accepted
+            tokio::fs::write(
+                &eula,
+                "# Pending acceptance (Minecraft EULA: https://aka.ms/MinecraftEULA)\neula=false\n",
+            )
             .await
             .map_err(|e| e.to_string())?;
+        }
         let props_path = dir.join("server.properties");
         if !props_path.is_file() {
             tokio::fs::write(&props_path, config::default_server_properties(meta.port))
@@ -659,17 +729,21 @@ async fn start_server_inner(app: &AppHandle, id: &str) -> Result<(), String> {
             cwd: dir.clone(),
         }
     } else if meta.software == ServerSoftware::NeoForge {
-        // Installer-based launch: memory flags ride user_jvm_args.txt; the
-        // parsed script line carries classpath/module args.
-        if meta.min_memory_mb > 0 || meta.max_memory_mb > 0 {
-            tokio::fs::write(
-                dir.join("user_jvm_args.txt"),
-                config::user_jvm_args_txt(meta.min_memory_mb, meta.max_memory_mb),
-            )
-            .await
-            .map_err(|e| e.to_string())?;
+        // Installer-based launch: memory + custom flags ride
+        // user_jvm_args.txt; the parsed script line carries classpath/module
+        // args.
+        let flags = jvm_flag_list(&meta.jvm_flags);
+        if meta.min_memory_mb > 0 || meta.max_memory_mb > 0 || !flags.is_empty() {
+            let mut content = config::user_jvm_args_txt(meta.min_memory_mb, meta.max_memory_mb);
+            for flag in &flags {
+                content.push_str(flag);
+                content.push('\n');
+            }
+            tokio::fs::write(dir.join("user_jvm_args.txt"), content)
+                .await
+                .map_err(|e| e.to_string())?;
         }
-        let java = match find_java(&meta.software, &meta.version).await {
+        let java = match resolve_java(&meta).await {
             Ok(j) => j,
             Err(e) => {
                 set_state(app, id, "Stopped");
@@ -689,8 +763,7 @@ async fn start_server_inner(app: &AppHandle, id: &str) -> Result<(), String> {
             cwd: dir.clone(),
         }
     } else {
-        let java = find_java(&meta.software, &meta.version).await;
-        let java = match java {
+        let java = match resolve_java(&meta).await {
             Ok(j) => j,
             Err(e) => {
                 set_state(app, id, "Stopped");
@@ -699,11 +772,7 @@ async fn start_server_inner(app: &AppHandle, id: &str) -> Result<(), String> {
         };
         process::ServerSpawn {
             program: java,
-            args: process::java_args(
-                meta.min_memory_mb,
-                meta.max_memory_mb,
-                &artifact.to_string_lossy(),
-            ),
+            args: java_launch_args(&meta, &artifact.to_string_lossy()),
             cwd: dir.clone(),
         }
     };
@@ -711,10 +780,14 @@ async fn start_server_inner(app: &AppHandle, id: &str) -> Result<(), String> {
     match process::spawn(&spawn_spec, emit).await {
         Ok((child, sender)) => {
             let pid = child.id().unwrap_or(0);
-            running()
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(id.to_owned(), Running { sender, pid });
+            running().lock().unwrap_or_else(|e| e.into_inner()).insert(
+                id.to_owned(),
+                Running {
+                    sender,
+                    pid,
+                    started_at: now_secs(),
+                },
+            );
             watch_exit(app, id, child);
         }
         Err(e) => {
@@ -799,6 +872,9 @@ pub async fn create_server(app: AppHandle, config: CreateServer) -> Result<Serve
         offline_mode: config.offline_mode,
         connect: config.connect,
         created: now_secs(),
+        jvm_flags: None,
+        java_path: None,
+        auto_eula: true,
     };
     write_meta(&dir, &meta).await?;
     Ok(to_row(&meta, &id, "Stopped".into()))
@@ -1206,4 +1282,805 @@ pub async fn fetch_server_versions(software: String) -> Result<Vec<String>, Stri
 #[tauri::command]
 pub fn get_cpu_target() -> String {
     engine::host_cpu_target().to_owned()
+}
+
+// ---- live metrics ----
+
+#[derive(Clone, Serialize)]
+pub struct ServerMetrics {
+    pub state: String,
+    pub cpu_percent: f32,
+    pub memory_bytes: u64,
+    pub max_memory_bytes: u64,
+    pub disk_bytes: u64,
+    pub uptime_secs: u64,
+}
+
+/// Cached sysinfo handle: kept alive between calls so CPU% is a real delta
+/// between refreshes, never a zero first sample.
+static SYS: OnceLock<Mutex<Option<System>>> = OnceLock::new();
+
+fn sys_cache() -> &'static Mutex<Option<System>> {
+    SYS.get_or_init(Mutex::default)
+}
+
+/// One sysinfo refresh of exactly the server PID: `(cpu_percent, bytes)`.
+fn pid_cpu_memory(pid: u32) -> (f32, u64) {
+    if pid == 0 {
+        return (0.0, 0);
+    }
+    let Ok(mut guard) = sys_cache().lock() else {
+        return (0.0, 0);
+    };
+    if guard.is_none() {
+        *guard = System::new().ok();
+    }
+    let Some(system) = guard.as_mut() else {
+        return (0.0, 0);
+    };
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+        true,
+        ProcessRefreshKind::nothing().with_cpu().with_memory(),
+    );
+    match system.process(Pid::from_u32(pid)) {
+        Some(proc) => (proc.cpu_usage(), proc.memory()),
+        None => (0.0, 0),
+    }
+}
+
+/// Recursive on-disk size of `path` (depth-guarded against symlink cycles).
+fn dir_size(path: &Path, depth: usize) -> u64 {
+    if depth > 32 {
+        return 0;
+    }
+    let mut total = 0;
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.is_dir() {
+            total += dir_size(&p, depth + 1);
+        } else if let Ok(meta) = entry.metadata()
+            && meta.is_file()
+        {
+            total += meta.len();
+        }
+    }
+    total
+}
+
+/// ponytail: 30s TTL cache for the disk metric — a full tree walk every 2s
+/// poll would thrash large worlds; upgrade to a watcher when needed.
+static DISK_CACHE: OnceLock<Mutex<(PathBuf, u64, std::time::Instant)>> = OnceLock::new();
+
+const DISK_TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+fn cached_disk_size(path: PathBuf) -> u64 {
+    let Ok(mut guard) = DISK_CACHE
+        .get_or_init(|| Mutex::new((PathBuf::new(), 0, std::time::Instant::now())))
+        .lock()
+    else {
+        return 0;
+    };
+    if guard.0 == path && guard.2.elapsed() < DISK_TTL {
+        return guard.1;
+    }
+    *guard = (path.clone(), 0, std::time::Instant::now());
+    let size = dir_size(&path, 0);
+    guard.1 = size;
+    guard.2 = std::time::Instant::now();
+    size
+}
+
+/// Live process + disk metrics for one server.
+#[tauri::command]
+pub async fn get_server_metrics(app: AppHandle, id: String) -> Result<ServerMetrics, String> {
+    let dir = server_dir(&app, &id).await?;
+    let meta = read_meta(&dir).await?;
+    let state = state_of(&id);
+    let (cpu_percent, memory_bytes, uptime_secs) = if state == "Running" || state == "Starting" {
+        let entry = running()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&id)
+            .map(|r| (r.pid, r.started_at));
+        match entry {
+            Some((pid, started_at)) => {
+                let (cpu, mem) = pid_cpu_memory(pid);
+                (cpu, mem, now_secs().saturating_sub(started_at))
+            }
+            None => (0.0, 0, 0),
+        }
+    } else {
+        (0.0, 0, 0)
+    };
+    let disk_bytes = tokio::task::spawn_blocking(move || cached_disk_size(dir.clone()))
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(ServerMetrics {
+        state,
+        cpu_percent,
+        memory_bytes,
+        max_memory_bytes: u64::from(meta.max_memory_mb) * 1024 * 1024,
+        disk_bytes,
+        uptime_secs,
+    })
+}
+
+// ---- file manager ----
+
+#[derive(Clone, Serialize)]
+pub struct FileEntry {
+    pub name: String,
+    pub is_dir: bool,
+    pub size: u64,
+    pub modified: u64,
+    pub readonly: bool,
+}
+
+/// Resolves `rel` inside `root` with a strict traversal guard: every `..`
+/// component is rejected lexically, then the target (or its deepest existing
+/// ancestor) is canonicalized and verified to stay inside the canonicalized
+/// root — so symlinked entries cannot escape either.
+fn resolve_in_root(root: &Path, rel: &str) -> Result<PathBuf, String> {
+    let trimmed = rel.trim().trim_matches(|c| c == '/' || c == '\\');
+    if trimmed.is_empty() {
+        return Ok(root.to_path_buf());
+    }
+    let mut target = root.to_path_buf();
+    for comp in trimmed.split(['/', '\\']) {
+        if comp.is_empty() || comp == "." {
+            continue;
+        }
+        if comp == ".." || comp.contains(':') || Path::new(comp).is_absolute() {
+            return Err(format!("path traversal rejected: {rel:?}"));
+        }
+        target = target.join(comp);
+    }
+    let canon_root = root.canonicalize().map_err(|e| e.to_string())?;
+    let mut popped: Vec<String> = Vec::new();
+    let mut probe = target;
+    let canonical = loop {
+        match probe.canonicalize() {
+            Ok(existing) => {
+                let mut full = existing;
+                for part in popped.iter().rev() {
+                    full = full.join(part);
+                }
+                break full;
+            }
+            Err(_) => {
+                let name = probe
+                    .file_name()
+                    .ok_or_else(|| format!("path escapes the server directory: {rel:?}"))?
+                    .to_string_lossy()
+                    .to_string();
+                popped.push(name);
+                probe = probe
+                    .parent()
+                    .ok_or_else(|| format!("path escapes the server directory: {rel:?}"))?
+                    .to_path_buf();
+            }
+        }
+    };
+    if !canonical.starts_with(&canon_root) {
+        return Err(format!("path escapes the server directory: {rel:?}"));
+    }
+    Ok(canonical)
+}
+
+fn modified_secs(meta: &std::fs::Metadata) -> u64 {
+    meta.modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|delta| delta.as_secs())
+        .unwrap_or_default()
+}
+
+/// Editor-eligible text configs (`.properties`, `.toml`, `.yml`, `.json`,
+/// `.txt`) plus logs and common config sidecars.
+fn editable_rel(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .as_deref(),
+        Some(
+            "properties"
+                | "toml"
+                | "yml"
+                | "yaml"
+                | "json"
+                | "txt"
+                | "log"
+                | "cfg"
+                | "conf"
+                | "mcmeta"
+        )
+    )
+}
+
+/// Upper bound for the built-in text editor.
+const MAX_TEXT_FILE_BYTES: u64 = 2 * 1024 * 1024;
+
+#[tauri::command]
+pub async fn list_server_files(
+    app: AppHandle,
+    id: String,
+    rel_path: String,
+) -> Result<Vec<FileEntry>, String> {
+    let dir = server_dir(&app, &id).await?;
+    let target = resolve_in_root(&dir, &rel_path)?;
+    let mut out = Vec::new();
+    let mut entries = tokio::fs::read_dir(&target)
+        .await
+        .map_err(|e| e.to_string())?;
+    while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
+        let Ok(meta) = entry.metadata().await else {
+            continue;
+        };
+        out.push(FileEntry {
+            name: entry.file_name().to_string_lossy().into_owned(),
+            is_dir: meta.is_dir(),
+            size: if meta.is_file() { meta.len() } else { 0 },
+            modified: modified_secs(&meta),
+            readonly: meta.permissions().readonly(),
+        });
+    }
+    // directories first, then case-insensitive names
+    out.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    Ok(out)
+}
+
+#[tauri::command]
+pub async fn read_server_text_file(
+    app: AppHandle,
+    id: String,
+    rel_path: String,
+) -> Result<String, String> {
+    let dir = server_dir(&app, &id).await?;
+    let target = resolve_in_root(&dir, &rel_path)?;
+    if !target.is_file() {
+        return Err(format!("not a file: {rel_path}"));
+    }
+    if !editable_rel(&target) {
+        return Err(format!("{rel_path} is not an editable text file"));
+    }
+    let size = tokio::fs::metadata(&target)
+        .await
+        .map_err(|e| e.to_string())?
+        .len();
+    if size > MAX_TEXT_FILE_BYTES {
+        return Err(format!(
+            "file is larger than the {} MiB editor limit",
+            MAX_TEXT_FILE_BYTES / 1024 / 1024
+        ));
+    }
+    let bytes = tokio::fs::read(&target).await.map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+#[tauri::command]
+pub async fn write_server_text_file(
+    app: AppHandle,
+    id: String,
+    rel_path: String,
+    content: String,
+) -> Result<(), String> {
+    let dir = server_dir(&app, &id).await?;
+    let target = resolve_in_root(&dir, &rel_path)?;
+    if !editable_rel(&target) {
+        return Err(format!("{rel_path} is not an editable text file"));
+    }
+    if let Some(parent) = target.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    tokio::fs::write(&target, content)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn create_server_dir(app: AppHandle, id: String, rel_path: String) -> Result<(), String> {
+    let dir = server_dir(&app, &id).await?;
+    let target = resolve_in_root(&dir, &rel_path)?;
+    tokio::fs::create_dir_all(&target)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_server_entry(
+    app: AppHandle,
+    id: String,
+    rel_path: String,
+) -> Result<(), String> {
+    let dir = server_dir(&app, &id).await?;
+    let target = resolve_in_root(&dir, &rel_path)?;
+    if target == dir {
+        return Err("cannot delete the server root".to_owned());
+    }
+    if target.is_dir() {
+        tokio::fs::remove_dir_all(&target)
+            .await
+            .map_err(|e| e.to_string())
+    } else if target.is_file() {
+        tokio::fs::remove_file(&target)
+            .await
+            .map_err(|e| e.to_string())
+    } else {
+        Err(format!("no such entry: {rel_path}"))
+    }
+}
+
+#[tauri::command]
+pub async fn rename_server_entry(
+    app: AppHandle,
+    id: String,
+    old_rel: String,
+    new_rel: String,
+) -> Result<(), String> {
+    let dir = server_dir(&app, &id).await?;
+    let from = resolve_in_root(&dir, &old_rel)?;
+    let to = resolve_in_root(&dir, &new_rel)?;
+    if to.exists() {
+        return Err(format!("target already exists: {new_rel}"));
+    }
+    if let Some(parent) = to.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    tokio::fs::rename(&from, &to)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Copies external files (jars, mods, plugins) into one server directory.
+#[tauri::command]
+pub async fn upload_server_files(
+    app: AppHandle,
+    id: String,
+    rel_dir: String,
+    source_paths: Vec<String>,
+) -> Result<u32, String> {
+    let dir = server_dir(&app, &id).await?;
+    let target = resolve_in_root(&dir, &rel_dir)?;
+    if !target.is_dir() {
+        return Err(format!("not a directory: {rel_dir}"));
+    }
+    let mut copied = 0u32;
+    for source in &source_paths {
+        let source = PathBuf::from(source.trim());
+        let Some(name) = source.file_name().map(|n| n.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        if !source.is_file() {
+            continue;
+        }
+        tokio::fs::copy(&source, target.join(name))
+            .await
+            .map_err(|e| e.to_string())?;
+        copied += 1;
+    }
+    Ok(copied)
+}
+
+/// Zips the selected entries into `<server>/archives/<stamp>.zip`; returns
+/// the archive's server-relative path.
+#[tauri::command]
+pub async fn archive_server_entries(
+    app: AppHandle,
+    id: String,
+    rel_paths: Vec<String>,
+) -> Result<String, String> {
+    let dir = server_dir(&app, &id).await?;
+    if rel_paths.is_empty() {
+        return Err("select at least one entry to archive".to_owned());
+    }
+    for rel in &rel_paths {
+        resolve_in_root(&dir, rel)?;
+    }
+    let archives = dir.join("archives");
+    tokio::fs::create_dir_all(&archives)
+        .await
+        .map_err(|e| e.to_string())?;
+    let name = format!("archive-{}.zip", timestamp_label(now_secs() as i64));
+    let dest = archives.join(&name);
+    let base = dir.clone();
+    let rels: Vec<String> = rel_paths.iter().map(|r| r.replace('\\', "/")).collect();
+    let out = dest.clone();
+    tokio::task::spawn_blocking(move || {
+        let refs: Vec<&str> = rels.iter().map(String::as_str).collect();
+        write_zip_entries(&base, &refs, &out)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    Ok(dest
+        .strip_prefix(&dir)
+        .unwrap_or(&dest)
+        .to_string_lossy()
+        .into_owned())
+}
+
+// ---- startup & runtime configuration ----
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerStartup {
+    pub min_memory_mb: u32,
+    pub max_memory_mb: u32,
+    pub port: u16,
+    pub jvm_flags: Option<String>,
+    pub java_path: Option<String>,
+    pub auto_eula: bool,
+}
+
+/// Persists the Startup-page fields; blocked while the server runs.
+#[tauri::command]
+pub async fn set_server_startup(
+    app: AppHandle,
+    id: String,
+    config: ServerStartup,
+) -> Result<(), String> {
+    if running()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains_key(&id)
+    {
+        return Err("stop the server before editing its startup".to_owned());
+    }
+    if config.port == 0 {
+        return Err("port must not be 0".to_owned());
+    }
+    if let Some(java) = config
+        .java_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        && !Path::new(java).is_file()
+    {
+        return Err(format!("java runtime not found: {java}"));
+    }
+    let dir = server_dir(&app, &id).await?;
+    let mut meta = read_meta(&dir).await?;
+    let port_changed = meta.port != config.port;
+    meta.min_memory_mb = config.min_memory_mb;
+    meta.max_memory_mb = config.max_memory_mb;
+    meta.port = config.port;
+    meta.jvm_flags = config
+        .jvm_flags
+        .map(|f| f.trim().to_owned())
+        .filter(|f| !f.is_empty());
+    meta.java_path = config
+        .java_path
+        .map(|p| p.trim().to_owned())
+        .filter(|p| !p.is_empty());
+    meta.auto_eula = config.auto_eula;
+    write_meta(&dir, &meta).await?;
+    if port_changed {
+        // keep the runtime config (server.properties / Pumpkin.toml) in sync
+        let properties = HashMap::from([("server-port".to_owned(), config.port.to_string())]);
+        update_server_properties(app, id, properties).await?;
+    }
+    Ok(())
+}
+
+// ---- backups ----
+
+#[derive(Clone, Serialize)]
+pub struct ServerBackup {
+    pub name: String,
+    pub size: u64,
+    pub created: u64,
+}
+
+fn backups_dir(dir: &Path) -> PathBuf {
+    dir.join("backups")
+}
+
+/// Everything a backup preserves: the world plus the identity configs.
+const BACKUP_ROOTS: &[&str] = &[
+    "world",
+    "server.properties",
+    "Pumpkin.toml",
+    "eula.txt",
+    "server.json",
+];
+
+/// Timestamped backups of `world/` + configs, newest first.
+#[tauri::command]
+pub async fn list_server_backups(app: AppHandle, id: String) -> Result<Vec<ServerBackup>, String> {
+    let dir = server_dir(&app, &id).await?;
+    let mut out = Vec::new();
+    let Ok(mut entries) = tokio::fs::read_dir(backups_dir(&dir)).await else {
+        return Ok(out);
+    };
+    while let Some(entry) = entries.next_entry().await.map_err(|e| e.to_string())? {
+        let Ok(meta) = entry.metadata().await else {
+            continue;
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.to_ascii_lowercase().ends_with(".zip") {
+            continue;
+        }
+        out.push(ServerBackup {
+            name,
+            size: meta.len(),
+            created: modified_secs(&meta),
+        });
+    }
+    out.sort_by_key(|b| std::cmp::Reverse(b.created));
+    Ok(out)
+}
+
+/// Archives `world/` + configs into `<server>/backups/<stamp>.zip`.
+#[tauri::command]
+pub async fn create_server_backup(app: AppHandle, id: String) -> Result<ServerBackup, String> {
+    let dir = server_dir(&app, &id).await?;
+    let existing: Vec<String> = BACKUP_ROOTS
+        .iter()
+        .filter(|rel| dir.join(rel).exists())
+        .map(|rel| rel.to_string())
+        .collect();
+    if existing.is_empty() {
+        return Err("nothing to back up yet (no world or configs)".to_owned());
+    }
+    tokio::fs::create_dir_all(backups_dir(&dir))
+        .await
+        .map_err(|e| e.to_string())?;
+    let name = format!("backup-{}.zip", timestamp_label(now_secs() as i64));
+    let dest = backups_dir(&dir).join(&name);
+    let base = dir.clone();
+    let out = dest.clone();
+    tokio::task::spawn_blocking(move || {
+        let refs: Vec<&str> = existing.iter().map(String::as_str).collect();
+        write_zip_entries(&base, &refs, &out)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let size = tokio::fs::metadata(&dest)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
+    Ok(ServerBackup {
+        name,
+        size,
+        created: now_secs(),
+    })
+}
+
+/// Destination for one archive entry inside `dir`, or `None` when the entry
+/// escapes the server folder (zip-slip guard).
+fn dest_for_entry(dir: &Path, name: &str) -> Option<PathBuf> {
+    if name.is_empty() || name.ends_with('/') {
+        return None;
+    }
+    let mut dest = dir.to_path_buf();
+    for component in Path::new(name).components() {
+        match component {
+            std::path::Component::Normal(part) => dest.push(part),
+            // `..`, absolute roots, Windows prefixes: never leave the dir
+            _ => return None,
+        }
+    }
+    Some(dest)
+}
+
+/// Restores one backup zip over the server directory (blocked while
+/// running); stale files not in the archive survive.
+#[tauri::command]
+pub async fn restore_server_backup(
+    app: AppHandle,
+    id: String,
+    backup_name: String,
+) -> Result<(), String> {
+    validate_server_id(&backup_name)?;
+    if running()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains_key(&id)
+    {
+        return Err("stop the server before restoring a backup".to_owned());
+    }
+    let dir = server_dir(&app, &id).await?;
+    let path = backups_dir(&dir).join(&backup_name);
+    if !path.is_file() {
+        return Err(format!("backup {backup_name:?} does not exist"));
+    }
+    let bytes = tokio::fs::read(&path).await.map_err(|e| e.to_string())?;
+    let entries = extract_archive(&bytes).map_err(|e| e.to_string())?;
+    for (name, content) in entries {
+        // ponytail: directory entries are skipped — parents are created by
+        // the file writes; empty dirs never occur in these archives
+        if name.ends_with('/') {
+            continue;
+        }
+        let Some(dest) = dest_for_entry(&dir, &name) else {
+            return Err(format!(
+                "archive entry {name:?} escapes the server directory"
+            ));
+        };
+        if let Some(parent) = dest.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        tokio::fs::write(&dest, &content)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Deletes one backup zip.
+#[tauri::command]
+pub async fn delete_server_backup(
+    app: AppHandle,
+    id: String,
+    backup_name: String,
+) -> Result<(), String> {
+    validate_server_id(&backup_name)?;
+    let dir = server_dir(&app, &id).await?;
+    let path = backups_dir(&dir).join(&backup_name);
+    if !path.is_file() {
+        return Err(format!("backup {backup_name:?} does not exist"));
+    }
+    tokio::fs::remove_file(&path)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod server_manager_tests {
+    use super::*;
+
+    fn temp_root(tag: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "twi-srv-mgr-test-{tag}-{}-{}",
+            std::process::id(),
+            now_secs() * 1000
+                + u64::from(
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .subsec_millis()
+                )
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
+    #[test]
+    fn traversal_is_rejected_lexically() {
+        let root = temp_root("traversal");
+        std::fs::create_dir_all(root.join("world")).unwrap();
+        std::fs::write(root.join("server.properties"), "x=1\n").unwrap();
+        // simple escape
+        assert!(resolve_in_root(&root, "../evil").is_err());
+        // sneaky escape through a nested path
+        assert!(resolve_in_root(&root, "world/../../evil").is_err());
+        // absolute roots and drive prefixes
+        let canon_root = root.canonicalize().unwrap();
+        assert!(resolve_in_root(&root, "/etc/passwd").is_ok_and(|p| p.starts_with(&canon_root))); // leading slash is relative
+        assert!(resolve_in_root(&root, "C:/evil").is_err());
+        // valid nesting resolves and stays inside
+        let ok = resolve_in_root(&root, "world/region").unwrap();
+        assert!(ok.starts_with(&canon_root));
+        // empty resolves to the root itself
+        assert_eq!(resolve_in_root(&root, "").unwrap(), root);
+        assert_eq!(resolve_in_root(&root, "  ").unwrap(), root);
+    }
+
+    #[test]
+    fn canonicalization_blocks_symlink_escapes() {
+        // unix-only: symlink creation needs no elevation there
+        #[cfg(unix)]
+        {
+            let root = temp_root("symlink");
+            let outside = temp_root("outside");
+            std::fs::write(outside.join("secret.txt"), "x").unwrap();
+            std::os::unix::fs::symlink(&outside, root.join("link")).unwrap();
+            // the symlink resolves outside the root: rejected
+            assert!(resolve_in_root(&root, "link/secret.txt").is_err());
+            // a nested dir that does not exist yet resolves fine
+            assert!(resolve_in_root(&root, "missing/dir/file.txt").is_ok());
+        }
+    }
+
+    #[test]
+    fn java_args_carry_flags_then_memory_then_jar() {
+        let meta = ServerMeta {
+            software: ServerSoftware::Paper,
+            version: "1.21.4".into(),
+            loader_version: None,
+            port: 25565,
+            min_memory_mb: 1024,
+            max_memory_mb: 4096,
+            offline_mode: false,
+            connect: false,
+            created: 0,
+            jvm_flags: Some("-XX:+UseG1GC -Dfile.encoding=UTF8".into()),
+            java_path: None,
+            auto_eula: true,
+        };
+        let args = java_launch_args(&meta, "server.jar");
+        assert_eq!(
+            args,
+            vec![
+                "-XX:+UseG1GC",
+                "-Dfile.encoding=UTF8",
+                "-Xms1024M",
+                "-Xmx4096M",
+                "-jar",
+                "server.jar",
+                "nogui"
+            ]
+        );
+        // no flags / no memory: the plain java line
+        let mut plain = meta.clone();
+        plain.jvm_flags = None;
+        plain.min_memory_mb = 0;
+        plain.max_memory_mb = 0;
+        assert_eq!(
+            java_launch_args(&plain, "server.jar"),
+            vec!["-jar", "server.jar", "nogui"]
+        );
+        // whitespace-only flags are none
+        assert!(jvm_flag_list(&Some("   ".into())).is_empty());
+        assert!(jvm_flag_list(&None).is_empty());
+    }
+
+    #[test]
+    fn editable_extensions_match_text_configs_only() {
+        for name in [
+            "server.properties",
+            "Pumpkin.toml",
+            "config.yml",
+            "config.yaml",
+            "settings.json",
+            "README.txt",
+            "latest.log",
+            "proxy.cfg",
+            "proxy.conf",
+            "pack.mcmeta",
+        ] {
+            assert!(editable_rel(Path::new(name)), "{name} should be editable");
+        }
+        for name in [
+            "server.jar",
+            "pumpkin.exe",
+            "world.dat",
+            "image.png",
+            "noext",
+        ] {
+            assert!(
+                !editable_rel(Path::new(name)),
+                "{name} must not be editable"
+            );
+        }
+    }
+
+    #[test]
+    fn backup_entry_guard_blocks_zip_slip() {
+        let root = temp_root("backup-guard");
+        assert!(dest_for_entry(&root, "world/level.dat").is_some());
+        assert!(dest_for_entry(&root, "server.properties").is_some());
+        assert!(dest_for_entry(&root, "../steal.dat").is_none());
+        assert!(dest_for_entry(&root, "/abs.dat").is_none());
+        assert!(dest_for_entry(&root, "C:/abs.dat").is_none());
+        assert!(dest_for_entry(&root, "dir/").is_none());
+        assert!(dest_for_entry(&root, "").is_none());
+    }
 }
