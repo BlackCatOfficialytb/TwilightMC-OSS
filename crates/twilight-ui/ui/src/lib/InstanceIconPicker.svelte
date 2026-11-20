@@ -9,6 +9,7 @@
   import { onMount } from 'svelte';
   import { pushOverlay, popOverlay } from './overlays.js';
   import { ICON_PICKER_TWEMOJI, PRISM_INSTANCE_ICONS } from './twemoji.js';
+  import { t } from './i18n.svelte.ts';
 
   let {
     currentKey = '',
@@ -19,9 +20,9 @@
   } = $props();
 
   const TABS = [
-    { id: 'prism', label: 'Prism / Freesm' },
-    { id: 'twemoji', label: 'Twemoji' },
-    { id: 'custom', label: 'Custom image…' },
+    { id: 'prism', label: 'icons-tab-prism' },
+    { id: 'twemoji', label: 'icons-tab-twemoji' },
+    { id: 'custom', label: 'icons-tab-custom' },
   ];
 
   let tab = $state('prism');
@@ -73,27 +74,27 @@
   class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
   role="dialog"
   aria-modal="true"
-  aria-label="Choose an instance icon"
+  aria-label={t('icons-choose-aria')}
 >
   <div
     class="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-(--border) bg-(--bg-surface) shadow-xl"
   >
     <header class="flex items-center justify-between border-b border-(--border) px-4 py-3">
-      <h2 class="text-sm font-semibold">Instance icon</h2>
+      <h2 class="text-sm font-semibold">{t('icons-title')}</h2>
       <button
         type="button"
         class="rounded px-2 py-1 text-xs text-(--text-muted) hover:bg-(--bg-subtle)"
         onclick={onclose}
-        aria-label="Close icon picker"
+        aria-label={t('icons-close-aria')}
       >
-        Close
+        {t('icons-close')}
       </button>
     </header>
 
     <div
       class="flex gap-1 border-b border-(--border) px-3 py-2"
       role="tablist"
-      aria-label="Icon sources"
+      aria-label={t('icons-sources-aria')}
     >
       {#each TABS as entry (entry.id)}
         <button
@@ -105,7 +106,7 @@
             : 'text-(--text-muted) hover:bg-(--bg-subtle)'}"
           onclick={() => (tab = entry.id)}
         >
-          {entry.label}
+          {t(entry.label)}
         </button>
       {/each}
     </div>
@@ -156,8 +157,7 @@
       {:else}
         <div class="flex flex-col items-start gap-3">
           <p class="text-[12px] text-(--text-muted)">
-            Pick a PNG, JPG, SVG, WEBP or ICO from disk. The file is copied into the instance
-            directory, so the instance stays self-contained.
+            {t('icons-custom-desc')}
           </p>
           {#if currentPath}
             <div class="flex items-center gap-2 rounded border border-(--border) p-2">
@@ -176,7 +176,7 @@
             onclick={pickCustom}
             disabled={busy}
           >
-            {busy ? 'Copying…' : 'Choose file…'}
+            {busy ? t('icons-copying') : t('icons-choose-file')}
           </button>
           {#if error}
             <p role="alert" class="text-[11px] text-red-400">{error}</p>

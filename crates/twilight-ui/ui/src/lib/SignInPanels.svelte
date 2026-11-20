@@ -6,6 +6,7 @@
   // flow, and any other custom Yggdrasil server. Owns its own state and
   // polling timers; results bubble up through `onrefresh`.
   import { onDestroy } from 'svelte';
+  import { t } from './i18n.svelte.ts';
 
   let { onrefresh } = $props();
 
@@ -47,7 +48,7 @@
 
   function invoke(cmd, args) {
     const core = window.__TAURI__?.core;
-    if (!core) return Promise.reject(new Error('Tauri backend unavailable in this preview.'));
+    if (!core) return Promise.reject(new Error(t('backend-unavailable')));
     return core.invoke(cmd, args);
   }
 
@@ -290,14 +291,14 @@
   async function pickTexture(target) {
     const open = window.__TAURI__?.dialog?.open;
     if (!open) {
-      error = 'File picker unavailable in this build.';
+      error = t('status-file-picker-unavailable');
       return;
     }
     try {
       const picked = await open({
         multiple: false,
-        title: target === 'skin' ? 'Choose a skin PNG' : 'Choose a cape PNG',
-        filters: [{ name: 'PNG textures', extensions: ['png'] }],
+        title: target === 'skin' ? t('choose-skin') : t('choose-cape'),
+        filters: [{ name: t('filter-png-textures'), extensions: ['png'] }],
       });
       if (!picked) return;
       const path = String(picked);
@@ -312,7 +313,7 @@
 
 <!-- tab bar -->
 <div class="flex gap-1 border-b border-(--border) px-3 pt-2.5">
-  {#each [['offline', 'Offline'], ['elyby', 'Ely.by'], ['microsoft', 'Microsoft'], ['custom', 'Custom']] as [id, label]}
+  {#each [['offline', 'signin-tab-offline'], ['elyby', 'signin-tab-elyby'], ['microsoft', 'signin-tab-microsoft'], ['custom', 'signin-tab-custom']] as [id, label]}
     <button
       class="rounded-t px-3 py-1.5 text-[12px] font-medium {tab === id
         ? 'bg-(--bg-subtle) text-(--text-main)'
@@ -322,7 +323,7 @@
         error = '';
       }}
     >
-      {label}
+      {label ? t(label) : ''}
     </button>
   {/each}
 </div>
@@ -332,23 +333,23 @@
     <form class="flex items-center gap-2 p-4" onsubmit={addOffline}>
       <input
         class="h-8 flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-        placeholder="Offline username (3-16 letters, digits, _)"
+        placeholder={t('signin-offline-placeholder')}
         bind:value={offlineName}
       />
       <button
         type="submit"
         class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
-        disabled={!offlineName.trim() || busy}>Add</button
+        disabled={!offlineName.trim() || busy}>{t('signin-add')}</button
       >
     </form>
     {#if offlineUuid}
       <div class="px-4 pb-4 -mt-1">
-        <span class="text-[11px] text-(--text-muted)">JVM UUID v3 preview:</span>
+        <span class="text-[11px] text-(--text-muted)">{t('signin-offline-uuid')}</span>
         <code class="ml-1 select-all text-[11px] text-(--accent)">{offlineUuid}</code>
       </div>
     {/if}
     <p class="px-4 pb-4 text-[11px] text-(--text-muted)">
-      No password, no validation — the game runs as this username with a deterministic offline UUID.
+      {t('signin-offline-note')}
     </p>
   {:else if tab === 'microsoft'}
     <div class="p-4">
@@ -356,18 +357,18 @@
         <button
           class="w-full rounded bg-(--accent) px-3 py-2 text-[13px] font-semibold text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
           disabled={busy}
-          onclick={startMicrosoft}>Sign in with Microsoft</button
+          onclick={startMicrosoft}>{t('signin-ms')}</button
         >
         <p class="mt-2 text-[11px] text-(--text-muted)">
-          A device code opens the sign-in at microsoft.com/link — no password ever enters the launcher.
+          {t('signin-ms-note')}
         </p>
       {:else if msState === 'requesting'}
-        <p class="py-6 text-center text-[12px] text-(--text-muted)">Requesting a device code…</p>
+        <p class="py-6 text-center text-[12px] text-(--text-muted)">{t('signin-requesting')}</p>
       {:else if msState === 'code' && deviceCode}
         <div class="flex flex-col items-center gap-2 py-2">
-          <span class="text-[11px] text-(--text-muted)">Enter this code at</span>
+          <span class="text-[11px] text-(--text-muted)">{t('signin-enter-code')}</span>
           <code class="select-all rounded bg-(--bg-subtle) px-2 py-1 text-[12px]">{deviceCode.verification_uri}</code>
-          <span class="mt-2 text-[11px] text-(--text-muted)">Device code</span>
+          <span class="mt-2 text-[11px] text-(--text-muted)">{t('signin-device-code')}</span>
           <code class="select-all rounded bg-(--bg-subtle) px-3 py-1.5 text-xl font-bold tracking-widest text-(--accent)">
             {deviceCode.user_code}
           </code>
@@ -375,25 +376,25 @@
             <button
               class="rounded border border-(--border) px-3 py-1 text-[12px] hover:bg-(--bg-subtle)"
               onclick={copyUserCode}>
-              {copied ? 'Copied ✓' : 'Copy code'}
+              {copied ? t('signin-copied') + ' ✓' : t('signin-copy-code')}
             </button>
             <button class="rounded border border-(--border) px-3 py-1 text-[12px] hover:bg-(--bg-subtle)" onclick={startMicrosoft}>
-              Restart
+              {t('signin-restart')}
             </button>
           </div>
           <p class="mt-3 flex items-center gap-2 text-[11px] text-(--text-muted)">
             <span class="inline-block h-2 w-2 animate-pulse rounded-full bg-(--accent)"></span>
-            Waiting for you to finish signing in…
+            {t('signin-waiting')}
           </p>
         </div>
       {:else if msState === 'signedin'}
-        <p class="py-6 text-center text-[12px] font-medium text-(--accent)">Signed in — account saved.</p>
+        <p class="py-6 text-center text-[12px] font-medium text-(--accent)">{t('signin-signed-in')}</p>
         <button
           class="mx-auto block rounded border border-(--border) px-3 py-1.5 text-[12px] hover:bg-(--bg-subtle)"
           onclick={() => {
             msState = 'idle';
             msError = '';
-          }}>Sign in another account</button
+          }}>{t('signin-another')}</button
         >
       {/if}
       {#if msError}
@@ -404,7 +405,7 @@
     <div class="flex flex-col gap-3 p-4">
       <div class="flex items-center gap-2">
         <span class="flex h-6 w-6 items-center justify-center rounded bg-[#3a7bd5]/15 text-[11px] font-bold text-[#3a7bd5]">e</span>
-        <span class="text-[12px] font-medium">Sign in with Ely.by</span>
+        <span class="text-[12px] font-medium">{t('signin-ely-title')}</span>
       </div>
 
       {#if elyMode === 'idle'}
@@ -413,26 +414,25 @@
           disabled={elyBrowserBusy}
           onclick={elyBrowser}
         >
-          {elyBrowserBusy ? 'Waiting for the browser…' : 'Sign in with browser (recommended)'}
+          {elyBrowserBusy ? t('signin-ely-waiting') : t('signin-ely-browser')}
         </button>
         <p class="text-[11px] text-(--text-muted)">
-          Opens <code class="text-(--accent)">account.ely.by</code> in your browser and returns
-          automatically — no password ever enters the launcher.
+          {t('signin-ely-browser-note')}
         </p>
         <button
           class="w-full rounded border border-(--border) px-3 py-1.5 text-[12px] hover:bg-(--bg-subtle) disabled:opacity-40"
           disabled={elyBrowserBusy}
           onclick={startElyDevice}
         >
-          Use a device code instead
+          {t('signin-ely-device')}
         </button>
       {:else if elyMode === 'requesting'}
-        <p class="py-6 text-center text-[12px] text-(--text-muted)">Requesting a device code…</p>
+        <p class="py-6 text-center text-[12px] text-(--text-muted)">{t('signin-requesting')}</p>
       {:else if elyMode === 'code' && elyDevice}
         <div class="flex flex-col items-center gap-2 py-2">
-          <span class="text-[11px] text-(--text-muted)">Enter this code at</span>
+          <span class="text-[11px] text-(--text-muted)">{t('signin-enter-code')}</span>
           <code class="select-all rounded bg-(--bg-subtle) px-2 py-1 text-[12px]">{elyDevice.verification_uri}</code>
-          <span class="mt-2 text-[11px] text-(--text-muted)">Device code</span>
+          <span class="mt-2 text-[11px] text-(--text-muted)">{t('signin-device-code')}</span>
           <code class="select-all rounded bg-(--bg-subtle) px-3 py-1.5 text-xl font-bold tracking-widest text-(--accent)">
             {elyDevice.user_code}
           </code>
@@ -440,32 +440,32 @@
             <button
               class="rounded border border-(--border) px-3 py-1 text-[12px] hover:bg-(--bg-subtle)"
               onclick={copyElyCode}>
-              {elyCopied ? 'Copied ✓' : 'Copy code'}
+              {elyCopied ? t('signin-copied') + ' ✓' : t('signin-copy-code')}
             </button>
             {#if elyDevice.verification_uri || elyDevice.verification_uri_complete}
               <button
                 class="rounded border border-(--border) px-3 py-1 text-[12px] hover:bg-(--bg-subtle)"
                 onclick={openElyVerification}>
-                Open page
+                {t('signin-ely-open')}
               </button>
             {/if}
             <button class="rounded border border-(--border) px-3 py-1 text-[12px] hover:bg-(--bg-subtle)" onclick={startElyDevice}>
-              Restart
+              {t('signin-restart')}
             </button>
           </div>
           <p class="mt-3 flex items-center gap-2 text-[11px] text-(--text-muted)">
             <span class="inline-block h-2 w-2 animate-pulse rounded-full bg-(--accent)"></span>
-            Waiting for you to finish signing in…
+            {t('signin-waiting')}
           </p>
         </div>
       {:else if elyMode === 'signedin'}
-        <p class="py-6 text-center text-[12px] font-medium text-(--accent)">Signed in — account saved.</p>
+        <p class="py-6 text-center text-[12px] font-medium text-(--accent)">{t('signin-signed-in')}</p>
         <button
           class="mx-auto block rounded border border-(--border) px-3 py-1.5 text-[12px] hover:bg-(--bg-subtle)"
           onclick={() => {
             elyMode = 'idle';
             elyError = '';
-          }}>Sign in another account</button
+          }}>{t('signin-another')}</button
         >
       {/if}
 
@@ -474,26 +474,26 @@
       {/if}
       {#if elyDone && elyMode === 'idle'}
         <p class="rounded bg-(--accent)/10 px-3 py-2 text-[12px] font-medium text-(--accent)">
-          Signed in — the Ely.by account is saved and active.
+          {t('signin-ely-done')}
         </p>
       {/if}
 
       <!-- classic credentials: collapsed fallback -->
       <details class="rounded border border-(--border)">
         <summary class="cursor-pointer select-none px-3 py-2 text-[11px] font-medium text-(--text-muted) hover:text-(--text-main)">
-          Classic login (fallback) — username &amp; password
+          {t('signin-ely-classic')}
         </summary>
         <form class="flex flex-col gap-3 p-3 pt-1" onsubmit={addElyby}>
           <input
             class="h-8 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-            placeholder="Ely.by username or email"
+            placeholder={t('signin-username-email')}
             autocomplete="username"
             bind:value={elyUser}
           />
           <input
             type="password"
             class="h-8 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-            placeholder="Password"
+            placeholder={t('signin-password')}
             autocomplete="current-password"
             bind:value={elyPassword}
           />
@@ -502,44 +502,41 @@
             class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
             disabled={!elyUser.trim() || !elyPassword || elyBusy}
           >
-            {elyBusy ? 'Signing in…' : 'Sign in'}
+            {elyBusy ? t('signin-signing-in') : t('signin-sign-in')}
           </button>
         </form>
       </details>
       <p class="text-[11px] text-(--text-muted)">
-        Your skin, cape and UUID come straight from Ely.by. Launches inject the SHA-256 verified
-        authlib-injector agent aimed at
-        <code class="text-(--accent)">authserver.ely.by</code> — no URL to configure.
+        {t('signin-ely-classic-note')}
       </p>
     </div>
   {:else if tab === 'custom'}
     <form class="flex flex-col gap-3 p-4" onsubmit={addCustom}>
       <input
         class="h-8 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-        placeholder="Server URL (authlib-injector)"
+        placeholder={t('signin-custom-url')}
         bind:value={customUrl}
       />
       <input
         class="h-8 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-        placeholder="Username (3-16 letters, digits, _)"
+        placeholder={t('signin-custom-username')}
         bind:value={customName}
       />
       <div class="grid grid-cols-2 gap-2">
         <button type="button" class="rounded border border-(--border) px-2.5 py-1.5 text-[11px] text-left hover:bg-(--bg-subtle)" onclick={() => pickTexture('skin')}>
-          Skin PNG: <span class="truncate text-(--accent)">{customSkin || 'none'}</span>
+          {t('signin-skin-png')} <span class="truncate text-(--accent)">{customSkin || t('accounts-none')}</span>
         </button>
         <button type="button" class="rounded border border-(--border) px-2.5 py-1.5 text-[11px] text-left hover:bg-(--bg-subtle)" onclick={() => pickTexture('cape')}>
-          Cape PNG: <span class="truncate text-(--accent)">{customCape || 'none'}</span>
+          {t('signin-cape-png')} <span class="truncate text-(--accent)">{customCape || t('accounts-none')}</span>
         </button>
       </div>
       <button
         type="submit"
         class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
-        disabled={!customName.trim() || !customUrl.trim() || busy}>Add custom account</button
+        disabled={!customName.trim() || !customUrl.trim() || busy}>{t('signin-add-custom')}</button
       >
       <p class="text-[11px] text-(--text-muted)">
-        The launcher auto-fetches the SHA-256 verified authlib-injector agent into
-        <code class="text-(--accent)">&lt;shared&gt;/libraries/</code> on the next launch of this account.
+        {t('signin-custom-note')}
       </p>
     </form>
   {/if}

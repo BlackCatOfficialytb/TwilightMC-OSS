@@ -4,6 +4,7 @@
   // instance named by the input. The parent owns grid refresh + selection.
   import { onMount } from 'svelte';
   import { pushOverlay, popOverlay } from './overlays.js';
+  import { t } from './i18n.svelte.ts';
 
   let { path, onclose, oninstalled } = $props();
 
@@ -20,8 +21,8 @@
   }
 
   function loaderLabel() {
-    if (!info || !info.loader) return 'Vanilla';
-    return info.loader[0].toUpperCase() + info.loader.slice(1) + (info.loader_version ? ` ${info.loader_version}` : ' (latest stable)');
+    if (!info || !info.loader) return t('install-vanilla');
+    return info.loader[0].toUpperCase() + info.loader.slice(1) + (info.loader_version ? ` ${info.loader_version}` : ` ${t('install-latest-stable')}`);
   }
 
   onMount(async () => {
@@ -61,7 +62,7 @@
 >
   <div class="w-[480px] overflow-hidden rounded-lg border border-(--border) bg-(--bg-surface) shadow-2xl">
     <div class="flex items-center justify-between border-b border-(--border) px-4 py-3">
-      <h3 class="text-sm font-semibold">Install Modpack</h3>
+      <h3 class="text-sm font-semibold">{t('install-title')}</h3>
       <button class="text-(--text-muted) hover:text-(--text-main)" onclick={() => onclose?.()}>✕</button>
     </div>
 
@@ -73,7 +74,7 @@
         <p class="mt-2 break-all text-[11px] text-(--text-muted)" title={path}>{path}</p>
       </div>
     {:else if !info}
-      <div class="p-6 text-center text-[12px] text-(--text-muted)">Reading pack…</div>
+      <div class="p-6 text-center text-[12px] text-(--text-muted)">{t('install-reading')}</div>
     {:else}
       <div class="p-4">
         <div class="rounded border border-(--border) bg-(--bg-subtle) p-3">
@@ -88,8 +89,8 @@
             <span class="rounded bg-(--bg-canvas) px-2 py-0.5 text-[10px] font-medium text-(--text-muted)">
               {loaderLabel()}
             </span>
-            <span class="rounded bg-(--bg-canvas) px-2 py-0.5 text-[10px] font-medium text-(--text-muted)" title="{info.download_count} downloaded, {info.override_count} overrides extracted">
-              {info.file_count} files
+            <span class="rounded bg-(--bg-canvas) px-2 py-0.5 text-[10px] font-medium text-(--text-muted)" title={t('install-downloaded-title', { downloads: info.download_count, overrides: info.override_count })}>
+              {t('install-files', { count: info.file_count })}
             </span>
             <span class="rounded bg-(--bg-canvas) px-2 py-0.5 text-[10px] font-medium text-(--text-muted)">
               {fmtSize(info.archive_size)}
@@ -97,11 +98,11 @@
           </div>
         </div>
 
-        <label class="mt-4 block text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)" for="mrpack-name">Instance name</label>
+        <label class="mt-4 block text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)" for="mrpack-name">{t('install-instance-name')}</label>
         <input
           id="mrpack-name"
           class="mt-2 h-9 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-          placeholder="Instance name"
+          placeholder={t('install-instance-name')}
           bind:value={name}
         />
 
@@ -115,15 +116,15 @@
           class="rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:text-(--text-main)"
           onclick={() => onclose?.()}
         >
-          Cancel
+          {t('common-cancel')}
         </button>
         <button
           class="rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
           disabled={busy || !name.trim()}
-          title="Stages the pack's downloads and overrides into a new instance"
+          title={t('install-title-attr')}
           onclick={install}
         >
-          {busy ? 'Installing…' : 'Install Modpack'}
+          {busy ? t('install-busy') : t('install-confirm')}
         </button>
       </div>
     {/if}

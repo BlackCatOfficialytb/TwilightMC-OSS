@@ -8,6 +8,7 @@
   import SkinViewer3D from './SkinViewer3D.svelte';
   import SkinFace from './SkinFace.svelte';
   import { skinSource } from './accounts.svelte.js';
+  import { t } from './i18n.svelte.ts';
 
   let { accounts = [], active = null, onrefresh } = $props();
 
@@ -24,7 +25,7 @@
 
   function invoke(cmd, args) {
     const core = window.__TAURI__?.core;
-    if (!core) return Promise.reject(new Error('Tauri backend unavailable in this preview.'));
+    if (!core) return Promise.reject(new Error(t('backend-unavailable')));
     return core.invoke(cmd, args);
   }
 
@@ -89,14 +90,14 @@
   async function pickEditTexture(target) {
     const open = window.__TAURI__?.dialog?.open;
     if (!open) {
-      error = 'File picker unavailable in this build.';
+      error = t('status-file-picker-unavailable');
       return;
     }
     try {
       const picked = await open({
         multiple: false,
-        title: target === 'skin' ? 'Choose a skin PNG' : 'Choose a cape PNG',
-        filters: [{ name: 'PNG textures', extensions: ['png'] }],
+        title: target === 'skin' ? t('choose-skin') : t('choose-cape'),
+        filters: [{ name: t('filter-png-textures'), extensions: ['png'] }],
       });
       if (!picked) return;
       if (target === 'skin') editSkin = String(picked);
@@ -132,9 +133,9 @@
   }
 
   function typeLabel(account) {
-    return (
-      { offline: 'Offline', microsoft: 'Microsoft', ely_by: 'Ely.by' }[account.account_type.type] ??
-      'Yggdrasil'
+    return t(
+      { offline: 'account-type-offline', microsoft: 'account-type-microsoft', ely_by: 'account-type-elyby' }[account.account_type.type] ??
+        'account-type-yggdrasil'
     );
   }
 
@@ -159,7 +160,7 @@
               {typeLabel(account)}
             </span>
             {#if active?.id === account.id}
-              <span class="text-[10px] font-semibold tracking-wide text-(--accent)">ACTIVE</span>
+              <span class="text-[10px] font-semibold tracking-wide text-(--accent)">{t('accounts-active-badge')}</span>
             {/if}
           </div>
           <div class="truncate text-[11px] text-(--text-muted)">{account.uuid}</div>
@@ -167,28 +168,28 @@
         <div class="flex shrink-0 gap-1">
           <button
             class="rounded px-2 py-1 text-[11px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-            title="Skin & cape"
+            title={t('account-skin-cape-title')}
             onclick={() => toggleEditor(account)}><Twemoji emoji="🎨" /></button
           >
           {#if refreshKind(account)}
             <button
               class="rounded px-2 py-1 text-[11px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
-              title="Silently renew this account's token"
+              title={t('account-refresh-title')}
               disabled={refreshingId !== null}
               onclick={() => refreshAccount(account)}
             >
-              {refreshingId === account.id ? 'Refreshing…' : 'Refresh token'}
+              {refreshingId === account.id ? t('account-refreshing') : t('account-refresh')}
             </button>
           {/if}
           {#if active?.id !== account.id}
             <button
               class="rounded px-2 py-1 text-[11px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-              onclick={() => setActive(account.id)}>Set active</button
+              onclick={() => setActive(account.id)}>{t('account-set-active')}</button
             >
           {/if}
           <button
             class="rounded px-2 py-1 text-[11px] text-(--text-muted) hover:bg-red-500/10 hover:text-red-400"
-            onclick={() => removeAccount(account.id)}>Remove</button
+            onclick={() => removeAccount(account.id)}>{t('account-remove')}</button
           >
         </div>
       </div>
@@ -198,19 +199,19 @@
           <SkinViewer3D skin={editSkin} cape={editCape} model={editingAccount?.model} width={110} height={150} />
           <div class="flex min-w-0 flex-1 flex-col gap-2">
             <button class="rounded border border-(--border) px-2.5 py-1.5 text-left text-[11px] hover:bg-(--bg-surface)" onclick={() => pickEditTexture('skin')}>
-              Skin: <span class="truncate text-(--accent)">{editSkin || 'default (Steve/Alex)'}</span>
+              {t('account-skin-label')} <span class="truncate text-(--accent)">{editSkin || t('accounts-skin-default')}</span>
             </button>
             <button class="rounded border border-(--border) px-2.5 py-1.5 text-left text-[11px] hover:bg-(--bg-surface)" onclick={() => pickEditTexture('cape')}>
-              Cape: <span class="truncate text-(--accent)">{editCape || 'none'}</span>
+              {t('account-cape-label')} <span class="truncate text-(--accent)">{editCape || t('accounts-none')}</span>
             </button>
             <div class="flex gap-2">
               <button
                 class="rounded bg-(--accent) px-3 py-1 text-[11px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
                 disabled={busy}
-                onclick={saveTextures}>Save</button
+                onclick={saveTextures}>{t('account-editor-save')}</button
               >
               <button class="rounded border border-(--border) px-3 py-1 text-[11px] hover:bg-(--bg-surface)" onclick={clearTextures}>
-                Clear
+                {t('account-editor-clear')}
               </button>
             </div>
           </div>
@@ -218,7 +219,7 @@
       {/if}
     </div>
   {:else}
-    <p class="px-4 py-3 text-[12px] text-(--text-muted)">No accounts yet — add one above.</p>
+    <p class="px-4 py-3 text-[12px] text-(--text-muted)">{t('account-no-accounts')}</p>
   {/each}
 
   {#if error}

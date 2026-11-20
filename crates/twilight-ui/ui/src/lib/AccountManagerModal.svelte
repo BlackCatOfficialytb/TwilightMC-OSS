@@ -8,6 +8,7 @@
   import { pushOverlay, popOverlay } from './overlays.js';
   import SignInPanels from './SignInPanels.svelte';
   import AccountList from './AccountList.svelte';
+  import { t } from './i18n.svelte.ts';
 
   let { accounts = [], active = null, onclose, onrefresh } = $props();
 
@@ -26,7 +27,7 @@
 >
   <div class="flex max-h-[85vh] w-[560px] flex-col rounded-lg border border-(--border) bg-(--bg-surface) shadow-2xl">
     <div class="flex items-center justify-between border-b border-(--border) px-4 py-3">
-      <h3 class="text-sm font-semibold">Accounts</h3>
+      <h3 class="text-sm font-semibold">{t('nav-accounts')}</h3>
       <button class="text-(--text-muted) hover:text-(--text-main)" onclick={() => onclose?.()}>✕</button>
     </div>
 

@@ -6,6 +6,7 @@
   import { onMount } from 'svelte';
   import { pushOverlay, popOverlay } from './overlays.js';
   import { toast } from './alerts.svelte.js';
+  import { t } from './i18n.svelte.ts';
 
   let { instance, items = [], onclose, ondownloaded } = $props();
 
@@ -29,9 +30,9 @@
   }
 
   function note(row) {
-    if (row.required_by.length) return `required by ${row.required_by.join(', ')}`;
-    if (row.installed) return 'already installed';
-    return 'your selection';
+    if (row.required_by.length) return t('review-required-by', { mods: row.required_by.join(', ') });
+    if (row.installed) return t('review-already-installed');
+    return t('review-selection');
   }
 
   function checkedCount() {
@@ -44,7 +45,7 @@
 
   function invoke(cmd, args) {
     const core = window.__TAURI__?.core;
-    if (!core) return Promise.reject(new Error('Tauri backend unavailable in this preview.'));
+    if (!core) return Promise.reject(new Error(t('backend-unavailable')));
     return core.invoke(cmd, args);
   }
 
@@ -61,11 +62,11 @@
         instanceId: instance.id,
         files,
       });
-      toast(`Downloaded ${names.length} mod file${names.length === 1 ? '' : 's'}.`, 'success');
+      toast(t('review-downloaded', { count: names.length }), 'success');
       ondownloaded?.(names);
     } catch (e) {
       downloadError = String(e);
-      toast(`Download failed: ${e}`, 'error');
+      toast(t('review-download-failed', { error: String(e) }), 'error');
     } finally {
       downloading = false;
     }
@@ -109,10 +110,8 @@
     <!-- header -->
     <div class="flex items-center justify-between border-b border-(--border-1) px-4 py-3">
       <div class="min-w-0">
-        <h3 class="text-(--step-heading) font-semibold text-(--fg-1)">Confirm download</h3>
-        <p class="text-(--step-meta) text-(--fg-2)">
-          You're about to download the following mods — only rows with a check will be downloaded.
-        </p>
+        <h3 class="text-(--step-heading) font-semibold text-(--fg-1)">{t('review-title')}</h3>
+        <p class="text-(--step-meta) text-(--fg-2)">{t('review-desc')}</p>
       </div>
       <button
         class="text-(--fg-2) hover:text-(--fg-1) disabled:opacity-40"
@@ -127,7 +126,7 @@
     <div class="min-h-0 flex-1 overflow-y-auto">
       {#if loading}
         <div class="p-6 text-center text-(--step-body) text-(--fg-2)">
-          Resolving mods and their dependencies…
+          {t('review-resolving')}
         </div>
       {:else if error}
         <div class="p-4">
@@ -140,11 +139,11 @@
           <thead class="sticky top-0 z-10 bg-(--bg-3)">
             <tr class="border-b border-(--border-1) text-(--step-caption) uppercase tracking-wide text-(--fg-2)">
               <th class="w-[36px] px-3 py-2 font-medium"></th>
-              <th class="px-3 py-2 font-medium">Mod</th>
-              <th class="w-[130px] px-3 py-2 font-medium">Version</th>
-              <th class="w-[220px] px-3 py-2 font-medium">File</th>
-              <th class="w-[190px] px-3 py-2 font-medium">Source</th>
-              <th class="w-[80px] px-3 py-2 text-right font-medium">Size</th>
+              <th class="px-3 py-2 font-medium">{t('review-mod')}</th>
+              <th class="w-[130px] px-3 py-2 font-medium">{t('review-version')}</th>
+              <th class="w-[220px] px-3 py-2 font-medium">{t('review-file')}</th>
+              <th class="w-[190px] px-3 py-2 font-medium">{t('review-source')}</th>
+              <th class="w-[80px] px-3 py-2 text-right font-medium">{t('review-size')}</th>
             </tr>
           </thead>
           <tbody>
@@ -178,7 +177,7 @@
               </tr>
             {:else}
               <tr>
-                <td colspan="6" class="px-3 py-6 text-center text-(--fg-2)">The queue is empty.</td>
+                <td colspan="6" class="px-3 py-6 text-center text-(--fg-2)">{t('review-empty')}</td>
               </tr>
             {/each}
           </tbody>
@@ -192,9 +191,9 @@
         {#if downloadError}
           <span class="text-rose-400">{downloadError}</span>
         {:else if downloading}
-          Downloading {checkedCount()} file{checkedCount() === 1 ? '' : 's'}…
+          {t('review-downloading', { count: checkedCount() })}
         {:else if rows}
-          {checkedCount()} of {rows.length} rows will download
+          {t('review-will-download', { selected: checkedCount(), total: rows.length })}
         {/if}
       </span>
       <div class="flex items-center gap-2">
@@ -203,15 +202,15 @@
           disabled={downloading}
           onclick={() => onclose?.()}
         >
-          Back
+          {t('review-back')}
         </button>
         <button
           class="flex items-center gap-1.5 rounded bg-(--accent-1) px-4 py-1.5 text-(--step-body) font-medium text-(--on-accent) hover:bg-(--accent-1-hover) disabled:opacity-40"
           disabled={downloading || !rows || checkedCount() === 0}
-          title="Downloads every checked file (SHA-1 verified) into this instance's mods folder"
+          title={t('review-confirm-title')}
           onclick={confirmDownload}
         >
-          {downloading ? 'Downloading…' : 'Confirm & Download'}
+          {downloading ? t('review-confirm-button') : t('review-confirm')}
         </button>
       </div>
     </div>

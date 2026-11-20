@@ -8,6 +8,7 @@
   import LauncherIcon from './LauncherIcon.svelte';
   import { toast } from './alerts.svelte.js';
   import ModDownloadReviewModal from './ModDownloadReviewModal.svelte';
+  import { t } from './i18n.svelte.ts';
 
   let { instance, onclose, oninstalled } = $props();
 
@@ -37,12 +38,7 @@
     'transportation',
     'game-mechanics',
   ];
-  const SORTS = [
-    { id: 'relevance', label: 'Relevance' },
-    { id: 'downloads', label: 'Most downloaded' },
-    { id: 'updated', label: 'Recently updated' },
-    { id: 'newest', label: 'Newest' },
-  ];
+  const SORTS = ['relevance', 'downloads', 'updated', 'newest'];
 
   // ---- search (center) ----
   let query = $state('');
@@ -94,7 +90,7 @@
 
   function invoke(cmd, args) {
     const core = window.__TAURI__?.core;
-    if (!core) return Promise.reject(new Error('Tauri backend unavailable in this preview.'));
+    if (!core) return Promise.reject(new Error(t('backend-unavailable')));
     return core.invoke(cmd, args);
   }
 
@@ -201,12 +197,13 @@
     <!-- header -->
     <div class="flex items-center justify-between border-b border-(--border-1) px-4 py-3">
       <div class="min-w-0">
-        <h3 class="text-(--step-heading) font-semibold text-(--fg-1)">Browse &amp; Download Mods</h3>
+        <h3 class="text-(--step-heading) font-semibold text-(--fg-1)">{t('modrinth-title')}</h3>
         <p class="truncate text-(--step-meta) text-(--fg-2)">
-          Modrinth · {instance.name} · MC {instance.minecraft_version}
-          {#if loaderTag}
-            · {loaderTag[0].toUpperCase() + loaderTag.slice(1)}
-          {/if}
+          {t('modrinth-subtitle', {
+            instance: instance.name,
+            version: instance.minecraft_version,
+            loader: loaderTag ? ` · ${loaderTag[0].toUpperCase() + loaderTag.slice(1)}` : '',
+          })}
         </p>
       </div>
       <button class="text-(--fg-2) hover:text-(--fg-1)" onclick={() => onclose?.()}>✕</button>
@@ -218,7 +215,7 @@
       <aside class="flex w-[200px] shrink-0 flex-col gap-4 overflow-y-auto border-r border-(--border-1) p-3">
         <section>
           <h4 class="text-(--step-caption) font-semibold uppercase tracking-wide text-(--fg-2)">
-            Categories
+            {t('modrinth-categories')}
           </h4>
           <div class="mt-1.5 flex flex-col gap-1">
             {#each CATEGORIES as tag (tag)}
@@ -229,7 +226,7 @@
                   checked={categories.has(tag)}
                   onchange={() => toggleCategory(tag)}
                 />
-                <span>{tag.replace('-', ' ')}</span>
+                <span>{t(`modrinth-category-${tag}`)}</span>
               </label>
             {/each}
           </div>
@@ -237,15 +234,15 @@
         <section class="border-t border-(--border-1) pt-3">
           <label
             class="text-(--step-caption) font-semibold uppercase tracking-wide text-(--fg-2)"
-            for="mods-sort">Sort</label
+            for="mods-sort">{t('modrinth-sort')}</label
           >
           <select
             id="mods-sort"
             class="mt-1.5 h-8 w-full rounded border border-(--border-1) bg-(--bg-3) px-2 text-(--step-body) text-(--fg-1) outline-none focus:border-(--accent-1)"
             bind:value={sort}
           >
-            {#each SORTS as s (s.id)}
-              <option value={s.id}>{s.label}</option>
+            {#each SORTS as s (s)}
+              <option value={s}>{t(`modrinth-sort-${s}`)}</option>
             {/each}
           </select>
         </section>
@@ -256,7 +253,7 @@
         <div class="border-b border-(--border-1) p-3">
           <input
             class="h-9 w-full rounded border border-(--border-1) bg-(--bg-3) px-3 text-(--step-card) text-(--fg-1) outline-none placeholder:text-(--fg-2) focus:border-(--accent-1)"
-            placeholder="Search Modrinth mods…"
+            placeholder={t('modrinth-search')}
             bind:value={query}
           />
         </div>
@@ -268,12 +265,15 @@
           {/if}
           {#if !results}
             <div class="p-6 text-center text-(--step-body) text-(--fg-2)">
-              {searching ? 'Searching Modrinth…' : 'Type to search.'}
+              {searching ? t('modrinth-searching') : t('modrinth-type-to-search')}
             </div>
           {:else if results.length === 0 && !searching}
             <div class="p-6 text-center text-(--step-body) text-(--fg-2)">
-              No mods for MC {instance.minecraft_version}{loaderTag ? ` + ${loaderTag}` : ''} match
-              “{query.trim()}”.
+              {t('modrinth-no-results', {
+                version: instance.minecraft_version,
+                loader: loaderTag ? ` + ${loaderTag}` : '',
+                query: query.trim(),
+              })}
             </div>
           {:else}
             <div class="flex flex-col gap-1.5">
@@ -305,13 +305,13 @@
                       {#if looksInstalled(row)}
                         <span
                           class="shrink-0 rounded bg-green-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-green-500"
-                          >installed</span
+                          >{t('modrinth-installed')}</span
                         >
                       {/if}
                       {#if inQueue(row.project_id)}
                         <span
                           class="shrink-0 rounded bg-(--accent-1)/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-(--accent-1)"
-                          >queued</span
+                          >{t('modrinth-queued')}</span
                         >
                       {/if}
                     </span>
@@ -319,7 +319,10 @@
                       {row.description}
                     </span>
                     <span class="block truncate text-[10px] text-(--fg-2)">
-                      by {row.author || 'unknown'} · {fmtDownloads(row.downloads)} downloads
+                      {t('modrinth-by', {
+                        author: row.author || t('modrinth-unknown-author'),
+                        downloads: fmtDownloads(row.downloads),
+                      })}
                     </span>
                   </span>
                 </button>
@@ -334,7 +337,7 @@
         {#if !selected}
           <div class="flex h-full flex-col items-center justify-center p-6 text-center text-(--step-body) text-(--fg-2)">
             <LauncherIcon name="modrinth" size={28} />
-            <p class="mt-3">Select a mod to inspect it.</p>
+            <p class="mt-3">{t('modrinth-select')}</p>
           </div>
         {:else}
           <div class="flex items-start gap-3 border-b border-(--border-1) p-3">
@@ -354,19 +357,23 @@
               <div class="truncate text-(--step-card) font-semibold text-(--fg-1)" title={selected.title}>
                 {selected.title}
               </div>
-              <div class="truncate text-[10px] text-(--fg-2)">by {selected.author || 'unknown'}</div>
-              <div class="text-[10px] text-(--fg-2)">{fmtDownloads(selected.downloads)} downloads</div>
+              <div class="truncate text-[10px] text-(--fg-2)">
+                {t('modrinth-by-author', { author: selected.author || t('modrinth-unknown-author') })}
+              </div>
+              <div class="text-[10px] text-(--fg-2)">
+                {t('modrinth-download-count', { downloads: fmtDownloads(selected.downloads) })}
+              </div>
             </div>
           </div>
 
           <div class="border-b border-(--border-1) p-3">
             <label
               class="text-(--step-caption) font-semibold uppercase tracking-wide text-(--fg-2)"
-              for="mods-version">Version</label
+              for="mods-version">{t('modrinth-version')}</label
             >
             {#if detailsLoading}
               <div class="mt-1 flex h-8 items-center rounded border border-(--border-1) bg-(--bg-3) px-2.5 text-(--step-meta) text-(--fg-2)">
-                Loading versions…
+                {t('modrinth-loading-versions')}
               </div>
             {:else if details?.versions?.length}
               <select
@@ -374,7 +381,7 @@
                 class="mt-1 h-8 w-full rounded border border-(--border-1) bg-(--bg-3) px-2 text-(--step-body) text-(--fg-1) outline-none focus:border-(--accent-1)"
                 bind:value={versionPicked}
               >
-                <option value="">Latest ({details.versions[0]?.version})</option>
+                <option value="">{t('modrinth-latest', { version: details.versions[0]?.version })}</option>
                 {#each details.versions as v (v.id)}
                   <option value={v.id}>
                     {v.version}{v.version_type && v.version_type !== 'release' ? ` (${v.version_type})` : ''}
@@ -383,7 +390,7 @@
               </select>
             {:else}
               <div class="mt-1 h-8 rounded border border-(--border-1) bg-(--bg-3) px-2.5 text-(--step-meta) leading-8 text-(--fg-2)">
-                Latest compatible
+                {t('modrinth-latest-compatible')}
               </div>
             {/if}
           </div>
@@ -407,8 +414,8 @@
     <div class="flex items-center justify-between gap-2 border-t border-(--border-1) px-4 py-3">
       <span class="text-(--step-body) text-(--fg-2)">
         {queue.length === 0
-          ? 'No mods selected'
-          : `${queue.length} mod${queue.length === 1 ? '' : 's'} selected`}
+          ? t('modrinth-no-mods')
+          : t('modrinth-selected', { count: queue.length })}
         {#if queue.length}
           <span class="ml-1 text-[10px]">({queue.map((q) => q.title).join(', ')})</span>
         {/if}
@@ -419,15 +426,15 @@
           disabled={!queue.length}
           onclick={() => (queue = [])}
         >
-          Clear
+          {t('modrinth-clear')}
         </button>
         <button
           class="flex items-center gap-1.5 rounded bg-(--accent-1) px-4 py-1.5 text-(--step-body) font-medium text-(--on-accent) hover:bg-(--accent-1-hover) disabled:opacity-40"
           disabled={!queue.length}
-          title="Stages every queued mod plus its required dependencies for confirmation"
+          title={t('modrinth-review-title')}
           onclick={openReview}
         >
-          <LauncherIcon name="download" size={13} /> Review and Confirm…
+          <LauncherIcon name="download" size={13} /> {t('modrinth-review')}
         </button>
       </div>
     </div>

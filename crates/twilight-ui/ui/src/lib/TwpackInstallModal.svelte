@@ -5,6 +5,7 @@
   // pack fails before any file is written. The parent owns grid refresh.
   import { onMount } from 'svelte';
   import { pushOverlay, popOverlay } from './overlays.js';
+  import { t } from './i18n.svelte.ts';
 
   let { path, onclose, oninstalled } = $props();
 
@@ -15,7 +16,7 @@
   let error = $state('');
 
   function loaderLabel() {
-    if (!info || !info.loader) return 'Vanilla';
+    if (!info || !info.loader) return t('install-vanilla');
     return info.loader[0].toUpperCase() + info.loader.slice(1) + (info.loader_version ? ` ${info.loader_version}` : '');
   }
 
@@ -56,7 +57,7 @@
 >
   <div class="w-[480px] overflow-hidden rounded-lg border border-(--border) bg-(--bg-surface) shadow-2xl">
     <div class="flex items-center justify-between border-b border-(--border) px-4 py-3">
-      <h3 class="text-sm font-semibold">Import .twpack</h3>
+      <h3 class="text-sm font-semibold">{t('twpack-title')}</h3>
       <button class="text-(--text-muted) hover:text-(--text-main)" onclick={() => onclose?.()}>✕</button>
     </div>
 
@@ -68,7 +69,7 @@
         <p class="mt-2 break-all text-[11px] text-(--text-muted)" title={path}>{path}</p>
       </div>
     {:else if !info}
-      <div class="p-6 text-center text-[12px] text-(--text-muted)">Reading pack…</div>
+      <div class="p-6 text-center text-[12px] text-(--text-muted)">{t('twpack-reading')}</div>
     {:else}
       <div class="p-4">
         <div class="rounded border border-(--border) bg-(--bg-subtle) p-3">
@@ -81,7 +82,7 @@
               {loaderLabel()}
             </span>
             <span class="rounded bg-(--bg-canvas) px-2 py-0.5 text-[10px] font-medium text-(--text-muted)">
-              {info.file_count} entries
+              {t('twpack-entries', { count: info.file_count })}
             </span>
             <span class="rounded bg-(--bg-canvas) px-2 py-0.5 text-[10px] font-medium text-(--text-muted)">
               .twpack
@@ -90,15 +91,14 @@
         </div>
 
         <p class="mt-3 text-[11px] text-(--text-muted)">
-          The pack ships mods, configs, resource packs and shader packs — never logs,
-          crash reports or natives. Every archive path is validated before extraction.
+          {t('twpack-desc')}
         </p>
 
-        <label class="mt-4 block text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)" for="twpack-name">Instance name</label>
+        <label class="mt-4 block text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)" for="twpack-name">{t('install-instance-name')}</label>
         <input
           id="twpack-name"
           class="mt-2 h-9 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-          placeholder="Instance name"
+          placeholder={t('install-instance-name')}
           bind:value={name}
         />
 
@@ -112,15 +112,15 @@
           class="rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:text-(--text-main)"
           onclick={() => onclose?.()}
         >
-          Cancel
+          {t('common-cancel')}
         </button>
         <button
           class="rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
           disabled={busy || !name.trim()}
-          title="Validates every archive path, then extracts into a new instance"
+          title={t('twpack-import-title')}
           onclick={install}
         >
-          {busy ? 'Importing…' : 'Import .twpack'}
+          {busy ? t('twpack-import-busy') : t('twpack-import')}
         </button>
       </div>
     {/if}

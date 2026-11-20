@@ -7,6 +7,7 @@
   // remove plus the inline texture editor). Layout mirrors SettingsPage.
   import { accounts as accountStore } from './accounts.svelte.js';
   import { skinSource } from './accounts.svelte.js';
+  import { t } from './i18n.svelte.ts';
   import SkinViewer3D from './SkinViewer3D.svelte';
   import SkinFace from './SkinFace.svelte';
   import SignInPanels from './SignInPanels.svelte';
@@ -15,9 +16,9 @@
   let { onback, onrefresh } = $props();
 
   const sections = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'add', label: 'Add Account' },
-    { id: 'saved', label: 'Saved Accounts' },
+    { id: 'overview', label: 'accounts-overview' },
+    { id: 'add', label: 'accounts-add' },
+    { id: 'saved', label: 'accounts-saved' },
   ];
   let section = $state('overview');
 
@@ -38,9 +39,9 @@
   let outerLayer = $state(true);
 
   function typeLabel(account) {
-    return (
-      { offline: 'Offline', microsoft: 'Microsoft', ely_by: 'Ely.by' }[account.account_type.type] ??
-      'Yggdrasil'
+    return t(
+      { offline: 'account-type-offline', microsoft: 'account-type-microsoft', ely_by: 'account-type-elyby' }[account.account_type.type] ??
+        'account-type-yggdrasil'
     );
   }
 </script>
@@ -49,15 +50,15 @@
   <!-- left navigation rail -->
   <nav
     class="flex w-56 shrink-0 flex-col border-r border-(--border) bg-(--bg-subtle) p-3"
-    aria-label="Accounts sections"
+    aria-label={t('accounts-sections-aria')}
   >
     <button
       class="mb-3 flex h-9 items-center gap-2 rounded px-2.5 text-left text-[13px] font-medium text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main)"
-      title="Back to the instance library"
+      title={t('settings-back-title')}
       onclick={onback}
     >
       <span class="w-5 shrink-0 text-center text-[15px]">←</span>
-      <span class="truncate">Back to Instances</span>
+      <span class="truncate">{t('header-back-instances')}</span>
     </button>
     <div class="flex flex-col gap-0.5">
       {#each sections as s (s.id)}
@@ -68,7 +69,7 @@
           aria-current={section === s.id ? 'true' : undefined}
           onclick={() => (section = s.id)}
         >
-          <span class="truncate">{s.label}</span>
+          <span class="truncate">{t(s.label)}</span>
         </button>
       {/each}
     </div>
@@ -78,9 +79,9 @@
   <div class="min-w-0 flex-1 overflow-y-auto">
     <div class="mx-auto max-w-2xl p-8">
       {#if section === 'overview'}
-        <h2 class="text-[16px] font-semibold">Account overview</h2>
+        <h2 class="text-[16px] font-semibold">{t('accounts-overview-title')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">
-          The character launches use, with the hat/jacket outer layer included.
+          {t('accounts-overview-desc')}
         </p>
 
         {#if accountStore.list.length}
@@ -91,7 +92,7 @@
                 class="flex items-center gap-2 rounded border px-2 py-1.5 text-left {preview?.id === account.id
                   ? 'border-(--accent) bg-(--brand-tint)'
                   : 'border-(--border) hover:border-(--text-muted)'}"
-                title="Preview {account.username}"
+                title={t('accounts-preview-title', { name: account.username })}
                 onclick={() => (pickedId = account.id)}
               >
                 <SkinFace
@@ -102,7 +103,7 @@
                 />
                 <span class="text-[12px] font-medium">{account.username}</span>
                 {#if accountStore.active?.id === account.id}
-                  <span class="text-[9px] font-semibold tracking-wide text-(--accent)">ACTIVE</span>
+                  <span class="text-[9px] font-semibold tracking-wide text-(--accent)">{t('accounts-active-badge')}</span>
                 {/if}
               </button>
             {/each}
@@ -124,44 +125,43 @@
                 <p class="text-[11px] text-(--text-muted)">{typeLabel(preview)}</p>
               </div>
               <dl class="mt-1 grid w-full max-w-sm grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[11px]">
-                <dt class="text-(--text-muted)">Profile UUID</dt>
+                <dt class="text-(--text-muted)">{t('accounts-uuid')}</dt>
                 <dd class="min-w-0 truncate font-mono" title={preview.uuid}>{preview.uuid}</dd>
-                <dt class="text-(--text-muted)">Skin source</dt>
-                <dd class="min-w-0 truncate" title={preview.skin ?? 'default (Steve/Alex)'}>
-                  {preview.skin ? 'custom skin' : 'default (Steve/Alex)'}
+                <dt class="text-(--text-muted)">{t('accounts-skin-source')}</dt>
+                <dd class="min-w-0 truncate" title={preview.skin ?? t('accounts-skin-default')}>
+                  {preview.skin ? t('accounts-skin-custom') : t('accounts-skin-default')}
                 </dd>
-                <dt class="text-(--text-muted)">Cape</dt>
-                <dd class="min-w-0 truncate">{preview.cape ? 'custom cape' : 'none'}</dd>
-                <dt class="text-(--text-muted)">Renewable token</dt>
-                <dd class="min-w-0 truncate">{preview.refresh_token ? 'yes — silent refresh available' : 'no'}</dd>
+                <dt class="text-(--text-muted)">{t('accounts-cape')}</dt>
+                <dd class="min-w-0 truncate">{preview.cape ? t('accounts-cape-custom') : t('accounts-none')}</dd>
+                <dt class="text-(--text-muted)">{t('accounts-renewable')}</dt>
+                <dd class="min-w-0 truncate">{preview.refresh_token ? t('accounts-token-yes') : t('accounts-token-no')}</dd>
               </dl>
             </div>
           {/if}
         {:else}
           <div class="mt-6 flex flex-col items-center gap-3 rounded-lg border border-(--border) bg-(--bg-surface) px-6 py-12 text-center">
-            <p class="text-sm font-medium">No accounts yet</p>
+            <p class="text-sm font-medium">{t('accounts-empty-title')}</p>
             <p class="max-w-sm text-[12px] text-(--text-muted)">
-              Add an offline profile, sign in with Ely.by or Microsoft, or point at any custom
-              Yggdrasil server — everything lives in the Add Account section.
+              {t('accounts-empty-body')}
             </p>
             <button
               class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
-              onclick={() => (section = 'add')}>Add an account</button
+              onclick={() => (section = 'add')}>{t('accounts-add-one')}</button
             >
           </div>
         {/if}
       {:else if section === 'add'}
-        <h2 class="text-[16px] font-semibold">Add account</h2>
+        <h2 class="text-[16px] font-semibold">{t('accounts-add-title')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">
-          Offline profiles, Ely.by (browser or device code), Microsoft and custom Yggdrasil servers.
+          {t('accounts-add-desc')}
         </p>
         <div class="mt-6 overflow-hidden rounded-lg border border-(--border) bg-(--bg-surface)">
           <SignInPanels {onrefresh} />
         </div>
       {:else}
-        <h2 class="text-[16px] font-semibold">Saved accounts</h2>
+        <h2 class="text-[16px] font-semibold">{t('accounts-saved-title')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">
-          Set the active profile, renew tokens silently, edit skins — or remove accounts.
+          {t('accounts-saved-desc')}
         </p>
         <div class="mt-6 rounded-lg border border-(--border) bg-(--bg-surface)">
           <AccountList accounts={accountStore.list} active={accountStore.active} {onrefresh} />

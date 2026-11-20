@@ -6,19 +6,21 @@
   // the footer Next button, and a full-size Back button sits right next to
   // it on every step after the first.
   import { toast } from './alerts.svelte.js';
+  import { t } from './i18n.svelte.ts';
 
   let { onclose, oncreated } = $props();
 
   const SOFTWARE = [
-    { id: 'paper', label: 'Paper', note: 'High-performance Bukkit server' },
-    { id: 'purpur', label: 'Purpur', note: 'Paper fork, maximum configurability' },
-    { id: 'vanilla', label: 'Vanilla', note: 'Official Mojang server' },
-    { id: 'fabric', label: 'Fabric', note: 'Lightweight mod loader' },
-    { id: 'pumpkin', label: 'PumpkinMC (Rust)', note: 'Multithreaded native server' },
-    { id: 'velocity', label: 'Velocity', note: 'Modern proxy (no world)' },
-    { id: 'forge', label: 'Forge', note: 'Mod loader — auto-installer' },
-    { id: 'neoforge', label: 'NeoForge', note: 'Mod loader, auto-installer' },
-    { id: 'steel', label: 'SteelMC (Rust)', note: 'Native server, auto-download' },
+    // note holds a message id from locales/*/main.ftl, resolved at render time
+    { id: 'paper', label: 'Paper', note: 'software-paper-note' },
+    { id: 'purpur', label: 'Purpur', note: 'software-purpur-note' },
+    { id: 'vanilla', label: 'Vanilla', note: 'software-vanilla-note' },
+    { id: 'fabric', label: 'Fabric', note: 'software-fabric-note' },
+    { id: 'pumpkin', label: 'PumpkinMC (Rust)', note: 'software-pumpkin-note' },
+    { id: 'velocity', label: 'Velocity', note: 'software-velocity-note' },
+    { id: 'forge', label: 'Forge', note: 'software-forge-note' },
+    { id: 'neoforge', label: 'NeoForge', note: 'software-neoforge-note' },
+    { id: 'steel', label: 'SteelMC (Rust)', note: 'software-steel-note' },
   ];
 
   let step = $state(1);
@@ -121,7 +123,7 @@
       });
       oncreated?.();
       onclose?.();
-      toast(`Server ${name.trim()} created.`, 'success');
+      toast(t('server-created', { name: name.trim() }), 'success');
     } catch (e) {
       error = String(e);
     } finally {
@@ -141,11 +143,11 @@
   <div
     role="dialog"
     aria-modal="true"
-    aria-label="New server"
+    aria-label={t('newserver-aria')}
     class="flex max-h-[640px] w-[560px] flex-col rounded-lg border border-(--border-1) bg-(--bg-2) shadow-2xl animate-[fade-in_120ms_ease-out]"
   >
     <div class="flex items-center justify-between border-b border-(--border) p-4">
-      <h3 class="text-[14px] font-semibold">New Server</h3>
+      <h3 class="text-[14px] font-semibold">{t('newserver-title')}</h3>
       <div class="flex items-center gap-1.5">
         {#each [1, 2, 3, 4] as n (n)}
           <span class="h-1.5 w-6 rounded-full {step >= n ? 'bg-(--accent)' : 'bg-(--bg-3)'}"></span>
@@ -155,7 +157,7 @@
 
     <div class="min-h-0 flex-1 overflow-y-auto p-4">
       {#if step === 1}
-        <p class="text-[12px] text-(--text-muted)">Pick the server software.</p>
+        <p class="text-[12px] text-(--text-muted)">{t('newserver-step1')}</p>
         <div class="mt-3 grid grid-cols-2 gap-2">
           {#each SOFTWARE as s (s.id)}
             <button
@@ -165,23 +167,22 @@
               onclick={() => selectSoftware(s.id)}
             >
               <span class="block text-[12.5px] font-medium">{s.label}</span>
-              <span class="mt-0.5 block text-[11px] text-(--text-muted)">{s.note}</span>
+              <span class="mt-0.5 block text-[11px] text-(--text-muted)">{t(s.note)}</span>
             </button>
           {/each}
         </div>
         {#if loadingVersions}
-          <p class="mt-3 text-[11px] text-(--text-muted)">Checking available versions…</p>
+          <p class="mt-3 text-[11px] text-(--text-muted)">{t('newserver-checking')}</p>
         {/if}
         {#if cpuTarget}
           <p class="mt-3 text-[11px] text-(--text-muted)">
-            Host CPU target: <span class="text-(--text-main)">{cpuTarget}</span> — native builds
-            are matched to it ({cpuLabel}).
+            {t('newserver-cpu', { target: cpuTarget, label: cpuLabel })}
           </p>
         {/if}
       {:else if step === 2}
-        <p class="text-[12px] text-(--text-muted)">Pick the version for {labelOf(software)}.</p>
+        <p class="text-[12px] text-(--text-muted)">{t('newserver-step2', { software: labelOf(software) })}</p>
         {#if loadingVersions}
-          <p class="mt-4 text-[12px] text-(--text-muted)">Fetching versions…</p>
+          <p class="mt-4 text-[12px] text-(--text-muted)">{t('newserver-fetching')}</p>
         {:else if versionError}
           <p class="mt-4 text-[12px] text-amber-500">{versionError}</p>
         {:else}
@@ -199,15 +200,15 @@
           </div>
         {/if}
       {:else if step === 3}
-        <p class="text-[12px] text-(--text-muted)">Name, port and memory.</p>
-        <label for="ns-name" class="mt-4 block text-[11px] font-medium text-(--text-muted)">Server name</label>
+        <p class="text-[12px] text-(--text-muted)">{t('newserver-step3')}</p>
+        <label for="ns-name" class="mt-4 block text-[11px] font-medium text-(--text-muted)">{t('newserver-name')}</label>
         <input
           id="ns-name"
           class="mt-1 h-8 w-full rounded border border-(--border) bg-(--bg-3) px-2.5 text-[12.5px] outline-none focus:border-(--accent)"
-          placeholder="My Server"
+          placeholder={t('newserver-name-placeholder')}
           bind:value={name}
         />
-        <label for="ns-port" class="mt-3 block text-[11px] font-medium text-(--text-muted)">Port</label>
+        <label for="ns-port" class="mt-3 block text-[11px] font-medium text-(--text-muted)">{t('newserver-port')}</label>
         <input
           id="ns-port"
           type="number" min="1024" max="65535"
@@ -215,15 +216,15 @@
           bind:value={port}
         />
         <p class="mt-3 block text-[11px] font-medium text-(--text-muted)">
-          Memory: {minMem}-{maxMem} MiB
+          {t('newserver-memory', { min: minMem, max: maxMem })}
         </p>
         <input class="mt-1 w-full accent-(--accent)" type="range" min="512" max="8192" step="256" bind:value={minMem} />
         <input class="mt-1 w-full accent-(--accent)" type="range" min="1024" max="32768" step="512" bind:value={maxMem} />
         {#if maxMem < minMem}
-          <p class="mt-1 text-[11px] text-amber-500">Max memory is below min — the flag is skipped.</p>
+          <p class="mt-1 text-[11px] text-amber-500">{t('newserver-max-below-min')}</p>
         {/if}
       {:else}
-        <p class="text-[12px] text-(--text-muted)">Who can reach the server?</p>
+        <p class="text-[12px] text-(--text-muted)">{t('newserver-step4')}</p>
         <div class="mt-3 grid gap-2">
           <button
             class="rounded border px-3 py-2.5 text-left transition-colors {localOnly
@@ -231,8 +232,8 @@
               : 'border-(--border) hover:border-(--accent)'}"
             onclick={() => (localOnly = true)}
           >
-            <span class="block text-[12.5px] font-medium">Local Only</span>
-            <span class="mt-0.5 block text-[11px] text-(--text-muted)">LAN and localhost — no tunnel.</span>
+            <span class="block text-[12.5px] font-medium">{t('newserver-local')}</span>
+            <span class="mt-0.5 block text-[11px] text-(--text-muted)">{t('newserver-local-desc')}</span>
           </button>
           <button
             class="rounded border px-3 py-2.5 text-left transition-colors {!localOnly
@@ -240,25 +241,24 @@
               : 'border-(--border) hover:border-(--accent)'}"
             onclick={() => (localOnly = false)}
           >
-            <span class="block text-[12.5px] font-medium">Enable Minekube Connect Tunnel</span>
+            <span class="block text-[12.5px] font-medium">{t('newserver-connect')}</span>
             <span class="mt-0.5 block text-[11px] text-(--text-muted)">
-              Friends join over the internet without port forwarding (connect.minekube.com).
+              {t('newserver-connect-desc')}
             </span>
           </button>
         </div>
         <label class="mt-4 flex cursor-pointer items-start gap-2.5">
           <input type="checkbox" class="mt-0.5 accent-(--accent)" bind:checked={offlineMode} />
           <span class="min-w-0">
-            <span class="block text-[12.5px] font-medium">Offline Mode (online-mode=false)</span>
+            <span class="block text-[12.5px] font-medium">{t('newserver-offline')}</span>
             <span class="mt-0.5 block text-[11px] text-(--text-muted)">
-              Allows cracked / third-party clients. TwilightMC recommends AuthMeReloaded for these servers.
+              {t('newserver-offline-desc')}
             </span>
           </span>
         </label>
         {#if offlineMode}
           <div class="mt-2 rounded border border-amber-500/40 bg-amber-500/10 p-2.5 text-[11px] text-amber-500">
-            Offline Server Notice: With online-mode=false, anyone can connect using any username or spoof administrator UUIDs.
-            You can 1-click install AuthMeReloaded from the server card afterwards.
+            {t('newserver-offline-warning')}
           </div>
         {/if}
         {#if error}
@@ -273,7 +273,7 @@
         disabled={busy !== ''}
         onclick={onclose}
       >
-        Cancel
+        {t('common-cancel')}
       </button>
       <div class="flex items-center gap-2">
         {#if step > 1}
@@ -282,7 +282,7 @@
             disabled={busy !== ''}
             onclick={back}
           >
-            ← Back
+            ← {t('newserver-back')}
           </button>
         {/if}
         {#if step === 4}
@@ -291,7 +291,7 @@
             disabled={busy !== '' || !name.trim()}
             onclick={create}
           >
-            {busy === 'create' ? 'Creating…' : 'Create Server'}
+            {busy === 'create' ? t('newserver-creating') : t('newserver-create')}
           </button>
         {:else}
           <button
@@ -299,7 +299,7 @@
             disabled={busy !== '' || !canNext}
             onclick={next}
           >
-            {step === 3 ? 'Next: Networking' : 'Next →'}
+            {step === 3 ? t('newserver-next-networking') : `${t('newserver-next')} →`}
           </button>
         {/if}
       </div>

@@ -4,9 +4,8 @@
   // instead of a bare error toast — open the pack on CurseForge, 1-click the
   // Modrinth-hosted core mods (no key needed), or import a downloaded zip.
   import LauncherIcon from './LauncherIcon.svelte';
+  import { t } from './i18n.svelte.ts';
 
-  const GATE_MESSAGE =
-    'CleanroomMC requires the BareBones Template (Cleanroom) mods (Fugue, MixinBooter, ConfigAnytime, Scalar Legacy) to boot 1.12.2 safely.';
   const CF_FILES_URL = 'https://www.curseforge.com/minecraft/modpacks/barebones-template-cleanroom/files';
 
   let { instanceId, onclose, onlaunch } = $props();
@@ -25,8 +24,8 @@
     try {
       const installed = await window.__TAURI__.core.invoke('install_cleanroom_core_mods', { instanceId });
       done = {
-        title: `Installed ${installed.length} core mod${installed.length === 1 ? '' : 's'}: Fugue, MixinBooter, ConfigAnytime.`,
-        note: 'Scalar Legacy is CurseForge-only and was skipped — the gate is satisfied without it. Import the full BareBones zip if you want it too.',
+        title: t('barebones-installed', { count: installed.length }),
+        note: t('barebones-scalar-note'),
       };
     } catch (e) {
       error = String(e);
@@ -38,15 +37,15 @@
   async function importPack() {
     const open = window.__TAURI__?.dialog?.open;
     if (!open) {
-      error = 'File picker unavailable in this build.';
+      error = t('status-file-picker-unavailable');
       return;
     }
     error = '';
     try {
       const picked = await open({
         multiple: false,
-        title: 'Import a CurseForge modpack zip',
-        filters: [{ name: 'CurseForge modpack', extensions: ['zip'] }],
+        title: t('barebones-import-title'),
+        filters: [{ name: t('barebones-import-filter'), extensions: ['zip'] }],
       });
       if (!picked) return;
       busy = 'import';
@@ -55,11 +54,13 @@
         instanceId,
       });
       done = {
-        title: `Imported ${report.name} ${report.version}: ${report.overrides_extracted} override file${report.overrides_extracted === 1 ? '' : 's'}.`,
+        title: t('barebones-imported', {
+          name: report.name,
+          version: report.version,
+          count: report.overrides_extracted,
+        }),
         note:
-          report.mods_skipped > 0
-            ? `${report.mods_skipped} listed mod file${report.mods_skipped === 1 ? ' was' : 's were'} not downloaded — add a CurseForge API key in Settings → API Keys to fetch them automatically.`
-            : '',
+          report.mods_skipped > 0 ? t('barebones-skipped', { count: report.mods_skipped }) : '',
       };
     } catch (e) {
       error = String(e);
@@ -83,7 +84,7 @@
   <div
     role="dialog"
     aria-modal="true"
-    aria-label="BareBones Template required"
+    aria-label={t('barebones-aria')}
     class="w-[440px] rounded-lg border border-(--border-1) bg-(--bg-2) shadow-2xl animate-[fade-in_120ms_ease-out]"
   >
     <div class="flex items-start gap-3 p-4">
@@ -91,8 +92,8 @@
         <LauncherIcon name="mods" size={17} />
       </span>
       <div class="min-w-0 flex-1">
-        <h3 class="text-(--step-heading) font-semibold text-(--fg-1)">BareBones Template required</h3>
-        <p class="mt-1 text-[12px] text-(--fg-2)">{GATE_MESSAGE}</p>
+        <h3 class="text-(--step-heading) font-semibold text-(--fg-1)">{t('barebones-title')}</h3>
+        <p class="mt-1 text-[12px] text-(--fg-2)">{t('barebones-message')}</p>
       </div>
     </div>
 
@@ -106,8 +107,8 @@
           >
             <span class="w-4 shrink-0 text-center" aria-hidden="true">{busy === 'install' ? '…' : '⚡'}</span>
             <span class="min-w-0">
-              Install core mods from Modrinth — no key needed
-              <span class="block font-normal text-(--text-muted)">Fugue, MixinBooter, ConfigAnytime for 1.12.2 (forge)</span>
+              {t('barebones-install')}
+              <span class="block font-normal text-(--text-muted)">{t('barebones-install-note')}</span>
             </span>
           </button>
           <button
@@ -117,8 +118,8 @@
           >
             <span class="w-4 shrink-0 text-center" aria-hidden="true">{busy === 'import' ? '…' : '📦'}</span>
             <span class="min-w-0">
-              Import Downloaded .zip…
-              <span class="block font-normal text-(--text-muted)">CurseForge pack zip (manifest.json + overrides/)</span>
+              {t('barebones-import')}
+              <span class="block font-normal text-(--text-muted)">{t('barebones-import-note')}</span>
             </span>
           </button>
           <button
@@ -128,13 +129,13 @@
           >
             <span class="w-4 shrink-0 text-center" aria-hidden="true">↗</span>
             <span class="min-w-0">
-              Open BareBones Template on CurseForge
-              <span class="block font-normal text-(--text-muted)">Download the zip there, then import it above</span>
+              {t('barebones-open')}
+              <span class="block font-normal text-(--text-muted)">{t('barebones-open-note')}</span>
             </span>
           </button>
         </div>
         <p class="mt-3 text-[11px] text-(--text-muted)">
-          Scalar Legacy is CurseForge-only: the 1-click install covers the other three and the gate passes without it.
+          {t('barebones-scalar')}
         </p>
       {:else}
         <div class="rounded border border-(--border) bg-(--bg-3) p-3">
@@ -148,13 +149,13 @@
             class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
             onclick={() => onclose?.()}
           >
-            Close
+            {t('barebones-close')}
           </button>
           <button
             class="rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
             onclick={launch}
           >
-            Launch 1.12.2
+            {t('barebones-launch')}
           </button>
         </div>
       {/if}

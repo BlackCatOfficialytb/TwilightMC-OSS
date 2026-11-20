@@ -7,15 +7,16 @@
   import { pushOverlay, popOverlay } from './overlays.js';
   import { iconKeyAsset } from './twemoji.js';
   import InstanceIconPicker from './InstanceIconPicker.svelte';
+  import { t } from './i18n.svelte.ts';
 
   let { groups = [], blindMode = false, deafMode = false, onclose, oncreated } = $props();
 
   const TYPE_FILTERS = [
-    { id: 'release', label: 'Releases' },
-    { id: 'snapshot', label: 'Snapshots' },
-    { id: 'old_beta', label: 'Betas' },
-    { id: 'old_alpha', label: 'Alphas' },
-    { id: 'experiment', label: 'Experiments' },
+    { id: 'release', label: 'wizard-type-releases' },
+    { id: 'snapshot', label: 'wizard-type-snapshots' },
+    { id: 'old_beta', label: 'wizard-type-betas' },
+    { id: 'old_alpha', label: 'wizard-type-alphas' },
+    { id: 'experiment', label: 'wizard-type-experiments' },
   ];
 
   const LOADERS = [
@@ -92,23 +93,23 @@
     {
       id: 'minecraft-access',
       label: 'Minecraft Access',
-      hint: 'Core: screen reader & 3D spatial navigation',
+      hint: 'assist-minecraft-access-hint',
     },
     {
       id: 'sound-physics-remastered',
       label: 'Sound Physics Remastered',
-      hint: 'Optional: spatial acoustics & directional echoes',
+      hint: 'assist-sound-physics-hint',
     },
   ];
   const DEAF_ASSIST = [
-    { id: 'echosight', label: 'EchoSight', hint: 'Directional sound radar & priority subtitles' },
+    { id: 'echosight', label: 'EchoSight', hint: 'assist-echosight-hint' },
     {
       id: 'subtitles-visualizer',
       label: 'Subtitles Visualizer',
-      hint: 'In-world directional subtitle markers',
+      hint: 'assist-subtitles-hint',
     },
-    { id: 'visible-sound', label: 'Visible Sound', hint: 'In-world block/entity sound highlights' },
-    { id: 'soundsight', label: 'SoundSight', hint: 'Visual threat ring & enhanced subtitles' },
+    { id: 'visible-sound', label: 'Visible Sound', hint: 'assist-visible-sound-hint' },
+    { id: 'soundsight', label: 'SoundSight', hint: 'assist-soundsight-hint' },
   ];
   let assistMods = $state(new Set(['minecraft-access']));
 
@@ -134,7 +135,7 @@
 
   function invoke(cmd, args) {
     const core = window.__TAURI__?.core;
-    if (!core) return Promise.reject(new Error('Tauri backend unavailable in this preview.'));
+    if (!core) return Promise.reject(new Error(t('backend-unavailable')));
     return core.invoke(cmd, args);
   }
 
@@ -158,9 +159,13 @@
 
   function typeLabel(type) {
     return (
-      { release: 'Release', snapshot: 'Snapshot', old_beta: 'Beta', old_alpha: 'Alpha', experiment: 'Experiment' }[
-        type
-      ] ?? type
+      {
+        release: t('wizard-type-release'),
+        snapshot: t('wizard-type-snapshot'),
+        old_beta: t('wizard-type-beta'),
+        old_alpha: t('wizard-type-alpha'),
+        experiment: t('wizard-type-experiment'),
+      }[type] ?? type
     );
   }
 
@@ -189,14 +194,14 @@
   async function pickIcon() {
     const open = window.__TAURI__?.dialog?.open;
     if (!open) {
-      createError = 'Image picker unavailable in this build.';
+      createError = t('status-file-picker-unavailable');
       return;
     }
     try {
       const picked = await open({
         multiple: false,
-        title: 'Choose an instance icon',
-        filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'ico'] }],
+        title: t('wizard-choose-icon'),
+        filters: [{ name: t('filter-images'), extensions: ['png', 'jpg', 'jpeg', 'webp', 'ico'] }],
       });
       if (picked) {
         iconKey = '';
@@ -280,13 +285,13 @@
         try {
           await invoke('set_instance_icon_key', { instanceId: row.id, iconKey });
         } catch (e) {
-          warning = `Instance created, but the icon could not be applied: ${e}`;
+          warning = t('wizard-warning-icon', { error: String(e) });
         }
       } else if (iconPath) {
         try {
           await invoke('set_instance_icon', { instanceId: row.id, imagePath: iconPath });
         } catch (e) {
-          warning = `Instance created, but the icon could not be applied: ${e}`;
+          warning = t('wizard-warning-icon', { error: String(e) });
         }
       }
       if (group.trim()) {
@@ -294,8 +299,8 @@
           await invoke('set_instance_group', { instanceId: row.id, group: group.trim() });
         } catch (e) {
           warning = warning
-            ? `${warning} The group could not be set: ${e}`
-            : `Instance created, but the group could not be set: ${e}`;
+            ? `${warning} ${t('wizard-warning-group-append', { error: String(e) })}`
+            : t('wizard-warning-group', { error: String(e) });
         }
       }
       // accessibility checklist: install the picked assistive mods (+ their
@@ -311,8 +316,8 @@
           });
         } catch (e) {
           warning = warning
-            ? `${warning} ${projectId} could not be installed: ${e}`
-            : `Instance created, but ${projectId} could not be installed: ${e}`;
+            ? `${warning} ${t('wizard-warning-mod-append', { mod: projectId, error: String(e) })}`
+            : t('wizard-warning-mod', { mod: projectId, error: String(e) });
         }
       }
       oncreated?.(row, warning);
@@ -349,35 +354,37 @@
     <div class="flex items-start gap-3 border-b border-(--border) p-4">
       <button
         class="group relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-(--border) bg-(--accent)/10 text-(--text-muted) hover:border-(--accent)"
-        title="Choose an instance icon"
+        title={t('wizard-choose-icon')}
         onclick={() => (iconPickerOpen = true)}
       >
         {#if iconSrc()}
           <img src={iconSrc()} alt="" draggable="false" class="h-full w-full object-cover" />
           <span
             class="absolute inset-0 flex items-center justify-center bg-black/50 text-[10px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100"
-            >Change</span
+            >{t('wizard-change')}</span
           >
         {:else}
           <span class="text-[22px] leading-none">＋</span>
-          <span class="mt-0.5 text-[9px] uppercase tracking-wide">Icon</span>
+          <span class="mt-0.5 text-[9px] uppercase tracking-wide">{t('wizard-icon')}</span>
         {/if}
       </button>
 
       <div class="min-w-0 flex-1">
         <input
           class="h-9 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-          placeholder={selectedVersion ? `Instance name (${selectedVersion})` : 'Instance name'}
+          placeholder={selectedVersion
+            ? t('wizard-instance-name-version', { version: selectedVersion })
+            : t('wizard-instance-name')}
           bind:value={name}
         />
         <div class="mt-2 flex items-center gap-2">
-          <label class="shrink-0 text-[11px] text-(--text-muted)" for="wizard-group">Group</label>
+          <label class="shrink-0 text-[11px] text-(--text-muted)" for="wizard-group">{t('wizard-group')}</label>
           <select
             id="wizard-group"
             class="h-8 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2 text-[12px] outline-none focus:border-(--accent)"
             bind:value={group}
           >
-            <option value="">No group</option>
+            <option value="">{t('wizard-no-group')}</option>
             {#each groups as g (g)}
               <option value={g}>{g}</option>
             {/each}
@@ -387,7 +394,7 @@
 
       <button
         class="shrink-0 text-[13px] text-(--text-muted) hover:text-(--text-main)"
-        title="Close"
+        title={t('common-close')}
         onclick={() => onclose?.()}>✕</button
       >
     </div>
@@ -398,7 +405,7 @@
         <div class="min-h-0 flex-1 overflow-y-auto">
           {#if fetching}
             <div class="flex h-full items-center justify-center text-[12px] text-(--text-muted)">
-              Loading version list…
+              {t('wizard-loading-versions')}
             </div>
           {:else if versionsError}
             <div class="p-4">
@@ -407,7 +414,7 @@
               </div>
               <button
                 class="mt-2 rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
-                onclick={fetchCatalog}>Retry</button
+                onclick={fetchCatalog}>{t('common-retry')}</button
               >
             </div>
           {:else}
@@ -416,9 +423,9 @@
                 <tr
                   class="border-b border-(--border) text-[10px] uppercase tracking-wide text-(--text-muted)"
                 >
-                  <th class="px-3 py-2 font-medium">Version</th>
-                  <th class="w-[110px] px-3 py-2 font-medium">Released</th>
-                  <th class="w-[90px] px-3 py-2 font-medium">Type</th>
+                  <th class="px-3 py-2 font-medium">{t('wizard-version')}</th>
+                  <th class="w-[110px] px-3 py-2 font-medium">{t('wizard-released')}</th>
+                  <th class="w-[90px] px-3 py-2 font-medium">{t('wizard-type')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -442,7 +449,7 @@
                       {#if v.is_latest_release}
                         <span
                           class="ml-1.5 rounded bg-(--accent-star)/15 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-(--accent-star)"
-                          >latest</span
+                          >{t('wizard-latest')}</span
                         >
                       {/if}
                     </td>
@@ -452,7 +459,7 @@
                 {:else}
                   <tr>
                     <td colspan="3" class="px-3 py-6 text-center text-[12px] text-(--text-muted)">
-                      No versions match this filter.
+                      {t('wizard-no-versions')}
                     </td>
                   </tr>
                 {/each}
@@ -465,17 +472,19 @@
         <div class="flex items-center gap-2 border-t border-(--border) p-2">
           <input
             class="h-8 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-            placeholder="Search versions…"
+            placeholder={t('wizard-search')}
             bind:value={query}
             disabled={!catalog}
           />
-          <span class="shrink-0 text-[10px] text-(--text-muted)">{filteredVersions.length} shown</span>
+          <span class="shrink-0 text-[10px] text-(--text-muted)"
+            >{t('wizard-shown', { count: filteredVersions.length })}</span
+          >
         </div>
       </div>
 
       <aside class="flex w-[240px] shrink-0 flex-col gap-4 overflow-y-auto p-3">
         <section>
-          <h4 class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">Types</h4>
+          <h4 class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('wizard-types')}</h4>
           <div class="mt-1.5 flex flex-col gap-1">
             {#each TYPE_FILTERS as filter (filter.id)}
               <label class="flex cursor-pointer items-center gap-2 text-[12px]">
@@ -485,14 +494,14 @@
                   checked={enabledTypes.has(filter.id)}
                   onchange={() => toggleType(filter.id)}
                 />
-                <span>{filter.label}</span>
+                <span>{t(filter.label)}</span>
               </label>
             {/each}
           </div>
         </section>
 
         <section class="border-t border-(--border) pt-3">
-          <h4 class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">Mod loader</h4>
+          <h4 class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('wizard-mod-loader')}</h4>
           <div class="mt-1.5 flex flex-col gap-1">
             {#each LOADERS as option (option.id)}
               <label class="flex cursor-pointer items-center gap-2 text-[12px]">
@@ -504,24 +513,22 @@
                   checked={loader === option.id}
                   onchange={() => pickLoader(option.id)}
                 />
-                <span>{option.label}</span>
+                <span>{option.id ? option.label : t('wizard-loader-none')}</span>
               </label>
             {/each}
           </div>
 
           {#if unsupportedLoader}
             <p class="mt-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-400">
-              This mod loader is not supported yet.
+              {t('wizard-unsupported')}
             </p>
           {:else if !loader}
-            <p class="mt-2 text-[11px] text-(--text-muted)">No mod loader is selected.</p>
+            <p class="mt-2 text-[11px] text-(--text-muted)">{t('wizard-no-loader')}</p>
           {/if}
 
           {#if loader === 'horizon'}
             <p class="mt-2 rounded border border-(--border) bg-(--bg-subtle) p-2 text-[11px] leading-relaxed text-(--text-muted)">
-              Native Rust engine: launches vanilla worlds without Java, using the verified asset
-              store. Set the Horizon binary path in <strong>Settings → Horizon Engine</strong> before
-              the first launch.
+              {t('wizard-horizon-note')}
             </p>
           {/if}
 
@@ -530,14 +537,13 @@
               role="alert"
               class="mt-2 rounded border border-red-500/40 bg-red-500/10 p-2.5 text-[11px] leading-relaxed text-red-300"
             >
-              <p class="font-semibold text-red-400">Warning (Advanced Users)</p>
+              <p class="font-semibold text-red-400">{t('wizard-cleanroom-title')}</p>
               <p class="mt-1">
-                CleanroomMC runs 1.12.2 on modern Java (21+). Do NOT use it unless you understand how
-                it works — it is prone to crashes and only a limited subset of Forge mods support it.
+                {t('wizard-cleanroom-body')}
               </p>
               {#if cleanroomRequires1122}
                 <p class="mt-1.5 font-medium">
-                  Cleanroom only runs Minecraft 1.12.2 — select that version to continue.
+                  {t('wizard-cleanroom-version')}
                 </p>
               {/if}
             </div>
@@ -548,16 +554,14 @@
               role="alert"
               class="mt-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-400"
             >
-              Legacy Fabric targets Minecraft {LEGACY_MAX} and older; newer versions should use
-              regular <strong>Fabric</strong>.
+              {t('wizard-legacy-warning', { version: LEGACY_MAX })}
             </div>
           {:else if loader === '' && legacyFabricRecommended}
             <p
               role="status"
               class="mt-2 rounded border border-amber-500/20 bg-amber-500/5 p-2 text-[11px] text-amber-400"
             >
-              Minecraft {selectedVersion} predates modern Fabric — <strong>Legacy Fabric</strong> is
-              the recommended loader for it.
+              {t('wizard-legacy-recommended', { version: selectedVersion })}
             </p>
           {/if}
 
@@ -566,20 +570,18 @@
               role="alert"
               class="mt-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-400"
             >
-              Blind Mode Notice: Vanilla Minecraft's built-in Narrator lacks 3D world navigation and
-              block inspection. We strongly recommend selecting <strong>Fabric</strong> or
-              <strong>Quilt</strong> with Minecraft Access.
+              {t('wizard-blind-notice')}
             </div>
           {/if}
 
           {#if (loader === 'fabric' || loader === 'quilt') && assistOptions.length}
             <section class="mt-3 border-t border-(--border) pt-3">
               <h4 class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">
-                Accessibility mods
+                {t('wizard-a11y-mods')}
               </h4>
               <p class="mt-0.5 text-[10px] text-(--text-muted)">
-                Installed right after the instance is created.
-                {loader === 'quilt' ? 'Dependencies resolve through QFAPI.' : ''}
+                {t('wizard-a11y-installed')}
+                {loader === 'quilt' ? t('wizard-a11y-qfapi') : ''}
               </p>
               <div class="mt-1.5 flex flex-col gap-1.5">
                 {#each assistOptions as mod (mod.id)}
@@ -592,7 +594,7 @@
                     />
                     <span>
                       <span>{mod.label}</span>
-                      <span class="block text-[10px] text-(--text-muted)">{mod.hint}</span>
+                      <span class="block text-[10px] text-(--text-muted)">{t(mod.hint)}</span>
                     </span>
                   </label>
                 {/each}
@@ -603,32 +605,32 @@
           {#if needsBuilds}
             <label
               class="mt-2 block text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)"
-              for="loader-build">Loader version</label
+              for="loader-build">{t('wizard-loader-version')}</label
             >
             {#if loaderBuildsState === 'loading'}
               <div
                 class="mt-1 flex h-8 items-center rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[11px] text-(--text-muted)"
               >
-                Loading builds…
+                {t('wizard-loading-builds')}
               </div>
             {:else if loaderBuildsState === 'error'}
               <input
                 id="loader-build"
                 class="mt-1 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none focus:border-(--accent)"
                 bind:value={loaderVersion}
-                placeholder="version (empty = latest stable)"
+                placeholder={t('wizard-build-placeholder')}
               />
-              <p class="mt-1 text-[10px] text-(--accent-star)">Build list unavailable — type a version.</p>
+              <p class="mt-1 text-[10px] text-(--accent-star)">{t('wizard-build-unavailable')}</p>
             {:else}
               <select
                 id="loader-build"
-                class="mt-1 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2 text-[12px] outline-none focus:border-(--accent)"
+                class="mt-1 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none focus:border-(--accent)"
                 bind:value={loaderVersion}
               >
-                <option value="">Latest stable</option>
+                <option value="">{t('wizard-latest-stable')}</option>
                 {#each loaderBuilds as build (build.version)}
                   <option value={build.version}>
-                    {build.version}{build.stable ? '' : ' (unstable)'}
+                    {build.version}{build.stable ? '' : ` ${t('wizard-unstable')}`}
                   </option>
                 {/each}
               </select>
@@ -642,27 +644,27 @@
     <div class="flex items-center gap-2 border-t border-(--border) px-4 py-3">
       <button
         class="rounded px-2 py-1.5 text-[12px] text-(--text-muted) hover:text-(--text-main)"
-        title="Opens the project README"
-        onclick={openHelp}>Help</button
+        title={t('wizard-help-title')}
+        onclick={openHelp}>{t('wizard-help')}</button
       >
       {#if createError}
         <span class="min-w-0 flex-1 truncate text-[11px] text-red-400" title={createError}>{createError}</span>
       {:else}
         <span class="min-w-0 flex-1 truncate text-[11px] text-(--text-muted)">
-          {selectedVersion ? `Selected Minecraft ${selectedVersion}` : 'Pick a version to continue'}
+          {selectedVersion ? t('wizard-selected', { version: selectedVersion }) : t('wizard-pick')}
         </span>
       {/if}
       <button
         class="rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:text-(--text-main)"
-        onclick={() => onclose?.()}>Cancel</button
+        onclick={() => onclose?.()}>{t('common-cancel')}</button
       >
       <button
         class="rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
         disabled={!canCreate}
-        title={unsupportedLoader ? 'This mod loader is not supported yet.' : 'Create the instance'}
+        title={unsupportedLoader ? t('wizard-unsupported') : t('wizard-create-title')}
         onclick={create}
       >
-        {creating ? 'Creating…' : 'OK'}
+        {creating ? t('wizard-creating') : t('common-ok')}
       </button>
     </div>
   </div>

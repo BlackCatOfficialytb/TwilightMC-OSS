@@ -67,7 +67,12 @@ const dateFormats = new Map<Locale, Intl.DateTimeFormat>();
 let activeLocale = $state<Locale>(detectLocale());
 
 if (typeof document !== 'undefined') {
-  document.documentElement.lang = activeLocale;
+  // reactive: keeps <html lang> in sync on every locale switch
+  $effect.root(() => {
+    $effect(() => {
+      document.documentElement.lang = activeLocale;
+    });
+  });
 }
 
 /** Current UI locale (reactive when read inside components). */
@@ -83,9 +88,6 @@ export function setLocale(locale: Locale): void {
     localStorage.setItem(STORAGE_KEY, locale);
   } catch {
     // Persistence is best-effort; the switch still applies for this session.
-  }
-  if (typeof document !== 'undefined') {
-    document.documentElement.lang = locale;
   }
 }
 
