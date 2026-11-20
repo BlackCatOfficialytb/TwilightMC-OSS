@@ -209,7 +209,7 @@ fn pick_primary_file(entry: &serde_json::Value) -> Option<(String, String, Optio
     first_jar
 }
 
-fn client_ua() -> &'static str {
+pub(crate) fn client_ua() -> &'static str {
     concat!(
         "twilight-ui/",
         env!("CARGO_PKG_VERSION"),

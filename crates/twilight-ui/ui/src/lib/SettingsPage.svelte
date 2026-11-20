@@ -904,6 +904,9 @@
           {#if apiKeyError}
             <p class="mt-2 text-[11px] text-rose-400">{apiKeyError}</p>
           {/if}
+          <button class="mt-2 text-[11px] text-(--accent) hover:underline" onclick={() => onopenurl?.('https://console.curseforge.com/#/api-keys')}>
+            ↗ {t('settings-cf-get-key')}
+          </button>
         </div>
       {:else if section === 'accessibility'}
         <h2 class="text-[16px] font-semibold">{t('settings-a11y-title')}</h2>

@@ -12,6 +12,15 @@
 
   let { instance, onclose, oninstalled } = $props();
 
+  // ---- source: Modrinth (default) or CurseForge ----
+  // CurseForge search needs the personal API key from Settings; blocked
+  // files (no distribution URL) fall back to "Open in Browser" + manual
+  // import into the instance mods dir.
+  let source = $state('modrinth');
+  let hasCfKey = $state(false);
+  let cfInstalling = $state(false);
+  let fallbackTarget = $state(null);
+
   // Modrinth search categories only know real loaders; vanilla (and any
   // unknown tag) searches across every loader facet instead.
   const KNOWN_LOADERS = ['fabric', 'quilt', 'forge', 'neoforge', 'legacy-fabric'];
@@ -94,14 +103,46 @@
     return core.invoke(cmd, args);
   }
 
+  function switchSource(next) {
+    if (source === next) return;
+    source = next;
+    results = null;
+    searchError = '';
+  }
+
   // Debounced live search: each keystroke cancels the pending timer, the
   // sequence id drops stale responses after the query moved on.
   $effect(() => {
     const q = query.trim();
     const cats = [...categories];
     const index = sort;
+    const src = source;
+    const keyed = hasCfKey;
     const id = ++seq;
     const timer = setTimeout(() => {
+      if (src === 'curseforge') {
+        if (!keyed) return; // the key-required notice renders instead
+        searching = true;
+        searchError = '';
+        invoke('search_curseforge_mods', {
+          query: q,
+          gameVersion: instance.minecraft_version,
+          loader: loaderTag,
+        })
+          .then((rows) => {
+            if (id === seq) {
+              results = rows;
+              searching = false;
+            }
+          })
+          .catch((e) => {
+            if (id === seq) {
+              searchError = String(e);
+              searching = false;
+            }
+          });
+        return;
+      }
       searching = true;
       searchError = '';
       invoke('search_modrinth_mods', {
@@ -133,6 +174,7 @@
     details = null;
     detailsError = '';
     versionPicked = '';
+    if (source === 'curseforge') return; // the search hit carries its own download info
     const token = ++detailsSeq;
     detailsLoading = true;
     try {
@@ -146,6 +188,56 @@
       if (token === detailsSeq) detailsError = String(e);
     } finally {
       if (token === detailsSeq) detailsLoading = false;
+    }
+  }
+
+  // ---- CurseForge install + blocked-distribution fallback ----
+  async function installCurse(row) {
+    if (!row.download_url) {
+      fallbackTarget = row; // blocked for distribution → manual fallback dialog
+      return;
+    }
+    cfInstalling = true;
+    try {
+      const name = await invoke('install_curseforge_mod', {
+        instanceId: instance.id,
+        downloadUrl: row.download_url,
+        fileName: row.file_name,
+        sha1: row.sha1 || null,
+      });
+      installedNames = [...installedNames, name.toLowerCase()];
+      toast(t('curseforge-installed', { name }), 'success');
+    } catch (e) {
+      toast(String(e), 'error');
+    } finally {
+      cfInstalling = false;
+    }
+  }
+
+  function openFallbackBrowser() {
+    const url = fallbackTarget?.website_url;
+    if (url) invoke('open_external_url', { url }).catch(() => {});
+  }
+
+  async function importFallbackJar() {
+    try {
+      const dialog = window.__TAURI__?.dialog;
+      if (!dialog) {
+        toast(t('status-file-picker-unavailable'), 'warning');
+        return;
+      }
+      const path = await dialog.open({
+        multiple: false,
+        filters: [{ name: 'Minecraft mod', extensions: ['jar'] }],
+      });
+      if (!path) return;
+      await invoke('import_mod', { instanceId: instance.id, jarPath: path });
+      const name = String(path).split(/[\\/]/).pop();
+      installedNames = [...installedNames, name.toLowerCase()];
+      toast(t('curseforge-imported', { name }), 'success');
+      fallbackTarget = null;
+    } catch (e) {
+      toast(String(e), 'error');
     }
   }
 
@@ -179,6 +271,9 @@
     invoke('list_instance_mods', { instanceId: instance.id })
       .then((mods) => (installedNames = mods.map((m) => m.filename.toLowerCase())))
       .catch(() => {});
+    invoke('get_curseforge_api_key')
+      .then((key) => (hasCfKey = !!String(key ?? '').trim()))
+      .catch(() => {});
     return () => popOverlay(closer);
   });
 </script>
@@ -206,47 +301,69 @@
           })}
         </p>
       </div>
-      <button class="text-(--fg-2) hover:text-(--fg-1)" onclick={() => onclose?.()}>✕</button>
+      <div class="flex items-center gap-2">
+        <div class="flex items-center gap-0.5 rounded border border-(--border-1) bg-(--bg-3) p-0.5">
+          <button
+            class="rounded px-2.5 py-1 text-(--step-meta) font-medium {source === 'modrinth'
+              ? 'bg-(--accent-1) text-(--on-accent)'
+              : 'text-(--fg-2) hover:text-(--fg-1)'}"
+            onclick={() => switchSource('modrinth')}
+          >
+            Modrinth
+          </button>
+          <button
+            class="rounded px-2.5 py-1 text-(--step-meta) font-medium {source === 'curseforge'
+              ? 'bg-(--accent-1) text-(--on-accent)'
+              : 'text-(--fg-2) hover:text-(--fg-1)'}"
+            onclick={() => switchSource('curseforge')}
+          >
+            CurseForge
+          </button>
+        </div>
+        <button class="text-(--fg-2) hover:text-(--fg-1)" onclick={() => onclose?.()}>✕</button>
+      </div>
     </div>
 
     <!-- three panes -->
     <div class="flex min-h-0 flex-1">
-      <!-- left: filters -->
-      <aside class="flex w-[200px] shrink-0 flex-col gap-4 overflow-y-auto border-r border-(--border-1) p-3">
-        <section>
-          <h4 class="text-(--step-caption) font-semibold uppercase tracking-wide text-(--fg-2)">
-            {t('modrinth-categories')}
-          </h4>
-          <div class="mt-1.5 flex flex-col gap-1">
-            {#each CATEGORIES as tag (tag)}
-              <label class="flex cursor-pointer items-center gap-2 text-(--step-body) capitalize">
-                <input
-                  type="checkbox"
-                  class="h-3.5 w-3.5 accent-(--accent-1)"
-                  checked={categories.has(tag)}
-                  onchange={() => toggleCategory(tag)}
-                />
-                <span>{t(`modrinth-category-${tag}`)}</span>
-              </label>
-            {/each}
-          </div>
-        </section>
-        <section class="border-t border-(--border-1) pt-3">
-          <label
-            class="text-(--step-caption) font-semibold uppercase tracking-wide text-(--fg-2)"
-            for="mods-sort">{t('modrinth-sort')}</label
-          >
-          <select
-            id="mods-sort"
-            class="mt-1.5 h-8 w-full rounded border border-(--border-1) bg-(--bg-3) px-2 text-(--step-body) text-(--fg-1) outline-none focus:border-(--accent-1)"
-            bind:value={sort}
-          >
-            {#each SORTS as s (s)}
-              <option value={s}>{t(`modrinth-sort-${s}`)}</option>
-            {/each}
-          </select>
-        </section>
-      </aside>
+      <!-- left: filters (Modrinth facets; CurseForge search has none) -->
+      {#if source === 'modrinth'}
+        <aside class="flex w-[200px] shrink-0 flex-col gap-4 overflow-y-auto border-r border-(--border-1) p-3">
+          <section>
+            <h4 class="text-(--step-caption) font-semibold uppercase tracking-wide text-(--fg-2)">
+              {t('modrinth-categories')}
+            </h4>
+            <div class="mt-1.5 flex flex-col gap-1">
+              {#each CATEGORIES as tag (tag)}
+                <label class="flex cursor-pointer items-center gap-2 text-(--step-body) capitalize">
+                  <input
+                    type="checkbox"
+                    class="h-3.5 w-3.5 accent-(--accent-1)"
+                    checked={categories.has(tag)}
+                    onchange={() => toggleCategory(tag)}
+                  />
+                  <span>{t(`modrinth-category-${tag}`)}</span>
+                </label>
+              {/each}
+            </div>
+          </section>
+          <section class="border-t border-(--border-1) pt-3">
+            <label
+              class="text-(--step-caption) font-semibold uppercase tracking-wide text-(--fg-2)"
+              for="mods-sort">{t('modrinth-sort')}</label
+            >
+            <select
+              id="mods-sort"
+              class="mt-1.5 h-8 w-full rounded border border-(--border-1) bg-(--bg-3) px-2 text-(--step-body) text-(--fg-1) outline-none focus:border-(--accent-1)"
+              bind:value={sort}
+            >
+              {#each SORTS as s (s)}
+                <option value={s}>{t(`modrinth-sort-${s}`)}</option>
+              {/each}
+            </select>
+          </section>
+        </aside>
+      {/if}
 
       <!-- center: search + list -->
       <section class="flex min-w-0 flex-1 flex-col">
@@ -263,7 +380,12 @@
               {searchError}
             </div>
           {/if}
-          {#if !results}
+          {#if source === 'curseforge' && !hasCfKey}
+            <div class="p-6 text-center text-(--step-body) text-(--fg-2)">
+              <p class="mt-3">{t('curseforge-key-required')}</p>
+              <p class="mt-1.5 text-(--step-meta)">{t('curseforge-key-hint')}</p>
+            </div>
+          {:else if !results}
             <div class="p-6 text-center text-(--step-body) text-(--fg-2)">
               {searching ? t('modrinth-searching') : t('modrinth-type-to-search')}
             </div>
@@ -306,6 +428,12 @@
                         <span
                           class="shrink-0 rounded bg-green-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-green-500"
                           >{t('modrinth-installed')}</span
+                        >
+                      {/if}
+                      {#if source === 'curseforge' && !row.download_url}
+                        <span
+                          class="shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-500"
+                          >{t('curseforge-blocked')}</span
                         >
                       {/if}
                       {#if inQueue(row.project_id)}
@@ -366,34 +494,47 @@
             </div>
           </div>
 
-          <div class="border-b border-(--border-1) p-3">
-            <label
-              class="text-(--step-caption) font-semibold uppercase tracking-wide text-(--fg-2)"
-              for="mods-version">{t('modrinth-version')}</label
-            >
-            {#if detailsLoading}
-              <div class="mt-1 flex h-8 items-center rounded border border-(--border-1) bg-(--bg-3) px-2.5 text-(--step-meta) text-(--fg-2)">
-                {t('modrinth-loading-versions')}
-              </div>
-            {:else if details?.versions?.length}
-              <select
-                id="mods-version"
-                class="mt-1 h-8 w-full rounded border border-(--border-1) bg-(--bg-3) px-2 text-(--step-body) text-(--fg-1) outline-none focus:border-(--accent-1)"
-                bind:value={versionPicked}
+          {#if source === 'modrinth'}
+            <div class="border-b border-(--border-1) p-3">
+              <label
+                class="text-(--step-caption) font-semibold uppercase tracking-wide text-(--fg-2)"
+                for="mods-version">{t('modrinth-version')}</label
               >
-                <option value="">{t('modrinth-latest', { version: details.versions[0]?.version })}</option>
-                {#each details.versions as v (v.id)}
-                  <option value={v.id}>
-                    {v.version}{v.version_type && v.version_type !== 'release' ? ` (${v.version_type})` : ''}
-                  </option>
-                {/each}
-              </select>
-            {:else}
-              <div class="mt-1 h-8 rounded border border-(--border-1) bg-(--bg-3) px-2.5 text-(--step-meta) leading-8 text-(--fg-2)">
-                {t('modrinth-latest-compatible')}
-              </div>
-            {/if}
-          </div>
+              {#if detailsLoading}
+                <div class="mt-1 flex h-8 items-center rounded border border-(--border-1) bg-(--bg-3) px-2.5 text-(--step-meta) text-(--fg-2)">
+                  {t('modrinth-loading-versions')}
+                </div>
+              {:else if details?.versions?.length}
+                <select
+                  id="mods-version"
+                  class="mt-1 h-8 w-full rounded border border-(--border-1) bg-(--bg-3) px-2 text-(--step-body) text-(--fg-1) outline-none focus:border-(--accent-1)"
+                  bind:value={versionPicked}
+                >
+                  <option value="">{t('modrinth-latest', { version: details.versions[0]?.version })}</option>
+                  {#each details.versions as v (v.id)}
+                    <option value={v.id}>
+                      {v.version}{v.version_type && v.version_type !== 'release' ? ` (${v.version_type})` : ''}
+                    </option>
+                  {/each}
+                </select>
+              {:else}
+                <div class="mt-1 h-8 rounded border border-(--border-1) bg-(--bg-3) px-2.5 text-(--step-meta) leading-8 text-(--fg-2)">
+                  {t('modrinth-latest-compatible')}
+                </div>
+              {/if}
+            </div>
+          {:else}
+            <div class="border-b border-(--border-1) p-3">
+              <button
+                class="flex w-full items-center justify-center gap-1.5 rounded bg-(--accent-1) px-4 py-1.5 text-(--step-body) font-medium text-(--on-accent) hover:bg-(--accent-1-hover) disabled:opacity-40"
+                disabled={cfInstalling}
+                title={t('curseforge-install')}
+                onclick={() => installCurse(selected)}
+              >
+                <LauncherIcon name="download" size={13} /> {t('curseforge-install')}
+              </button>
+            </div>
+          {/if}
 
           <div class="min-h-0 flex-1 p-3">
             <div class="text-(--step-body) text-(--fg-2)">{selected.description}</div>
@@ -410,34 +551,36 @@
       </aside>
     </div>
 
-    <!-- bottom staging bar -->
-    <div class="flex items-center justify-between gap-2 border-t border-(--border-1) px-4 py-3">
-      <span class="text-(--step-body) text-(--fg-2)">
-        {queue.length === 0
-          ? t('modrinth-no-mods')
-          : t('modrinth-selected', { count: queue.length })}
-        {#if queue.length}
-          <span class="ml-1 text-[10px]">({queue.map((q) => q.title).join(', ')})</span>
-        {/if}
-      </span>
-      <div class="flex items-center gap-2">
-        <button
-          class="rounded px-3 py-1.5 text-(--step-body) text-(--fg-2) hover:bg-(--bg-3) hover:text-(--fg-1) disabled:opacity-40"
-          disabled={!queue.length}
-          onclick={() => (queue = [])}
-        >
-          {t('modrinth-clear')}
-        </button>
-        <button
-          class="flex items-center gap-1.5 rounded bg-(--accent-1) px-4 py-1.5 text-(--step-body) font-medium text-(--on-accent) hover:bg-(--accent-1-hover) disabled:opacity-40"
-          disabled={!queue.length}
-          title={t('modrinth-review-title')}
-          onclick={openReview}
-        >
-          <LauncherIcon name="download" size={13} /> {t('modrinth-review')}
-        </button>
+    <!-- bottom staging bar (Modrinth queue flow; CurseForge installs directly) -->
+    {#if source === 'modrinth'}
+      <div class="flex items-center justify-between gap-2 border-t border-(--border-1) px-4 py-3">
+        <span class="text-(--step-body) text-(--fg-2)">
+          {queue.length === 0
+            ? t('modrinth-no-mods')
+            : t('modrinth-selected', { count: queue.length })}
+          {#if queue.length}
+            <span class="ml-1 text-[10px]">({queue.map((q) => q.title).join(', ')})</span>
+          {/if}
+        </span>
+        <div class="flex items-center gap-2">
+          <button
+            class="rounded px-3 py-1.5 text-(--step-body) text-(--fg-2) hover:bg-(--bg-3) hover:text-(--fg-1) disabled:opacity-40"
+            disabled={!queue.length}
+            onclick={() => (queue = [])}
+          >
+            {t('modrinth-clear')}
+          </button>
+          <button
+            class="flex items-center gap-1.5 rounded bg-(--accent-1) px-4 py-1.5 text-(--step-body) font-medium text-(--on-accent) hover:bg-(--accent-1-hover) disabled:opacity-40"
+            disabled={!queue.length}
+            title={t('modrinth-review-title')}
+            onclick={openReview}
+          >
+            <LauncherIcon name="download" size={13} /> {t('modrinth-review')}
+          </button>
+        </div>
       </div>
-    </div>
+    {/if}
   </div>
 </div>
 
@@ -452,4 +595,44 @@
       oninstalled?.(names);
     }}
   />
+{/if}
+
+{#if fallbackTarget}
+  <div
+    role="presentation"
+    class="fixed inset-0 z-[60] flex items-center justify-center"
+    style="background: var(--scrim)"
+    onclick={(e) => {
+      if (e.target === e.currentTarget) fallbackTarget = null;
+    }}
+  >
+    <div class="w-[460px] max-w-[90vw] rounded-lg border border-(--border-1) bg-(--bg-2) p-5 shadow-2xl">
+      <h4 class="text-(--step-heading) font-semibold text-(--fg-1)">
+        {t('curseforge-fallback-title')}
+      </h4>
+      <p class="mt-2 text-(--step-body) text-(--fg-2)">
+        {t('curseforge-fallback-desc', { name: fallbackTarget.title })}
+      </p>
+      <div class="mt-4 flex justify-end gap-2">
+        <button
+          class="rounded px-3 py-1.5 text-(--step-body) text-(--fg-2) hover:bg-(--bg-3) hover:text-(--fg-1)"
+          onclick={() => (fallbackTarget = null)}
+        >
+          {t('common-cancel')}
+        </button>
+        <button
+          class="rounded border border-(--border-1) px-3 py-1.5 text-(--step-body) text-(--fg-1) hover:bg-(--bg-3)"
+          onclick={openFallbackBrowser}
+        >
+          {t('curseforge-open-browser')}
+        </button>
+        <button
+          class="flex items-center gap-1.5 rounded bg-(--accent-1) px-4 py-1.5 text-(--step-body) font-medium text-(--on-accent) hover:bg-(--accent-1-hover)"
+          onclick={importFallbackJar}
+        >
+          {t('curseforge-import-jar')}
+        </button>
+      </div>
+    </div>
+  </div>
 {/if}

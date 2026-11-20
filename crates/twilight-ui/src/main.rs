@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod accounts;
+mod curseforge;
 mod export;
 mod instance;
 mod instances;
@@ -183,6 +184,8 @@ fn main() {
             modrinth::get_modrinth_project_details,
             modrinth::install_modrinth_batch,
             modrinth::install_cleanroom_core_mods,
+            curseforge::search_curseforge_mods,
+            curseforge::install_curseforge_mod,
             launch::launch_instance,
             launch::kill_instance,
             instances::get_instances,

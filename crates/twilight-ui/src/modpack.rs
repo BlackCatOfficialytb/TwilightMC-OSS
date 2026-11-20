@@ -283,7 +283,7 @@ pub struct CurseImportReport {
     pub barebones_marker: bool,
 }
 
-const CF_API_BASE: &str = "https://api.curseforge.com/v1";
+pub(crate) const CF_API_BASE: &str = "https://api.curseforge.com/v1";
 
 /// Resolves the instance `minecraft` dir a CurseForge pack extracts into.
 async fn game_dir_for(app: &AppHandle, instance_id: &str) -> Result<PathBuf, String> {
@@ -313,7 +313,7 @@ fn override_dest(game_dir: &Path, overrides_dir: &str, name: &str) -> Option<Pat
 
 /// Mod-jar file name for a CurseForge download: the API's `fileName` (or the
 /// URL's last segment), stripped of path/separator characters.
-fn curse_file_name(file_name: &str, url: &str) -> String {
+pub(crate) fn curse_file_name(file_name: &str, url: &str) -> String {
     let raw = if !file_name.is_empty() {
         file_name.to_owned()
     } else {
