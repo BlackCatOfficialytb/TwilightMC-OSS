@@ -15,13 +15,13 @@ const BASE = (import.meta.env.BASE_URL ?? '/').replace(/\/{2,}/g, '/');
 
 /** The selector options shown in Settings → Appearance. */
 export const ICON_PACKS = [
-  { id: 'fluent-auto', label: 'Fluent (Auto)', hint: 'Freesm Fluent · follows the theme' },
-  { id: 'fluent', label: 'Fluent Light', hint: 'Freesm Fluent · light ink' },
-  { id: 'fluent_dark', label: 'Fluent Dark', hint: 'Freesm Fluent · white ink' },
-  { id: 'breeze_dark', label: 'Breeze Dark', hint: 'Prism · KDE Breeze dark' },
-  { id: 'breeze_light', label: 'Breeze Light', hint: 'Prism · KDE Breeze light' },
-  { id: 'pe_colored', label: 'Prism PE Colored', hint: 'Prism · full-color PE' },
-  { id: 'twemoji', label: 'Twemoji', hint: 'Emoji glyphs · the classic look' },
+  { id: 'fluent-auto', label: 'Fluent (Auto)' },
+  { id: 'fluent', label: 'Fluent Light' },
+  { id: 'fluent_dark', label: 'Fluent Dark' },
+  { id: 'breeze_dark', label: 'Breeze Dark' },
+  { id: 'breeze_light', label: 'Breeze Light' },
+  { id: 'pe_colored', label: 'Prism PE Colored' },
+  { id: 'twemoji', label: 'Twemoji' },
 ] as const;
 
 export type IconPackId = (typeof ICON_PACKS)[number]['id'];

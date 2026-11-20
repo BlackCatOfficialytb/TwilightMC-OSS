@@ -15,6 +15,7 @@
     listCustomThemes,
     saveCustomTheme,
   } from './theme';
+  import { t, getLocale, setLocale, SUPPORTED_LOCALES } from './i18n.svelte.ts';
 
   let {
     version = '',
@@ -57,7 +58,7 @@
   async function browseJava() {
     const open = window.__TAURI__?.dialog?.open;
     if (!open) {
-      javaPickError = 'File picker unavailable in this build.';
+      javaPickError = t('status-file-picker-unavailable');
       return;
     }
     javaPickError = '';
@@ -65,8 +66,8 @@
     try {
       const picked = await open({
         multiple: false,
-        title: 'Select a Java executable',
-        filters: [{ name: 'Java', extensions: ['exe', ''] }],
+        title: t('settings-choose-java'),
+        filters: [{ name: t('filter-java'), extensions: ['exe', ''] }],
       });
       if (!picked) return;
       javaBusy = true;
@@ -74,7 +75,7 @@
       const probed = await window.__TAURI__.core.invoke('probe_java_path', { path: String(picked) });
       const saved = await onaddjava?.(probed.executable);
       if (Array.isArray(saved)) addedJava = saved;
-      javaPickMsg = `Added Java ${probed.major} (${probed.version})`;
+      javaPickMsg = t('settings-java-added', { major: probed.major, version: probed.version });
     } catch (e) {
       javaPickError = String(e);
     } finally {
@@ -89,7 +90,7 @@
       await onapplyjava?.(path || null);
       appliedPath = path || '';
       javaPath = path || '';
-      javaPickMsg = path ? 'Applied. Launches will use this runtime.' : 'Reverted to auto-discovery.';
+      javaPickMsg = path ? t('settings-java-applied') : t('settings-java-reverted');
     } catch (e) {
       javaPickError = String(e);
     } finally {
@@ -123,7 +124,7 @@
   async function browseHorizon() {
     const open = window.__TAURI__?.dialog?.open;
     if (!open) {
-      horizonError = 'File picker unavailable in this build.';
+      horizonError = t('status-file-picker-unavailable');
       return;
     }
     horizonError = '';
@@ -131,8 +132,8 @@
     try {
       const picked = await open({
         multiple: false,
-        title: 'Select the Horizon engine binary',
-        filters: [{ name: 'Executable', extensions: ['exe', ''] }],
+        title: t('settings-choose-horizon'),
+        filters: [{ name: t('filter-executable'), extensions: ['exe', ''] }],
       });
       if (!picked) return;
       horizonPath = String(picked);
@@ -152,8 +153,8 @@
       });
       await refreshHorizon();
       horizonMsg = horizonConfigured
-        ? 'Saved. Horizon instances will launch with this binary.'
-        : 'Cleared. Horizon instances cannot launch until a binary is set.';
+        ? t('settings-horizon-saved')
+        : t('settings-horizon-cleared');
     } catch (e) {
       horizonError = String(e);
     } finally {
@@ -162,13 +163,13 @@
   }
 
   const sections = [
-    { id: 'appearance', label: 'Appearance', icon: '🎨' },
-    { id: 'java', label: 'Java & Memory', icon: '☕' },
-    { id: 'horizon', label: 'Horizon Engine', icon: '⚙' },
-    { id: 'storage', label: 'Folders', icon: '📁' },
-    { id: 'apikeys', label: 'API Keys', icon: '🔑' },
-    { id: 'accessibility', label: 'Accessibility', icon: '♿' },
-    { id: 'about', label: 'About & Updates', icon: 'ℹ' },
+    { id: 'appearance', label: 'settings-appearance', icon: '🎨' },
+    { id: 'java', label: 'settings-java', icon: '☕' },
+    { id: 'horizon', label: 'settings-horizon', icon: '⚙' },
+    { id: 'storage', label: 'settings-storage', icon: '📁' },
+    { id: 'apikeys', label: 'settings-api', icon: '🔑' },
+    { id: 'accessibility', label: 'settings-accessibility', icon: '♿' },
+    { id: 'about', label: 'settings-about', icon: 'ℹ' },
   ];
   let section = $state('appearance');
   let iconPack = $state(getIconPack());
@@ -198,8 +199,8 @@
       apiKeyConfigured = key.configured;
       apiKey = '';
       apiKeyMsg = key.configured
-        ? 'Saved. Imported CurseForge packs will resolve their mod downloads.'
-        : 'Cleared. The zero-key flow (Modrinth core mods + manual import) stays active.';
+        ? t('settings-cf-saved')
+        : t('settings-cf-cleared');
     } catch (e) {
       apiKeyError = String(e);
     }
@@ -215,7 +216,7 @@
 
   function cloneCurrentTheme() {
     builderTokens = currentTokens();
-    customMsg = 'Loaded the active theme’s tokens — tweak and save.';
+    customMsg = t('settings-custom-loaded');
   }
 
   function saveTheme() {
@@ -227,7 +228,7 @@
       });
       customs = listCustomThemes();
       theme = saved.id;
-      customMsg = `Saved “${saved.name}”.`;
+      customMsg = t('settings-theme-saved', { name: saved.name });
     } catch (e) {
       customMsg = String(e);
     }
@@ -237,35 +238,35 @@
     deleteCustomTheme(id);
     customs = listCustomThemes();
     if (theme === id) theme = DEFAULT_THEME;
-    customMsg = 'Theme deleted.';
+    customMsg = t('settings-theme-deleted');
   }
 
   function exportTheme() {
     themeJson = JSON.stringify(
       {
-        name: builderName.trim() || 'My theme',
+        name: builderName.trim() || t('settings-theme-name'),
         dark: builderDark,
         tokens: builderTokens,
       },
       null,
       2,
     );
-    customMsg = 'Theme JSON written below — copy it to share.';
+    customMsg = t('settings-theme-exported');
   }
 
   function importTheme() {
     try {
       const raw = JSON.parse(themeJson);
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-        throw new Error('Expected a theme object.');
+        throw new Error(t('settings-theme-expected'));
       }
       const saved = saveCustomTheme(raw);
       customs = listCustomThemes();
       theme = saved.id;
-      customMsg = `Imported “${saved.name}”.`;
+      customMsg = t('settings-theme-imported', { name: saved.name });
       themeJson = '';
     } catch (e) {
-      customMsg = `Import failed: ${e}`;
+      customMsg = t('settings-theme-import-failed', { error: e });
     }
   }
 
@@ -289,15 +290,16 @@
   // ---- folders (the former Storage & Staging page) ----
   // Eight configurable roots; blank inputs keep the default subdirectory
   // under the app data folder (`io.github.blackcatofficialytb.twilightmc`).
+  // Labels and hints come from the settings-folder-* messages.
   const FOLDERS = [
-    { key: 'instances', label: 'Instances', hint: 'Instance library; adopts an existing Prism or FreesmLauncher store when present' },
-    { key: 'shared', label: 'Shared Libraries & Assets', hint: 'The artifact library launches draw from' },
-    { key: 'versions', label: 'Versions', hint: 'Version metadata & jars' },
-    { key: 'mods', label: 'Mods', hint: 'Central mods folder / cache' },
-    { key: 'icons', label: 'Icons', hint: 'Custom instance icons' },
-    { key: 'java', label: 'Java Runtimes', hint: 'Auto-downloaded Java' },
-    { key: 'skins', label: 'Skins', hint: 'Local skins & free capes store' },
-    { key: 'downloads', label: 'Downloads', hint: 'Downloads & temporary staging' },
+    { key: 'instances' },
+    { key: 'shared' },
+    { key: 'versions' },
+    { key: 'mods' },
+    { key: 'icons' },
+    { key: 'java' },
+    { key: 'skins' },
+    { key: 'downloads' },
   ];
 
   // Per-row editable text; blank = default. Re-seeded from the backend
@@ -338,15 +340,15 @@
   <!-- left navigation rail -->
   <nav
     class="flex w-56 shrink-0 flex-col border-r border-(--border) bg-(--bg-subtle) p-3"
-    aria-label="Settings sections"
+    aria-label={t('settings-sections-aria')}
   >
     <button
       class="mb-3 flex h-9 items-center gap-2 rounded px-2.5 text-left text-[13px] font-medium text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main)"
-      title="Back to the instance library"
+      title={t('settings-back-title')}
       onclick={onback}
     >
       <span class="w-5 shrink-0 text-center text-[15px]">←</span>
-      <span class="truncate">Back to Instances</span>
+      <span class="truncate">{t('header-back-instances')}</span>
     </button>
     <div class="flex flex-col gap-0.5">
       {#each sections as s (s.id)}
@@ -360,19 +362,19 @@
           <span class="flex w-5 shrink-0 items-center justify-center text-[15px]">
             <Twemoji emoji={s.icon} size={15} />
           </span>
-          <span class="truncate">{s.label}</span>
+          <span class="truncate">{t(s.label)}</span>
         </button>
       {/each}
     </div>
     <button
       class="mt-4 flex h-10 items-center gap-2.5 rounded px-2.5 text-left text-[13px] text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main)"
-      title="Open the dedicated Accounts page"
+      title={t('settings-accounts-title')}
       onclick={onopenaccounts}
     >
       <span class="flex w-5 shrink-0 items-center justify-center">
         <LauncherIcon name="accounts" size={15} />
       </span>
-      <span class="truncate">Accounts</span>
+      <span class="truncate">{t('nav-accounts')}</span>
     </button>
   </nav>
 
@@ -380,12 +382,12 @@
   <div class="min-w-0 flex-1 overflow-y-auto">
     <div class="mx-auto max-w-2xl p-8">
       {#if section === 'appearance'}
-        <h2 class="text-[16px] font-semibold">Appearance</h2>
+        <h2 class="text-[16px] font-semibold">{t('settings-appearance-title')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">
-          Theme mode and the accent that recolors the entire launcher.
+          {t('settings-appearance-desc')}
         </p>
 
-        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Theme</h3>
+        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('settings-theme')}</h3>
         <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
           {#each THEME_PRESETS as p (p.id)}
             <button
@@ -393,7 +395,10 @@
                 ? 'border-(--accent) bg-(--brand-tint)'
                 : 'border-(--border) hover:border-(--text-muted)'}"
               aria-pressed={theme === p.id}
-              title="{p.label}: {p.dark ? 'dark' : 'light'} ground"
+              title={t('settings-theme-ground-title', {
+                name: t(`theme-preset-${p.id}`),
+                ground: p.dark ? t('settings-dark-ground') : t('settings-light-ground'),
+              })}
               onclick={() => (theme = p.id)}
             >
               <span class="flex gap-1" aria-hidden="true">
@@ -401,8 +406,8 @@
                 <span class="h-4 w-4 rounded-full border border-black/20" style="background:{p.swatch[1]}"></span>
                 <span class="h-4 w-4 rounded-full border border-black/20" style="background:{p.swatch[2]}"></span>
               </span>
-              <span class="text-[12px] font-medium">{p.label}</span>
-              <span class="text-[10px] text-(--text-muted)">{p.dark ? 'Dark ground' : 'Light ground'}</span>
+              <span class="text-[12px] font-medium">{t(`theme-preset-${p.id}`)}</span>
+              <span class="text-[10px] text-(--text-muted)">{p.dark ? t('settings-dark-ground') : t('settings-light-ground')}</span>
             </button>
           {/each}
           {#each customs as c (c.id)}
@@ -413,7 +418,10 @@
                 : 'border-(--border) hover:border-(--text-muted)'}"
               role="button"
               tabindex="0"
-              title="{c.name}: {c.dark ? 'dark' : 'light'} ground"
+              title={t('settings-theme-ground-title', {
+                name: c.name,
+                ground: c.dark ? t('settings-dark-ground') : t('settings-light-ground'),
+              })}
               onclick={() => (theme = c.id)}
               onkeydown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
@@ -428,11 +436,11 @@
                 <span class="h-4 w-4 rounded-full border border-black/20" style="background:{c.tokens.accent1}"></span>
               </span>
               <span class="truncate pr-4 text-[12px] font-medium">{c.name}</span>
-              <span class="text-[10px] text-(--text-muted)">Custom · {c.dark ? 'Dark' : 'Light'} ground</span>
+              <span class="text-[10px] text-(--text-muted)">{t('common-custom')} · {c.dark ? t('settings-dark-ground') : t('settings-light-ground')}</span>
               <button
                 class="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded text-[10px] text-(--text-muted) hover:bg-rose-500/15 hover:text-rose-400"
-                title="Delete {c.name}"
-                aria-label="Delete {c.name}"
+                title={t('settings-delete-theme', { name: c.name })}
+                aria-label={t('settings-delete-theme', { name: c.name })}
                 onclick={(e) => {
                   e.stopPropagation();
                   removeTheme(c.id);
@@ -444,14 +452,14 @@
           {/each}
         </div>
 
-        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Accent color</h3>
+        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('settings-accent')}</h3>
         <div class="mt-3">
           <AccentPicker {theme} />
         </div>
 
-        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Icon pack</h3>
+        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('settings-icon-pack')}</h3>
         <p class="mt-1 text-[12px] text-(--text-muted)">
-          The glyph set used across the launcher. Fluent (Auto) follows the theme.
+          {t('settings-icon-pack-desc')}
         </p>
         <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {#each ICON_PACKS as p (p.id)}
@@ -460,7 +468,7 @@
                 ? 'border-(--accent) bg-(--brand-tint)'
                 : 'border-(--border) hover:border-(--text-muted)'}"
               aria-pressed={iconPack === p.id}
-              title="{p.label}: {p.hint}"
+              title="{t(`icon-pack-${p.id}`)}: {t(`pack-hint-${p.id}`)}"
               onclick={() => {
                 setIconPack(p.id);
                 iconPack = getIconPack();
@@ -471,25 +479,39 @@
                 <LauncherIcon name="settings" size={16} pack={p.id} />
                 <LauncherIcon name="accounts" size={16} pack={p.id} />
               </span>
-              <span class="text-[12px] font-medium">{p.label}</span>
-              <span class="text-[10px] text-(--text-muted)">{p.hint}</span>
+              <span class="text-[12px] font-medium">{t(`icon-pack-${p.id}`)}</span>
+              <span class="text-[10px] text-(--text-muted)">{t(`pack-hint-${p.id}`)}</span>
             </button>
           {/each}
         </div>
 
-        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Create a custom theme</h3>
+        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('settings-language')}</h3>
         <p class="mt-1 text-[12px] text-(--text-muted)">
-          Build your own palette; it lives in this browser and joins the grid above.
+          {t('settings-language-desc')}
+        </p>
+        <select
+          class="mt-3 h-9 w-full rounded border border-(--border) bg-(--bg-subtle) px-2 text-[13px] outline-none focus:border-(--accent)"
+          value={getLocale()}
+          onchange={(e) => setLocale(e.currentTarget.value)}
+        >
+          {#each SUPPORTED_LOCALES as loc (loc.id)}
+            <option value={loc.id}>{t(loc.label)}</option>
+          {/each}
+        </select>
+
+        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('settings-custom-theme')}</h3>
+        <p class="mt-1 text-[12px] text-(--text-muted)">
+          {t('settings-custom-theme-desc')}
         </p>
         <div class="mt-3 rounded border border-(--border) bg-(--bg-subtle) p-4">
           <div class="flex flex-wrap items-center gap-2">
             <input
               class="h-8 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-canvas) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-              placeholder="Theme name"
+              placeholder={t('settings-theme-name')}
               bind:value={builderName}
-              aria-label="Theme name"
+              aria-label={t('settings-theme-name')}
             />
-            <div class="flex overflow-hidden rounded border border-(--border)" role="group" aria-label="Ground type">
+            <div class="flex overflow-hidden rounded border border-(--border)" role="group" aria-label={t('settings-ground-type')}>
               <button
                 type="button"
                 class="px-3 py-1.5 text-[12px] {builderDark
@@ -498,7 +520,7 @@
                 aria-pressed={builderDark}
                 onclick={() => (builderDark = true)}
               >
-                Dark
+                {t('settings-dark')}
               </button>
               <button
                 type="button"
@@ -508,29 +530,29 @@
                 aria-pressed={!builderDark}
                 onclick={() => (builderDark = false)}
               >
-                Light
+                {t('settings-light')}
               </button>
             </div>
           </div>
           <div class="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
             {#each TOKEN_FIELDS as f (f.key)}
               <label class="flex flex-col gap-1">
-                <span class="text-[10px] uppercase tracking-wide text-(--text-muted)">{f.label}</span>
+                <span class="text-[10px] uppercase tracking-wide text-(--text-muted)">{t(`settings-token-${f.key}`)}</span>
                 <span class="flex items-center gap-1">
                   <input
                     type="color"
                     value={builderTokens[f.key]}
                     oninput={(e) => (builderTokens = { ...builderTokens, [f.key]: e.currentTarget.value })}
                     class="h-7 w-8 shrink-0 cursor-pointer rounded border border-(--border) bg-(--bg-canvas) p-0.5"
-                    title="{f.label} color"
-                    aria-label="{f.label} color"
+                    title={t('settings-token-color-label', { label: t(`settings-token-${f.key}`) })}
+                    aria-label={t('settings-token-color-label', { label: t(`settings-token-${f.key}`) })}
                   />
                   <input
                     value={builderTokens[f.key]}
                     oninput={(e) => (builderTokens = { ...builderTokens, [f.key]: e.currentTarget.value })}
                     class="h-7 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-canvas) px-1.5 font-mono text-[11px] uppercase outline-none focus:border-(--accent)"
                     spellcheck="false"
-                    aria-label="{f.label} hex"
+                    aria-label={t('settings-token-hex-label', { label: t(`settings-token-${f.key}`) })}
                   />
                 </span>
               </label>
@@ -539,44 +561,44 @@
           <div class="mt-3 flex flex-wrap gap-2">
             <button
               class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
-              title="Copy the active theme's colors into the builder"
+              title={t('settings-clone-title')}
               onclick={cloneCurrentTheme}
             >
-              Clone active theme
+              {t('settings-clone-theme')}
             </button>
             <button
               class="rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
               onclick={saveTheme}
             >
-              Save theme
+              {t('settings-save-theme')}
             </button>
           </div>
         </div>
 
-        <h3 class="mt-6 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Import / export</h3>
+        <h3 class="mt-6 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('settings-import-export')}</h3>
         <div class="mt-2">
           <textarea
             bind:value={themeJson}
             rows="5"
             spellcheck="false"
             class="w-full rounded border border-(--border) bg-(--bg-canvas) p-2 font-mono text-[11px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-            placeholder="Paste an exported theme JSON here"
-            aria-label="Theme JSON"
+            placeholder={t('settings-theme-json')}
+            aria-label={t('settings-theme-json')}
           ></textarea>
           <div class="mt-2 flex gap-2">
             <button
               class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
-              title="Writes the builder draft into the field"
+              title={t('settings-export-title')}
               onclick={exportTheme}
             >
-              ⤒ Export draft
+              ⤒ {t('settings-export-draft')}
             </button>
             <button
               class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
-              title="Saves the JSON in the field as a custom theme and applies it"
+              title={t('settings-import-title')}
               onclick={importTheme}
             >
-              ⤓ Import from JSON
+              ⤓ {t('settings-import-json')}
             </button>
           </div>
         </div>
@@ -584,27 +606,27 @@
           <p class="mt-2 text-[12px] text-(--text-muted)">{customMsg}</p>
         {/if}
       {:else if section === 'java'}
-        <h2 class="text-[16px] font-semibold">Java &amp; Memory</h2>
+        <h2 class="text-[16px] font-semibold">{t('settings-java-title')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">
-          Which JVM runs the game and how much memory it gets.
+          {t('settings-java-desc')}
         </p>
 
-        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Java runtime</h3>
+        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('settings-java-runtime')}</h3>
         <select
           class="mt-2 h-9 w-full rounded border border-(--border) bg-(--bg-subtle) px-2 text-[13px] outline-none focus:border-(--accent)"
           bind:value={javaPath}
         >
-          <option value="">Auto-discovery (recommended)</option>
+          <option value="">{t('settings-java-auto')}</option>
           {#each runtimes as r (r.executable)}
-            <option value={r.executable}>Java {r.major} — {r.home}</option>
+            <option value={r.executable}>{t('settings-java-option', { major: r.major, home: r.home })}</option>
           {/each}
           {#each addedJava.filter((p) => !runtimes.some((r) => r.executable === p)) as path (path)}
-            <option value={path}>Custom — {path}</option>
+            <option value={path}>{t('settings-java-custom-option', { path })}</option>
           {/each}
         </select>
         {#if !runtimes.length}
           <p class="mt-2 text-[12px] text-(--text-muted)">
-            {scanning ? 'Probing system roots…' : 'No runtimes detected.'}
+            {scanning ? t('settings-java-probing') : t('settings-java-none')}
           </p>
         {/if}
         {#if javaError}
@@ -617,21 +639,21 @@
             disabled={scanning}
             onclick={onscanjava}
           >
-            ↻ Rescan JREs
+            ↻ {t('settings-java-rescan')}
           </button>
           <button
             class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main) disabled:opacity-50"
             disabled={javaBusy}
             onclick={browseJava}
           >
-            {javaBusy ? 'Checking…' : 'Browse / Add Custom Java…'}
+            {javaBusy ? t('settings-java-checking') : t('settings-java-browse')}
           </button>
           <button
             class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-50"
             disabled={javaBusy || javaPath === appliedPath}
             onclick={() => applyJava(javaPath)}
           >
-            Apply
+            {t('settings-java-apply')}
           </button>
         </div>
 
@@ -639,10 +661,10 @@
           <span
             class="inline-block h-1.5 w-1.5 rounded-full {appliedPath ? 'bg-(--accent)' : 'bg-(--text-muted)'}"
           ></span>
-          Active runtime:
-          <span class="font-mono">{appliedPath || 'auto-discovery'}</span>
+          {t('settings-java-active')}
+          <span class="font-mono">{appliedPath || t('settings-java-auto-lower')}</span>
           {#if javaPath !== appliedPath}
-            <span class="text-amber-400">(selection not applied yet)</span>
+            <span class="text-amber-400">{t('settings-java-not-applied')}</span>
           {/if}
         </p>
         {#if javaPickMsg}
@@ -657,14 +679,14 @@
               <li class="flex items-center justify-between gap-2 text-[11px] text-(--text-muted)">
                 <span class="truncate font-mono" title={path}>{path}</span>
                 {#if appliedPath === path}
-                  <span class="shrink-0 text-(--accent)">active</span>
+                  <span class="shrink-0 text-(--accent)">{t('settings-java-active-badge')}</span>
                 {/if}
               </li>
             {/each}
           </ul>
         {/if}
 
-        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Memory allocation</h3>
+        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('settings-memory-title')}</h3>
         <div class="mt-3 flex items-center gap-3">
           <span class="w-12 font-mono text-[12px] text-(--text-muted)">-Xms</span>
           <input type="range" min="0" max="16384" step="256" bind:value={minMem} class="flex-1 accent-[var(--accent)]" />
@@ -691,32 +713,29 @@
           />
           <span class="w-8 text-[11px] text-(--text-muted)">MiB</span>
         </div>
-        <p class="mt-2 text-[12px] text-(--text-muted)">0 = launcher default. Recommended: 2048–4096.</p>
+        <p class="mt-2 text-[12px] text-(--text-muted)">{t('settings-memory-hint')}</p>
 
         <button
           class="mt-6 rounded bg-(--accent) px-4 py-2 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
           onclick={onsaveprefs}
         >
-          Save Java settings
+          {t('settings-save-java')}
         </button>
       {:else if section === 'horizon'}
-        <h2 class="text-[16px] font-semibold">Horizon Engine</h2>
+        <h2 class="text-[16px] font-semibold">{t('settings-horizon-title')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">
-          The native Rust engine. Instances created with the Horizon loader run vanilla worlds
-          without a JVM; the launcher downloads and verifies Mojang's assets into the shared store
-          (<span class="font-mono">assets/objects/…</span> + <span class="font-mono">horizon-assets.json</span>)
-          before every launch. The binary is never bundled — point the launcher at your own build.
+          {t('settings-horizon-desc')}
         </p>
 
         <label
           class="mt-5 block text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)"
-          for="horizon-path">Horizon binary</label
+          for="horizon-path">{t('settings-horizon-binary')}</label
         >
         <div class="mt-1 flex gap-2">
           <input
             id="horizon-path"
             class="h-8 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2.5 font-mono text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-            placeholder="C:\Horizon\horizon.exe (empty = not configured)"
+            placeholder={t('settings-horizon-placeholder')}
             bind:value={horizonPath}
           />
           <button
@@ -724,14 +743,14 @@
             disabled={horizonBusy}
             onclick={browseHorizon}
           >
-            {horizonBusy ? 'Checking…' : 'Browse…'}
+            {horizonBusy ? t('settings-java-checking') : t('settings-horizon-browse')}
           </button>
           <button
             class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-50"
             disabled={horizonBusy}
             onclick={saveHorizon}
           >
-            Save
+            {t('settings-horizon-save')}
           </button>
         </div>
 
@@ -739,9 +758,9 @@
           <span
             class="inline-block h-1.5 w-1.5 rounded-full {horizonConfigured ? 'bg-emerald-400' : 'bg-rose-400'}"
           ></span>
-          {horizonConfigured ? 'Configured' : 'Not configured'}
+          {horizonConfigured ? t('settings-horizon-configured') : t('settings-horizon-not-configured')}
           {#if horizonPath && !horizonConfigured}
-            <span class="text-rose-400">(file not found)</span>
+            <span class="text-rose-400">{t('settings-horizon-missing')}</span>
           {/if}
         </p>
         {#if horizonMsg}
@@ -752,31 +771,30 @@
         {/if}
 
         <p class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-3 text-[11px] leading-relaxed text-(--text-muted)">
-          Launch contract: <span class="font-mono">horizon --assets &lt;store&gt; --game-dir &lt;dir&gt;</span>.
-          Horizon output streams into the console drawer; stopping the engine uses the same
-          process-tree kill as Java instances.
+          {t('settings-horizon-contract')} <span class="font-mono">horizon --assets &lt;store&gt; --game-dir &lt;dir&gt;</span>.
+          {t('settings-horizon-contract-note')}
         </p>
       {:else if section === 'storage'}
-        <h2 class="text-[16px] font-semibold">Folders</h2>
+        <h2 class="text-[16px] font-semibold">{t('settings-folders-title')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">
-          Where instances, libraries, mods and downloads live. Blank inputs keep the default under the app data folder.
+          {t('settings-folders-desc')}
         </p>
 
         {#if storage}
           <div class="mt-6 rounded border border-(--border) bg-(--bg-subtle) p-4">
             <div class="flex items-center justify-between gap-3">
               <div class="min-w-0">
-                <div class="text-[12px] font-medium">App data folder</div>
+                <div class="text-[12px] font-medium">{t('settings-app-data')}</div>
                 <div class="mt-2 truncate font-mono text-[12px] text-(--text-muted)" title={storage.app_data}>
                   {storage.app_data}
                 </div>
               </div>
               <button
                 class="shrink-0 rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
-                title="Open the app data folder in the file explorer"
+                title={t('settings-open-app-data')}
                 onclick={() => onopenfolder?.(storage.app_data)}
               >
-                Open
+                {t('common-open')}
               </button>
             </div>
           </div>
@@ -785,21 +803,21 @@
             <div class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-4">
               <div class="flex items-center justify-between gap-3">
                 <div class="text-[12px] font-medium">
-                  {f.label}
-                  <span class="font-normal text-(--text-muted)">{isDefault(f.key) ? '(default)' : '(custom)'}</span>
+                  {t(`settings-folder-${f.key}`)}
+                  <span class="font-normal text-(--text-muted)">{isDefault(f.key) ? t('settings-folder-default') : t('settings-folder-custom')}</span>
                 </div>
                 {#if !isDefault(f.key)}
                   <button
                     class="rounded px-4 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main) disabled:opacity-40"
                     disabled={storageBusy}
-                    title="Back to the default app-data subdirectory"
+                    title={t('settings-folder-reset-title')}
                     onclick={() => onsavefolder?.(f.key, '')}
                   >
-                    Reset
+                    {t('common-reset')}
                   </button>
                 {/if}
               </div>
-              <p class="mt-0.5 text-[11px] text-(--text-muted)">{f.hint}</p>
+              <p class="mt-0.5 text-[11px] text-(--text-muted)">{t(`settings-folder-${f.key}-hint`)}</p>
               <div class="mt-3 flex gap-2">
                 <input
                   class="h-9 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-canvas) px-2.5 font-mono text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
@@ -808,41 +826,41 @@
                 />
                 <button
                   class="rounded border border-(--border) px-3 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
-                  title="Pick a directory"
+                  title={t('settings-folder-pick')}
                   onclick={async () => {
                     const picked = await browseDir(folderInputs[f.key]);
                     if (picked) folderInputs[f.key] = picked;
                   }}
                 >
-                  Browse…
+                  {t('settings-horizon-browse')}
                 </button>
                 <button
                   class="rounded border border-(--border) px-3 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
-                  title="Open this folder in the file explorer"
+                  title={t('settings-folder-open')}
                   onclick={() => onopenfolder?.(resolvedPath(f.key))}
                 >
-                  Open
+                  {t('common-open')}
                 </button>
                 <button
                   class="rounded bg-(--accent) px-4 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
                   disabled={storageBusy}
                   onclick={() => onsavefolder?.(f.key, folderInputs[f.key])}
                 >
-                  Save
+                  {t('common-save')}
                 </button>
               </div>
               {#if f.key === 'downloads'}
                 <div class="mt-2 flex items-center justify-between gap-3">
                   <div class="min-w-0 truncate font-mono text-[11px] text-(--text-muted)" title={storage.staging_root}>
-                    Staging: {storage.staging_root}
+                    {t('settings-staging', { path: storage.staging_root })}
                   </div>
                   <button
                     class="shrink-0 rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main) disabled:opacity-40"
                     disabled={storageBusy || gameRunning}
-                    title={gameRunning ? 'Unavailable while a game is running' : 'Purges the staging area'}
+                    title={gameRunning ? t('settings-purge-running') : t('settings-purge-title')}
                     onclick={oncleanstaging}
                   >
-                    Purge staging
+                    {t('settings-purge')}
                   </button>
                 </div>
               {/if}
@@ -850,36 +868,34 @@
           {/each}
         {/if}
       {:else if section === 'apikeys'}
-        <h2 class="text-[16px] font-semibold">API Keys</h2>
+        <h2 class="text-[16px] font-semibold">{t('settings-api-title')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">
-          Optional keys for third-party APIs. The launcher works fully without them —
-          every default flow is keyless.
+          {t('settings-api-desc')}
         </p>
 
         <div class="mt-6 rounded border border-(--border) bg-(--bg-subtle) p-4">
           <div class="text-[12px] font-medium">
-            CurseForge API key
-            <span class="font-normal text-(--text-muted)">{apiKeyConfigured ? '(configured)' : '(not set)'}</span>
+            {t('settings-cf-key')}
+            <span class="font-normal text-(--text-muted)">{apiKeyConfigured ? t('settings-cf-configured') : t('settings-cf-not-set')}</span>
           </div>
           <p class="mt-0.5 text-[11px] text-(--text-muted)">
-            Only used to auto-download mods from imported CurseForge packs. Your key is yours —
-            paste it here, it is saved locally and never bundled with the launcher.
+            {t('settings-cf-desc')}
           </p>
           <div class="mt-3 flex gap-2">
             <input
               type="password"
               class="h-9 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-canvas) px-2.5 font-mono text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-              placeholder={apiKeyConfigured ? '•••••••••••• (saved — paste a new key to replace)' : 'Paste your CurseForge API key'}
+              placeholder={apiKeyConfigured ? t('settings-cf-placeholder-saved') : t('settings-cf-placeholder')}
               bind:value={apiKey}
-              aria-label="CurseForge API key"
+              aria-label={t('settings-cf-key')}
               spellcheck="false"
             />
             <button
               class="rounded bg-(--accent) px-4 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
-              title="Save the CurseForge API key (blank clears it)"
+              title={t('settings-cf-save-title')}
               onclick={saveApiKey}
             >
-              Save
+              {t('common-save')}
             </button>
           </div>
           {#if apiKeyMsg}
@@ -890,17 +906,16 @@
           {/if}
         </div>
       {:else if section === 'accessibility'}
-        <h2 class="text-[16px] font-semibold">Accessibility</h2>
+        <h2 class="text-[16px] font-semibold">{t('settings-a11y-title')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">
-          Assistive profiles that adapt suggestions, installs and pre-launch setup for screen-reader and caption users.
+          {t('settings-a11y-desc')}
         </p>
 
         <div class="mt-6 flex items-center justify-between gap-4 rounded border border-(--border) bg-(--bg-subtle) p-4">
           <div class="min-w-0">
-            <div class="text-[12px] font-medium">Blind Mode</div>
+            <div class="text-[12px] font-medium">{t('settings-blind-title')}</div>
             <p class="mt-1 text-[11px] text-(--text-muted)">
-              Screen reader &amp; audio navigation. Suggests Minecraft Access and spatial-audio mods on
-              Fabric; Fabric is strongly recommended over Vanilla or Horizon.
+              {t('settings-blind-desc')}
             </p>
           </div>
           <button
@@ -910,8 +925,8 @@
             class="relative h-6 w-11 shrink-0 rounded-full border transition-colors {blindMode
               ? 'border-transparent bg-(--accent)'
               : 'border-(--border) bg-(--bg-surface)'}"
-            aria-label="Blind Mode (screen reader and audio navigation): suggests Minecraft Access on Fabric and recommends Fabric over Vanilla or Horizon"
-            title="Toggle Blind Mode"
+            aria-label={t('settings-blind-aria')}
+            title={t('settings-blind-toggle')}
             onclick={() => (blindMode = !blindMode)}
           >
             <span
@@ -925,10 +940,9 @@
 
         <div class="mt-4 flex items-center justify-between gap-4 rounded border border-(--border) bg-(--bg-subtle) p-4">
           <div class="min-w-0">
-            <div class="text-[12px] font-medium">Deaf Mode</div>
+            <div class="text-[12px] font-medium">{t('settings-deaf-title')}</div>
             <p class="mt-1 text-[11px] text-(--text-muted)">
-              Closed captions &amp; visual sound cues. Enforces <span class="font-mono">showSubtitles:true</span> in
-              <span class="font-mono">options.txt</span> before every launch and suggests visual-sound Fabric mods.
+              {t('settings-deaf-desc')}
             </p>
           </div>
           <button
@@ -938,8 +952,8 @@
             class="relative h-6 w-11 shrink-0 rounded-full border transition-colors {deafMode
               ? 'border-transparent bg-(--accent)'
               : 'border-(--border) bg-(--bg-surface)'}"
-            aria-label="Deaf Mode (closed captions and visual sound cues): enforces showSubtitles true in options.txt before launch and suggests visual-sound Fabric mods"
-            title="Toggle Deaf Mode"
+            aria-label={t('settings-deaf-aria')}
+            title={t('settings-deaf-toggle')}
             onclick={() => (deafMode = !deafMode)}
           >
             <span
@@ -952,19 +966,22 @@
         </div>
 
         <p class="mt-4 text-[11px] text-(--text-muted)" aria-live="polite">
-          Blind Mode is {blindMode ? 'on' : 'off'}. Deaf Mode is {deafMode ? 'on' : 'off'}.
+          {t('settings-a11y-status', {
+            blind: blindMode ? t('common-on') : t('common-off'),
+            deaf: deafMode ? t('common-on') : t('common-off'),
+          })}
         </p>
       {:else}
-        <h2 class="text-[16px] font-semibold">About &amp; Updates</h2>
-        <p class="mt-1 text-[12px] text-(--text-muted)">Build info and project links.</p>
+        <h2 class="text-[16px] font-semibold">{t('settings-about-title')}</h2>
+        <p class="mt-1 text-[12px] text-(--text-muted)">{t('settings-about-desc')}</p>
 
         <div class="mt-6 rounded border border-(--border) bg-(--bg-subtle) p-4">
           <div class="flex items-center gap-2">
             <img src="/logo.png" alt="" draggable="false" class="h-10 w-10" />
             <div>
-              <div class="text-[13px] font-semibold">TwilightMC Bolide <span class="font-normal text-(--text-muted)">(alpha-v{version})</span></div>
+              <div class="text-[13px] font-semibold">{t('settings-about-version', { version })}</div>
               <div class="mt-0.5 text-[12px] text-(--text-muted)">
-                pre-release UI · Bolide channel (alpha builds, may crash and rewrite formats)
+                {t('settings-about-channel')}
               </div>
             </div>
           </div>
@@ -972,17 +989,17 @@
 
         <div class="mt-4 flex flex-col items-start gap-2">
           <button class="text-[12px] text-(--accent) hover:underline" onclick={() => onopenurl?.(`${REPO}`)}>
-            ↗ GitHub repository
+            ↗ {t('settings-github')}
           </button>
           <button class="text-[12px] text-(--accent) hover:underline" onclick={() => onopenurl?.(`${REPO}/releases`)}>
-            ↗ Releases (stable builds)
+            ↗ {t('settings-releases')}
           </button>
           <button class="text-[12px] text-(--accent) hover:underline" onclick={() => onopenurl?.(`${REPO}/issues`)}>
-            ↗ Report an issue
+            ↗ {t('settings-report')}
           </button>
         </div>
         <p class="mt-6 text-[12px] text-(--text-muted)">
-          An open-source Minecraft launcher. Vanilla, Fabric and Quilt today; more loaders land in later milestones.
+          {t('settings-about-footer')}
         </p>
       {/if}
 

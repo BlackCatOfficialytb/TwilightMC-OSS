@@ -348,14 +348,14 @@ const TOKEN_FALLBACK = {
 
 /** The eight builder fields, in display order. */
 export const TOKEN_FIELDS = [
-  { key: 'bg1', label: 'Canvas' },
-  { key: 'bg2', label: 'Surface' },
-  { key: 'bg3', label: 'Subtle' },
-  { key: 'border1', label: 'Border' },
-  { key: 'fg1', label: 'Text' },
-  { key: 'fg2', label: 'Muted text' },
-  { key: 'accent1', label: 'Accent' },
-  { key: 'accent2', label: 'Star accent' },
+  { key: 'bg1' },
+  { key: 'bg2' },
+  { key: 'bg3' },
+  { key: 'border1' },
+  { key: 'fg1' },
+  { key: 'fg2' },
+  { key: 'accent1' },
+  { key: 'accent2' },
 ];
 
 function slugify(name) {
