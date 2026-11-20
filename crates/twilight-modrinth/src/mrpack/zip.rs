@@ -298,7 +298,7 @@ impl Huffman {
 }
 
 /// Built-in fixed literal/length table (RFC 1951 §3.2.6).
-fn fixed_lit_tree() -> Huffman {
+fn fixed_lit_tree() -> Result<Huffman, String> {
     let mut lengths = [0u8; 288];
     for (symbol, len) in lengths.iter_mut().enumerate() {
         *len = match symbol {
@@ -307,12 +307,12 @@ fn fixed_lit_tree() -> Huffman {
             _ => 8,
         };
     }
-    Huffman::build(&lengths, TreePolicy::Unchecked).expect("RFC fixed lit/len table")
+    Huffman::build(&lengths, TreePolicy::Unchecked)
 }
 
 /// Built-in fixed distance table (30 symbols of 5 bits — legally incomplete).
-fn fixed_dist_tree() -> Huffman {
-    Huffman::build(&[5u8; 30], TreePolicy::Unchecked).expect("RFC fixed distance table")
+fn fixed_dist_tree() -> Result<Huffman, String> {
+    Huffman::build(&[5u8; 30], TreePolicy::Unchecked)
 }
 
 /// One inflate call: all blocks, until the final-flagged block ends.
@@ -328,8 +328,8 @@ fn inflate_raw(data: &[u8]) -> Result<Vec<u8>, String> {
         match reader.bits(2).ok_or(EOF)? {
             0 => stored_block(&mut reader, &mut out)?,
             1 => {
-                let lit = fixed_lit_tree();
-                let dist = fixed_dist_tree();
+                let lit = fixed_lit_tree()?;
+                let dist = fixed_dist_tree()?;
                 codes(&mut reader, &mut out, &lit, &dist)?;
             }
             2 => {

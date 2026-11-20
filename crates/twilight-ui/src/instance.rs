@@ -351,11 +351,9 @@ fn set_group_membership(
                 key = format!("{label}-{n}");
                 n += 1;
             }
-            groups.insert(
-                key.clone(),
-                serde_json::json!({ "name": label, "hidden": false, "instances": [] }),
-            );
-            groups.get_mut(&key).unwrap()
+            groups.entry(key).or_insert_with(
+                || serde_json::json!({ "name": label, "hidden": false, "instances": [] }),
+            )
         }
     };
     if !entry.get("instances").is_some_and(|i| i.is_array()) {

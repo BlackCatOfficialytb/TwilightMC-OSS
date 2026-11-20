@@ -1,0 +1,345 @@
+name: build
+
+# Shared release pipeline for every channel (Snapshot, Bolide/alpha,
+# Star/beta, Stable). The four thin channel workflows only own their triggers;
+# this reusable workflow runs the quality gates, the 7-target desktop matrix,
+# the archive/checksum packaging and the GitHub release publishing.
+#
+# FreeBSD is intentionally absent: the VM build was slow and kept breaking on
+# upstream system crates (sysinfo / webkit2-gtk). FreeBSD users build the CLI
+# from source (`cargo build --release -p twilight-cli`); see README/VERSION.md.
+
+on:
+  workflow_call:
+    inputs:
+      channel:
+        description: 'snapshot | alpha | beta | stable'
+        required: true
+        type: string
+      tag:
+        description: 'Release tag (snapshot uses the rolling `snapshot` tag)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark the GitHub release as a pre-release'
+        required: false
+        type: boolean
+        default: false
+      rolling:
+        description: 'Replace the existing release and tag (rolling snapshot)'
+        required: false
+        type: boolean
+        default: false
+      publish:
+        description: 'Publish a GitHub release (false = verify/build only)'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Quality gates run once, fast; every channel build waits on this.
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.vars.outputs.version }}
+      date: ${{ steps.vars.outputs.date }}
+      commit: ${{ steps.vars.outputs.commit }}
+      release_name: ${{ steps.vars.outputs.release_name }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # this gate compiles the whole workspace, Tauri UI crate included
+      - name: Install Linux UI dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+      - id: vars
+        # snapshot identity per VERSION.md: workspace version + ddmmyyyy UTC +
+        # short sha; tagged channels use the pushed tag verbatim
+        run: |
+          set -e
+          VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)"
+          DATE="$(date -u +%d%m%Y)"
+          COMMIT="$(git rev-parse --short HEAD)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          case "${{ inputs.channel }}" in
+            snapshot) echo "release_name=twilight-snapshot-v${VERSION}-${DATE}-${COMMIT}" >> "$GITHUB_OUTPUT" ;;
+            *)        echo "release_name=twilight-${{ inputs.tag }}" >> "$GITHUB_OUTPUT" ;;
+          esac
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  build:
+    needs: verify
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: windows-msvc
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            suffix: windows-msvc-x86_64
+            bin: twilight.exe
+          - id: windows-mingw
+            runner: windows-latest
+            target: x86_64-pc-windows-gnu
+            suffix: windows-mingw-w64
+            bin: twilight.exe
+          - id: windows-clang
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            suffix: windows-clang-x86_64
+            bin: twilight.exe
+            cc: clang
+          - id: linux-gcc
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            suffix: linux-gcc-x86_64
+            bin: twilight
+          - id: linux-clang
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            suffix: linux-clang-x86_64
+            bin: twilight
+            cc: clang
+          - id: linux-arm64
+            # native ARM64 runner (free on public repos): WebKit2GTK has no
+            # usable cross sysroot, so the GUI is linked natively for SBCs
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            suffix: linux-aarch64
+            bin: twilight
+          - id: macos
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            suffix: macos-aarch64
+            bin: twilight
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      # tauri-winres (embed-resource) embeds the Windows resource using the
+      # HOST toolchain environment: with an MSVC host it emits an MSVC-format
+      # resource.lib that GNU ld rejects ("file format not recognized",
+      # tauri-apps/tauri#12257). Building FOR windows-gnu therefore requires
+      # the gnu host toolchain, not just the target.
+      - name: Use GNU host toolchain (mingw)
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        shell: bash
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal --no-self-update --force-non-host
+          rustup default stable-x86_64-pc-windows-gnu --force-non-host
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # one identity string shared by the artifact upload and the archive name
+      - name: Set artifact name
+        shell: bash
+        run: |
+          NAME="${{ needs.verify.outputs.release_name }}-${{ matrix.suffix }}"
+          echo "NAME=$NAME" >> "$GITHUB_ENV"
+          echo "ARTIFACT_NAME=$NAME" >> "$GITHUB_ENV"
+          # GUI binary name follows the OS (the crate is always twilight-ui)
+          case "${{ matrix.target }}" in
+            *windows*) echo "GUI_BIN=twilight-ui.exe" >> "$GITHUB_ENV" ;;
+            *)         echo "GUI_BIN=twilight-ui" >> "$GITHUB_ENV" ;;
+          esac
+
+      - name: MinGW linker on PATH
+        if: matrix.target == 'x86_64-pc-windows-gnu'
+        shell: bash
+        run: echo "C:\\msys64\\mingw64\\bin" >> "$GITHUB_PATH"
+
+      - name: Build with Clang/LLVM
+        if: matrix.cc == 'clang'
+        run: |
+          echo "CC=clang" >> "$GITHUB_ENV"
+          echo "CXX=clang++" >> "$GITHUB_ENV"
+
+      # The Tauri GUI embeds the Svelte frontend at compile time
+      # (generate_context!), so the Vite build MUST run before cargo build.
+      - name: Set up Node.js for the frontend
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/twilight-ui/ui/package-lock.json
+
+      - name: Build frontend (Svelte 5 + Vite)
+        working-directory: crates/twilight-ui/ui
+        run: |
+          npm ci
+          npm run build
+
+      # Tauri v2 system libraries: the GUI binary links GTK3 + WebKitGTK 4.1
+      - name: Install Linux GUI dependencies
+        if: startsWith(matrix.runner, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+
+      # ARM64 SBCs (Raspberry Pi 5, Radxa Rock 5, Orange Pi, Asahi): the rust
+      # target is installed by the toolchain action via `targets:` and built
+      # natively on the ARM64 runner — no cross linker required.
+      - name: Build
+        run: cargo build --locked --release -p twilight-cli -p twilight-ui --target ${{ matrix.target }}
+
+      # Raw distribution staging: the release job archives each target folder
+      # exactly once. Ships CLI + GUI binaries, any runtime libraries the build
+      # emitted and the full governance/licensing docs — flat, no subfolder.
+      - name: Stage distribution
+        shell: bash
+        run: |
+          set -e
+          REL="target/${{ matrix.target }}/release"
+          DIST="dist/${{ env.NAME }}"
+          mkdir -p "$DIST"
+          cp "$REL/${{ matrix.bin }}" "$DIST/"
+          cp "$REL/${{ env.GUI_BIN }}" "$DIST/"
+          # runtime libraries emitted by the build (e.g. WebView2Loader.dll on
+          # windows-gnu, any *.so/*.dylib produced by -sys crates)
+          for lib in "$REL"/*.dll "$REL"/*.so "$REL"/*.dylib; do
+            if [ -e "$lib" ]; then
+              cp "$lib" "$DIST/"
+              echo "staged runtime library: $(basename "$lib")"
+            fi
+          done
+          # MinGW-w64: bundle the WebView2 loader + GCC runtime DLLs so a
+          # portable copy never dies with "missing DLL" on a clean Windows box
+          if [ "${{ matrix.target }}" = "x86_64-pc-windows-gnu" ]; then
+            if [ ! -f "$DIST/WebView2Loader.dll" ]; then
+              loader="$(find target -name 'WebView2Loader.dll' -print -quit 2>/dev/null || true)"
+              if [ -n "$loader" ]; then
+                cp "$loader" "$DIST/"
+                echo "staged runtime library: WebView2Loader.dll"
+              fi
+            fi
+            for dll in libgcc_s_seh-1.dll libstdc++-6.dll libwinpthread-1.dll; do
+              if [ -f "/c/msys64/mingw64/bin/$dll" ]; then
+                cp "/c/msys64/mingw64/bin/$dll" "$DIST/"
+              fi
+            done
+          fi
+          for doc in README.md VERSION.md CREDITS.md LICENSE.md LICENSE_AGPL LICENSE_APACHE; do
+            if [ -f "$doc" ]; then cp "$doc" "$DIST/"; fi
+          done
+
+      # Strict staging assertion: every archive MUST carry both binaries.
+      - name: Assert staged distribution
+        shell: bash
+        run: |
+          set -e
+          DIST="dist/${{ env.NAME }}"
+          if [ ! -f "$DIST/${{ matrix.bin }}" ]; then
+            echo "::error::${{ matrix.suffix }}: CLI binary ${{ matrix.bin }} missing from $DIST"
+            exit 1
+          fi
+          if [ ! -f "$DIST/${{ env.GUI_BIN }}" ]; then
+            echo "::error::${{ matrix.suffix }}: GUI binary ${{ env.GUI_BIN }} missing from $DIST"
+            exit 1
+          fi
+          if [ ! -f "$DIST/README.md" ]; then
+            echo "::error::${{ matrix.suffix }}: README.md missing from $DIST"
+            exit 1
+          fi
+          echo "staged OK: ${{ matrix.bin }} + ${{ env.GUI_BIN }} + docs in $DIST"
+
+      - name: Upload staged distribution
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: dist/${{ env.NAME }}/*
+          if-no-files-found: error
+
+  release:
+    needs: [verify, build]
+    if: inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # each artifact lands in dist/<artifact-name>/ — no merge collisions
+      - name: Download staged distributions
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+
+      - name: Package single release archives
+        run: |
+          set -e
+          # zstd compresses the Linux tarballs; the runner usually ships it,
+          # so install only when the check fails
+          if ! command -v zstd >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y zstd
+          fi
+          mkdir -p release
+          for dir in dist/*/; do
+            name="$(basename "$dir")"
+            # download-artifact strips Unix exec bits: restore them before
+            # packing so the tarballs keep runnable binaries
+            case "$name" in
+              *windows*) ;;
+              *) chmod +x "$dir/twilight" "$dir/twilight-ui" 2>/dev/null || true ;;
+            esac
+            # archives carry their top-level folder: .zip on Windows/macOS,
+            # .tar.zst (Zstandard) on Linux
+            case "$name" in
+              *windows*|*macos*)
+                (cd dist && zip -qr -y "../release/$name.zip" "$name")
+                ;;
+              *)
+                (cd dist && tar --zstd -cf "../release/$name.tar.zst" "$name")
+                ;;
+            esac
+          done
+          cd release
+          sha256sum * > checksums.sha256
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          CHANNEL: ${{ inputs.channel }}
+          TAG: ${{ inputs.tag }}
+          ROLLING: ${{ inputs.rolling }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          DATE: ${{ needs.verify.outputs.date }}
+          COMMIT: ${{ needs.verify.outputs.commit }}
+        run: |
+          set -e
+          case "$CHANNEL" in
+            snapshot) TITLE="TwilightMC Snapshot v${VERSION}-${DATE}-${COMMIT}" ;;
+            alpha)    TITLE="TwilightMC Bolide (${TAG})" ;;
+            beta)     TITLE="TwilightMC Star (${TAG})" ;;
+            *)        TITLE="TwilightMC ${TAG}" ;;
+          esac
+          PREAMBLE="${TITLE} — built from commit ${COMMIT} (${DATE} UTC). Each archive ships the twilight CLI, the twilight-ui Tauri GUI and required runtime libraries plus the full license docs. SHA-256 digests are listed in checksums.sha256 — verify your download against it before running (binaries are unsigned; see README 'Security & unsigned binaries'). FreeBSD is source-build only: cargo build --release -p twilight-cli."
+          if [ "$ROLLING" = "true" ]; then
+            # rolling tag: the previous snapshot is superseded, never patched
+            gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+            gh release create "$TAG" release/* \
+              --target "$GITHUB_SHA" \
+              --title "$TITLE" \
+              --prerelease \
+              --notes "$PREAMBLE"
+          else
+            ARGS=(release create "$TAG" release/* --title "$TITLE" --notes "$PREAMBLE" --generate-notes)
+            if [ "$PRERELEASE" = "true" ]; then
+              ARGS+=(--prerelease)
+            fi
+            gh "${ARGS[@]}"
+          fi

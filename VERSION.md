@@ -26,12 +26,16 @@ and Bolide**; a Snapshot reuses the same triple as its milestone target (§2):
 ### Example strings
 
 ```
-v1.2                    → TwilightMC Stable v1.2.0
+v1.2.0                  → TwilightMC Stable v1.2.0
 v2.1.3                  → TwilightMC Stable v2.1.3
-v1.2.3-star.1           → TwilightMC Star v1.2.3-star.1
-v1.2.3-bolide.2         → TwilightMC Bolide v1.2.3-bolide.2
+alpha-v1.2.3            → TwilightMC Bolide (alpha-v1.2.3)
+beta-v1.2.3-b1          → TwilightMC Star (beta-v1.2.3-b1)
 v1.2.3-06112026-6c2d471 → TwilightMC Snapshot v1.2.3-06112026-6c2d471
 ```
+
+The `vX.Y` shorthand is prose-only. Official release tags — the ones that
+trigger the release workflows — always spell out the full `vX.Y.Z`
+(`v1.0.0`, never `v1.0`) so tag ordering and comparisons stay unambiguous.
 
 All crates in the workspace share one release train (`version.workspace =
 true` in every crate), so the workspace `version` field is the numeric part
@@ -40,12 +44,12 @@ implicit `.0`.
 
 ## 2. Release channels
 
-| Channel     | Version string                    | Meaning |
+| Channel     | Tag / version string              | Meaning |
 |-------------|-----------------------------------|---------|
-| **Stable**    | `vX.Y[.Z]`                        | No suffix. Fully supported: bug-fix releases are cut against the latest Stable minor only. |
-| **Star**      | `vX.Y[.Z]-star.N`, `N ≥ 1`        | *Beta*. Feature-complete for the upcoming milestone. Public API and on-disk formats are frozen; only bug fixes and polish land. |
-| **Bolide**    | `vX.Y[.Z]-bolide.N`, `N ≥ 1`      | *Alpha*. May crash, may rewrite formats. APIs, CLI flags and staging layouts can change without notice between Bolide numbers. |
-| **Snapshot**  | `vX.Y[.Z]-ddmmyyyy-<commit>`      | *Rolling*. Built straight from `main`, at least one per week while development is active. `ddmmyyyy` is the build date (two-digit day and month, four-digit year — `06112026` = 6 November 2026). Snapshots are **never patched** — a bad snapshot is superseded by the next one. |
+| **Stable**    | `vX.Y.Z`                          | No suffix. Fully supported: bug-fix releases are cut against the latest Stable minor only. |
+| **Star**      | `beta-vX.Y.Z-bN`, `N ≥ 1`         | *Beta*. Feature-complete for the upcoming milestone. Public API and on-disk formats are frozen; only bug fixes and polish land. |
+| **Bolide**    | `alpha-vX.Y.Z`, `alpha-vX.Y.Z-bN` | *Alpha*. May crash, may rewrite formats. APIs, CLI flags and staging layouts can change without notice between Bolide numbers. |
+| **Snapshot**  | tag `snapshot`; `vX.Y.Z-ddmmyyyy-<commit>` | *Rolling*. Built straight from `main`, at least one per week while development is active. `ddmmyyyy` is the build date (two-digit day and month, four-digit year — `06112026` = 6 November 2026). Snapshots are **never patched** — a bad snapshot is superseded by the next one. |
 
 `X.Y.Z` on a Star/Bolide/Snapshot build is the milestone **target** it is
 believed to ship as, and must be `>=` the highest published version.
@@ -61,12 +65,12 @@ identity (`TwilightMC Snapshot vX.Y.Z-ddmmyyyy-<commit>`) and every artifact
 or archive is named with the same full identity
 (`twilight-snapshot-vX.Y.Z-ddmmyyyy-<commit>-<platform-toolchain>`), plus a
 `checksums.sha256` alongside them. Archives ship as `.zip` on Windows and
-macOS and as `.tar.zst` (Zstandard) on Linux and FreeBSD.
+macOS and as `.tar.zst` (Zstandard) on Linux.
 
 ### Ascending order for the same milestone
 
 ```
-v1.2.3-06112026-6c2d471 < v1.2.3-bolide.1 < v1.2.3-star.1 < v1.2.3
+v1.2.3-06112026-6c2d471 < alpha-v1.2.3 < beta-v1.2.3-b1 < v1.2.3
 ```
 
 the last snapshot of a milestone is the last thing you test *before* it goes
@@ -129,7 +133,7 @@ validators — so precedence is defined here:
   a Settings-managed binary path, Gruvbox Dark/Light presets, and the
   `.twpack` 7z instance format; Bolide builds carry no API-stability
   promises (§2).
-- Star (beta) line: `v0.5.0-star.N` once the `beta` branch is cut; Star
+- Star (beta) line: `beta-v0.5.0-b1` once the `beta` branch is cut; Star
   releases are built from that branch and published as
   `TwilightMC Star (<tag>)` by `.github/workflows/beta.yml`.
 - Snapshot line: `v0.5.0-ddmmyyyy-<commit>`, built as rolling works land on
@@ -138,8 +142,8 @@ validators — so precedence is defined here:
 ## 7. Supported build targets
 
 Every published build is compiled for the officially tier-supported targets
-below (identical matrices in `snapshot.yml`, `alpha.yml`, `beta.yml` and
-`release.yml`):
+below (one shared 7-target matrix in `.github/workflows/_build.yml`, called by
+`snapshot.yml`, `alpha.yml`, `beta.yml` and `release.yml`):
 
 | Target                        | Platform                                          |
 |-------------------------------|---------------------------------------------------|
@@ -148,12 +152,17 @@ below (identical matrices in `snapshot.yml`, `alpha.yml`, `beta.yml` and
 | `x86_64-unknown-linux-gnu`    | Linux 64-bit (GCC; also the Clang-compiled build) |
 | `aarch64-unknown-linux-gnu`   | **Linux ARM64** — Raspberry Pi 4/5, Radxa Rock 5, Orange Pi and other SBCs, cross-compiled with `gcc-aarch64-linux-gnu` |
 | `aarch64-apple-darwin`        | macOS on Apple Silicon                            |
-| `x86_64-unknown-freebsd`      | FreeBSD 64-bit (native VM build)                  |
+
+FreeBSD (`x86_64-unknown-freebsd`) was removed from the automated matrix: the
+VM build was slow and repeatedly broke on upstream system crates
+(`sysinfo` / `webkit2-gtk`). FreeBSD remains **source-build supported** —
+compile the CLI directly with `cargo build --release -p twilight-cli`; the
+Tauri GUI stack is not officially supported there.
 
 Archive formats per platform: `.zip` on Windows (all three toolchains) and
-macOS, `.tar.zst` (Zstandard) on Linux (x86_64 and ARM64) and FreeBSD —
-unpack the tarballs with `tar -xf <archive>.tar.zst`; minimal Linux
-containers need the `zstd` package for that.
+macOS, `.tar.zst` (Zstandard) on Linux (x86_64 and ARM64) — unpack the
+tarballs with `tar -xf <archive>.tar.zst`; minimal Linux containers need the
+`zstd` package for that.
 
 A target earns official support only when its build job is green in the CI
 matrix; ad-hoc local builds of other targets are best-effort and untested.

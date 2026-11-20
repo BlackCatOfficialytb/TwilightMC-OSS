@@ -133,6 +133,7 @@
 <div
   class="fixed inset-0 z-[70] flex items-center justify-center"
   style="background: var(--scrim)"
+  role="presentation"
   onclick={(e) => {
     if (e.target === e.currentTarget && !busy) onclose?.();
   }}

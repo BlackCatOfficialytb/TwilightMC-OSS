@@ -190,12 +190,9 @@ pub async fn import_mod(
     }
     let dest = mods_dir(&instances_root(&app).await?, &instance_id)
         .await?
-        .join(file_name);
+        .join(&file_name);
     if dest.exists() {
-        return Err(format!(
-            "mod {} already exists",
-            src.file_name().unwrap().to_string_lossy()
-        ));
+        return Err(format!("mod {file_name} already exists"));
     }
     tokio::fs::copy(&src, &dest)
         .await

@@ -20,8 +20,9 @@
 - [x] `twilight-modloader`: Legacy Fabric (meta v2 at `meta.legacyfabric.net`, Fabric-schema reuse with a legacyfabric maven base) and CleanroomMC (MMC component pack unpacked from the published release zip via the `.mrpack` ZIP reader, `compatibleJavaMajors` honoured so a 1.12.2 instance selects Java 21+, and a 1.12.2-only game-version guard)
 - [x] `twilight-modrinth`: `.mrpack` engine — strict `modrinth.index.json` (format 1) parsing, client-env filtering, zip-slip-safe overrides extraction via a pure-Rust ZIP/DEFLATE (CRC-32 verified) reader, loopback-tested installer
 - [x] `twilight-cli`: `modpack install <PATH_OR_URL>` subcommand with dry-run plan printing, loader detection from index dependencies (ambiguous packs rejected) and `<shared>/instances/<slug>` instance layout, verified by loopback staging tests
-- [x] CI/CD: `.github/workflows/snapshot.yml` — fmt/clippy/test gates then a seven-target snapshot build matrix (Windows MSVC/MinGW/Clang, Linux GCC/Clang, macOS aarch64, FreeBSD native VM) with prism-style product-taxonomy artifact names (`twilight-snapshot-vX.Y.Z-ddmmyyyy-<commit>-<platform-toolchain>`), a push-only rolling `snapshot` pre-release (single rolling tag, `--cleanup-tag` replacement) carrying `checksums.sha256`
-- [x] CI/CD: `.github/workflows/release.yml` — a created GitHub release triggers the same gates + five-way matrix and attaches `twilight-<tag>-<target>` archives to the release; the `snapshot` tag is excluded since snapshot.yml already supplies its files
+- [x] CI/CD: `.github/workflows/_build.yml` — one reusable (`workflow_call`) release engine holding the fmt/clippy/test gates, the 7-target desktop matrix (Windows MSVC/MinGW/Clang, Linux GCC/Clang/ARM64, macOS aarch64) and the prism-style artifact names (`twilight-snapshot-vX.Y.Z-ddmmyyyy-<commit>-<platform-toolchain>`, `twilight-<tag>-<platform-toolchain>`), `.zip`/`.tar.zst` packaging plus `checksums.sha256`, and `gh release` publishing
+- [x] CI/CD: thin channel callers — `snapshot.yml` (push to `main` / manual dispatch → rolling `snapshot` pre-release, artifacts-only on dispatch), `alpha.yml` (`alpha-*` tag → `TwilightMC Bolide (<tag>)`), `beta.yml` (`beta-*` tag → `TwilightMC Star (<tag>)`) and `release.yml` (pure `vX.Y.Z` tag → `TwilightMC <tag>`); tagged releases are created by the workflow itself with `--generate-notes`, and the disjoint tag patterns guarantee a tag never builds twice
+- [x] CI/CD: FreeBSD dropped from the automated matrix (slow VM runs kept breaking on upstream system crates `sysinfo` / `webkit2-gtk`); FreeBSD stays source-build supported via `cargo build --release -p twilight-cli` (README/VERSION.md)
 
 ## Milestone 1 — Bolide Alpha desktop UI (alpha-v0.1.0 → alpha-v0.2.0)
 
@@ -100,6 +101,14 @@
 > workspace (`E:\TwilightMC-OSS`). Work on the core mod happens in its own repo
 > and is consumed here as an external artifact.
 
+## Pre-beta optimization pass (beta transition prep) — complete
+
+- [x] Frontend bundle: `skinview3d`/Three.js moved out of the initial shell (lazy `import('skinview3d')` in `SkinViewer3D` plus `manualChunks` vendor splits), eliminating the >500 kB Vite chunk warning; the launcher shell now parses in one small chunk
+- [x] Startup: Java discovery and instance scans are no longer awaited on the first-paint path — onMount loads accounts/instances/storage concurrently, the Settings page kicks off the disk scan in the background once and caches it (`javaScanned`), and repeated scans are guarded (`scanning`)
+- [x] Release profile verified (`lto = true`, `codegen-units = 1`, `strip = true`) with both binaries built in release mode for the smoke launch
+- [x] Panic audit: zero production-path `unwrap()`/`expect()` remain — instance group insertion, mod file-name formatting, server mutex locks (`unwrap_or_else(PoisonError::into_inner)`), the Tauri `run()` error path, the downloader hex encoder and the mrpack Huffman tables were all rewritten
+- [x] View-state leak audit: Launcher ⇄ Client switches clear the edit/menu/delete popovers (`setMode`), and sidebar navigation already resets the editor state; Accounts/Settings/Instances keep no stale selection across route changes
+
 ## Milestone 6 - Server Creator & Minekube Connect (next up)
 
 - [ ] Server Creator: first-class server instances alongside client instances — create Vanilla, Paper, Purpur, Fabric, Forge, NeoForge, Velocity, PumpkinMC (Rust) and SteelMC servers (version + build selection, eula/accept flow, memory and port defaults, start/stop console)
@@ -124,7 +133,14 @@
 
 - Special thanks to `cheryy_on_top` and `mimoji` from `discord.gg/sabatank` for the hilarious late-night debate about the Minecraft Narrator jumpscare (listening to Lofi gone wrong) that sparked the idea for the Blind & Deaf accessibility modes.
 
-## Upcoming phases (queued)
+## Active backlog (post-optimization, ordered)
 
-- [ ] **Optimization & `beta` Branch Transition (`TwilightMC Star`):** memory/performance hardening (startup time, download throughput, renderer/UI responsiveness) and cutting the `beta` branch that Star releases are built from.
-- [ ] **Symlink / Global CAS Storage Engine:** hardlinks/symlinks/junctions deduplicating `libraries/`, `assets/` and shared `mods/` across instances (like `uv`) — one global content-addressed store, per-instance link farms, with a Windows junction fallback when symlink privilege is unavailable.
+1. [ ] **Cut the `beta` branch** — freeze the Star feature set, branch from `main` and publish the first beta with `beta-vX.Y.Z-b1` (tag push → `beta.yml` → `TwilightMC Star (beta-vX.Y.Z-b1)`, pre-release). Only bug fixes and polish land on `beta`; `main` keeps moving toward the next minor.
+2. [ ] **Auto-Download Java (Adoptium/Temurin)** — when no compatible runtime is installed, offer a one-click vendor download (OS/arch + major-version resolution through the Adoptium API), verify the published checksum, unpack into `<shared>/java/` and feed the path straight into `select_best_java` and the launch pipeline. No bundled JRE.
+3. [ ] **Content tabs + Prism/MultiMC `.zip` import** — per-instance tabs for resource packs, shader packs and worlds (enable/disable, delete, open folder), plus an importer for Prism/MultiMC instance `.zip` exports (detect `instance.cfg` + `mmc-pack.json`, unpack through the pure-Rust ZIP reader with a zip-slip guard, convert into the native `instance.json` layout).
+4. [ ] **Internationalization (EN/VI)** — runtime-negotiated locale bundle (English + Vietnamese first), every user-facing string moved out of Svelte/Rust literals, locale persisted in `settings.json`, with the Blind Mode narration strings covered by the same catalogue.
+5. [ ] **Symlink / global CAS storage engine** — hardlinks/symlinks/junctions deduplicating `libraries/`, `assets/` and shared `mods/` across instances (like `uv`) — one global content-addressed store, per-instance link farms, with a Windows junction fallback when symlink privilege is unavailable.
+6. [ ] **CurseForge safe mode** — a no-key posture enforced by default: keyless imports list skipped manifest files instead of failing, API keys stay local-only and are redacted from logs, every CurseForge call is rate-limit aware and can be switched off entirely in Settings.
+7. [ ] **Code signing preparation** — SignPath Foundation application (Windows Authenticode for the 7-zip/MSI-less `.exe` pair, plus the macOS `codesign`/notarization path) and a full dependency-license review of the shipped binaries (AGPL/Apache/BSD notices, `CREDITS.md` completeness) before the first Stable.
+8. [ ] **1.0 UI overhaul backlog / GPUI `bolide-gpui`** — evaluate the GPUI-based `bolide-gpui` shell as the 1.0 client (native renderer, no WebView2/WebKitGTK dependency), with the current Tauri UI kept as the fallback until the rewrite reaches feature parity.
+9. [ ] **Separate-repo `TwilightCoreMod` + cosmetics sync** — `TwilightCoreMod` lives in its own repository and is consumed here as an external artifact; add the cosmetics sync channel (cape/elytra catalogue + account cosmetics manifest) so server and client see the same cosmetics set.

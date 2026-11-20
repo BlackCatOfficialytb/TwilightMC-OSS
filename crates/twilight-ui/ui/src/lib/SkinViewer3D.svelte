@@ -6,8 +6,13 @@
   // asset-protocol issues); a failed proxy falls back to direct loading and
   // a missing/broken texture falls back to the default Steve model.
   import { onMount } from 'svelte';
-  import { SkinViewer, IdleAnimation, WalkingAnimation } from 'skinview3d';
   import { skinDataUri } from './accounts.svelte.js';
+
+  // skinview3d pulls all of Three.js, so it is loaded on demand: the launcher
+  // shell stays small until a 3D viewer actually mounts (Accounts page or the
+  // Client dashboard). Vite splits it into a lazy vendor chunk.
+  let classes = null;
+  let loadFailed = $state(false);
 
   let {
     skin = null,
@@ -93,20 +98,32 @@
   }
 
   onMount(() => {
-    viewer = new SkinViewer({
-      canvas,
-      width,
-      height,
-      zoom,
-      fov: 55,
-    });
-    viewer.controls.enablePan = false;
-    viewer.controls.enableZoom = true;
-    viewer.autoRotate = autorotate;
-    viewer.animation = walking ? new WalkingAnimation() : new IdleAnimation();
-    applyTextures();
-    applyOuterLayer();
+    let disposed = false;
+    (async () => {
+      try {
+        classes = await import('skinview3d');
+        if (disposed || !canvas) return;
+        viewer = new classes.SkinViewer({
+          canvas,
+          width,
+          height,
+          zoom,
+          fov: 55,
+        });
+        viewer.controls.enablePan = false;
+        viewer.controls.enableZoom = true;
+        viewer.autoRotate = autorotate;
+        viewer.animation = walking
+          ? new classes.WalkingAnimation()
+          : new classes.IdleAnimation();
+        applyTextures();
+        applyOuterLayer();
+      } catch {
+        loadFailed = true;
+      }
+    })();
     return () => {
+      disposed = true;
       viewer?.dispose();
       viewer = null;
     };
@@ -142,7 +159,10 @@
   });
 
   $effect(() => {
-    if (viewer) viewer.animation = walking ? new WalkingAnimation() : new IdleAnimation();
+    if (viewer && classes)
+      viewer.animation = walking
+        ? new classes.WalkingAnimation()
+        : new classes.IdleAnimation();
   });
 
   $effect(() => {
@@ -154,7 +174,16 @@
   });
 </script>
 
-<canvas bind:this={canvas} style="width:{width}px;height:{height}px;display:block"></canvas>
+<canvas bind:this={canvas} style="width:{width}px;height:{height}px;display:{loadFailed ? 'none' : 'block'}"></canvas>
+{#if loadFailed}
+  <p
+    role="status"
+    class="flex items-center justify-center rounded border border-(--border) bg-(--bg-subtle) text-center text-[11px] text-(--text-muted)"
+    style="width:{width}px;height:{height}px"
+  >
+    3D preview unavailable
+  </p>
+{/if}
 {#if showToggle}
   <button
     class="rounded border border-(--border) px-2.5 py-1 text-[11px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) {outerLayer

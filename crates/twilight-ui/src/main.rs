@@ -132,7 +132,7 @@ fn main() {
     // auto-launch target before Tauri takes over the event loop.
     shortcut::init_startup_launch(&std::env::args().collect::<Vec<_>>());
 
-    tauri::Builder::default()
+    let result = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             get_version,
@@ -229,8 +229,11 @@ fn main() {
             storage::set_folder_dir,
             storage::clean_staging
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running TwilightMC UI");
+        .run(tauri::generate_context!());
+    if let Err(err) = result {
+        eprintln!("TwilightMC UI failed to start: {err}");
+        std::process::exit(1);
+    }
 }
 
 #[cfg(test)]

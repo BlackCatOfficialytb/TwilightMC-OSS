@@ -1,6 +1,8 @@
 # TwilightMC
 
 [![snapshot](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/actions/workflows/snapshot.yml/badge.svg)](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/actions/workflows/snapshot.yml)
+[![alpha](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/actions/workflows/alpha.yml/badge.svg)](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/actions/workflows/alpha.yml)
+[![beta](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/actions/workflows/beta.yml/badge.svg)](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/actions/workflows/beta.yml)
 [![release](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/actions/workflows/release.yml/badge.svg)](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/actions/workflows/release.yml)
 [![Total Downloads](https://img.shields.io/github/downloads/BlackCatOfficialytb/TwilightMC-OSS/total?label=Downloads&logo=github&style=flat-square)](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/releases)
 [![Language: Rust 2024](https://img.shields.io/badge/Rust-2024%20Edition-black?logo=rust&logoColor=white&style=flat-square)](https://www.rust-lang.org/)
@@ -58,7 +60,7 @@ unpacks into a single `twilight-…-<platform>` folder and contains:
 | `README.md`, `VERSION.md`, `CREDITS.md`, `LICENSE.md`, `LICENSE_AGPL`, `LICENSE_APACHE` | Governance & licensing docs. |
 
 **Archive formats** — Windows and macOS ship `.zip`; Linux (x86_64 and
-aarch64) and FreeBSD ship `.tar.zst` (Zstandard-compressed tarballs).
+aarch64) ships `.tar.zst` (Zstandard-compressed tarballs).
 Unpack the tarballs with `tar -xf <archive>.tar.zst` — minimal Linux
 containers first need the `zstd` package (`apt install zstd`,
 `apk add zstd`, `pacman -S zstd`, …), since both GNU tar and bsdtar call
@@ -79,11 +81,10 @@ Per-platform notes:
   stays dependency-free.
 - **macOS** — both binaries run as-is; the system WebKit (WKWebView) needs
   nothing extra. Launch the GUI with `./twilight-ui`.
-- **FreeBSD** — both binaries are built natively inside the CI VM against
-  WebKitGTK 4.1; at runtime install the matching packages first
-  (`pkg install webkit2-gtk_41 gtk3`). Should the GUI stack ever fail to
-  build, the archive falls back to CLI-only with a `PLATFORM_NOTES.txt`
-  documenting it.
+- **FreeBSD** — no pre-built archive is published. The VM build was brittle
+  and slow, so automated FreeBSD packages were retired; build the CLI from
+  source instead (`cargo build --release -p twilight-cli`). The Tauri GUI
+  stack (wry/tao) is not officially supported on FreeBSD.
 
 ## Build
 
@@ -219,42 +220,45 @@ Pushes to `main` (or manual `workflow_dispatch` runs) start the pipeline in
 1. **Verify** — `cargo fmt --all -- --check`, `cargo clippy --workspace
    --all-targets -- -D warnings`, `cargo test --workspace`, then compute the
    snapshot identity (workspace version + UTC date + short commit).
-2. **Build** — eight-target matrix: Windows (MSVC, MinGW-GNU, and
+2. **Build** — seven-target matrix: Windows (MSVC, MinGW-GNU, and
    Clang-compiled), Linux (GCC, Clang with `CC=clang`/`CXX=clang++`, and
    ARM64 built natively on GitHub's free `ubuntu-24.04-arm` runner for SBCs
    such as the Raspberry Pi 5, Radxa Rock 5, Orange Pi and Asahi Linux on
-   `aarch64-unknown-linux-gnu`), macOS on Apple Silicon
-   (`aarch64-apple-darwin`) and FreeBSD natively inside a
-   [`vmactions/freebsd-vm`](https://github.com/vmactions/freebsd-vm) runner.
-   Every job rebuilds the Svelte frontend first (`npm ci && npm run build`)
-   because the Tauri GUI embeds it at compile time, then compiles **both**
-   binaries in release mode — `twilight` (CLI) and `twilight-ui` (GUI) — and
-   stages them with any runtime libraries the build emits (e.g.
-   `WebView2Loader.dll` on the MinGW target, whose GCC runtime is statically
-   linked) plus the full
-   governance docs (`README.md`, `VERSION.md`, `CREDITS.md`, `LICENSE.md`,
-   `LICENSE_AGPL`, `LICENSE_APACHE`). A staging assertion fails the job
-   immediately if either binary is missing on Windows/Linux/macOS; FreeBSD
-   builds both binaries natively against WebKitGTK 4.1 and only falls back to
-   CLI-only (`PLATFORM_NOTES.txt` inside its archive) if the GUI stack breaks.
-   Each result is packaged as
+   `aarch64-unknown-linux-gnu`), and macOS on Apple Silicon
+   (`aarch64-apple-darwin`). Every job rebuilds the Svelte frontend first
+   (`npm ci && npm run build`) because the Tauri GUI embeds it at compile
+   time, then compiles **both** binaries in release mode — `twilight` (CLI)
+   and `twilight-ui` (GUI) — and stages them with any runtime libraries the
+   build emits (e.g. `WebView2Loader.dll` on the MinGW target, whose GCC
+   runtime is statically linked) plus the full governance docs (`README.md`,
+   `VERSION.md`, `CREDITS.md`, `LICENSE.md`, `LICENSE_AGPL`,
+   `LICENSE_APACHE`). A staging assertion fails the job immediately if
+   either binary is missing. Each result is packaged as
    `twilight-snapshot-vX.Y.Z-ddmmyyyy-<commit>-<platform-toolchain>` —
-   `.zip` on Windows and macOS, `.tar.zst` (Zstandard) on Linux and
-   FreeBSD — and a `checksums.sha256` of all archives is regenerated per
-   build.
+   `.zip` on Windows and macOS, `.tar.zst` (Zstandard) on Linux — and a
+   `checksums.sha256` of all archives is regenerated per build.
 3. **Release** — push-hosted only: the rolling `snapshot` **pre-release** is
    refreshed on GitHub Releases, titled
    `TwilightMC Snapshot vX.Y.Z-ddmmyyyy-<commit>`, each build superseding the
    previous one. Manual dispatch runs verify + build artifacts only and never
    touches a release.
 
-Tagging a release on GitHub (`vX.Y.Z`; star / bolide channels keep their
-suffix) instead fires
-[`.github/workflows/release.yml`](.github/workflows/release.yml): the same
-gates run, then the same eight-target matrix generates
-`twilight-<tag>-<target>` archives (`.zip` on Windows/macOS, `.tar.zst`
-on Linux/FreeBSD) and attaches them to the release — except the
-`snapshot` tag, whose files snapshot.yml supplies itself.
+All four channels share the reusable
+[`.github/workflows/_build.yml`](.github/workflows/_build.yml)
+(`on: workflow_call`); the channel files only own their triggers:
+
+| Workflow | Trigger | Release |
+| --- | --- | --- |
+| [`snapshot.yml`](.github/workflows/snapshot.yml) | push to `main`, `workflow_dispatch` | rolling `snapshot` pre-release |
+| [`alpha.yml`](.github/workflows/alpha.yml) | push `alpha-*` | `TwilightMC Bolide (<tag>)`, pre-release |
+| [`beta.yml`](.github/workflows/beta.yml) | push `beta-*` | `TwilightMC Star (<tag>)`, pre-release |
+| [`release.yml`](.github/workflows/release.yml) | push `vX.Y.Z` | `TwilightMC <tag>`, stable |
+
+Tagged releases are created by the workflow itself (`gh release create
+--generate-notes`), so the tag patterns stay disjoint and a tag never builds
+twice. FreeBSD is no longer part of the automated matrix: the VM job was slow
+and kept breaking on upstream system crates, so FreeBSD users build the CLI
+from source (`cargo build --release -p twilight-cli`).
 
 ## Security & unsigned binaries
 
@@ -289,7 +293,7 @@ Get-Content .\checksums.sha256 | ForEach-Object {
 }
 ```
 
-Linux, macOS and FreeBSD (run inside the download folder):
+Linux and macOS (run inside the download folder):
 
 ```sh
 sha256sum -c checksums.sha256      # GNU coreutils (Linux), BusyBox, or `shasum -a 256 -c` on macOS
@@ -308,7 +312,8 @@ the blocked app, or from a terminal:
 xattr -cr /path/to/twilight       # strips the quarantine attribute
 ```
 
-On Linux and FreeBSD nothing intervenes; just `chmod +x twilight` if needed.
+On Linux nothing intervenes for the pre-built archives; FreeBSD users build
+from source (`chmod +x target/release/twilight` if needed).
 
 ## License
 

@@ -62,7 +62,7 @@ fn connect_endpoints() -> &'static Mutex<HashMap<String, String>> {
 fn set_state(app: &AppHandle, id: &str, state: &str) {
     states()
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .insert(id.to_owned(), state.to_owned());
     let _ = app.emit(
         "server-state",
@@ -76,7 +76,7 @@ fn set_state(app: &AppHandle, id: &str, state: &str) {
 fn state_of(id: &str) -> String {
     states()
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .get(id)
         .cloned()
         .unwrap_or_else(|| "Stopped".into())
@@ -542,7 +542,7 @@ fn make_emit(app: &AppHandle, id: &str) -> std::sync::Arc<dyn Fn(String) + Send 
         if let Some(endpoint) = connect_endpoint(&line) {
             connect_endpoints()
                 .lock()
-                .unwrap()
+                .unwrap_or_else(|e| e.into_inner())
                 .insert(id.clone(), endpoint.clone());
             let _ = app.emit(
                 "server-connect",
@@ -568,13 +568,20 @@ fn watch_exit(app: &AppHandle, id: &str, mut child: tokio::process::Child) {
     let id = id.to_owned();
     tauri::async_runtime::spawn(async move {
         let _ = child.wait().await;
-        running().lock().unwrap().remove(&id);
+        running()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id);
         set_state(&app, &id, "Stopped");
     });
 }
 
 async fn start_server_inner(app: &AppHandle, id: &str) -> Result<(), String> {
-    if running().lock().unwrap().contains_key(id) {
+    if running()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains_key(id)
+    {
         return Err("server is already running".to_owned());
     }
     let dir = server_dir(app, id).await?;
@@ -706,7 +713,7 @@ async fn start_server_inner(app: &AppHandle, id: &str) -> Result<(), String> {
             let pid = child.id().unwrap_or(0);
             running()
                 .lock()
-                .unwrap()
+                .unwrap_or_else(|e| e.into_inner())
                 .insert(id.to_owned(), Running { sender, pid });
             watch_exit(app, id, child);
         }
@@ -800,15 +807,25 @@ pub async fn create_server(app: AppHandle, config: CreateServer) -> Result<Serve
 /// Deletes a server directory (not while running).
 #[tauri::command]
 pub async fn delete_server(app: AppHandle, id: String) -> Result<(), String> {
-    if running().lock().unwrap().contains_key(&id) {
+    if running()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains_key(&id)
+    {
         return Err("stop the server before deleting it".to_owned());
     }
     let dir = server_dir(&app, &id).await?;
     tokio::fs::remove_dir_all(dir)
         .await
         .map_err(|e| e.to_string())?;
-    states().lock().unwrap().remove(&id);
-    connect_endpoints().lock().unwrap().remove(&id);
+    states()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id);
+    connect_endpoints()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id);
     Ok(())
 }
 
@@ -842,8 +859,16 @@ async fn kill_pid(pid: u32) -> Result<(), String> {
 /// Graceful stop: `stop` down stdin; force-kill fallback after 15s.
 #[tauri::command]
 pub async fn stop_server(app: AppHandle, id: String) -> Result<(), String> {
-    let sender = running().lock().unwrap().get(&id).map(|r| r.sender.clone());
-    let pid = running().lock().unwrap().get(&id).map(|r| r.pid);
+    let sender = running()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&id)
+        .map(|r| r.sender.clone());
+    let pid = running()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&id)
+        .map(|r| r.pid);
     if let Some(sender) = sender {
         set_state(&app, &id, "Stopping");
         let _ = sender.send("stop".to_owned());
@@ -858,7 +883,10 @@ pub async fn stop_server(app: AppHandle, id: String) -> Result<(), String> {
     if let Some(pid) = pid.filter(|p| *p != 0) {
         let _ = kill_pid(pid).await;
     }
-    running().lock().unwrap().remove(&id);
+    running()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id);
     set_state(&app, &id, "Stopped");
     Ok(())
 }
@@ -866,11 +894,18 @@ pub async fn stop_server(app: AppHandle, id: String) -> Result<(), String> {
 /// Force-kills the process tree immediately.
 #[tauri::command]
 pub async fn kill_server(app: AppHandle, id: String) -> Result<(), String> {
-    let pid = running().lock().unwrap().get(&id).map(|r| r.pid);
+    let pid = running()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&id)
+        .map(|r| r.pid);
     if let Some(pid) = pid.filter(|p| *p != 0) {
         kill_pid(pid).await?;
     }
-    running().lock().unwrap().remove(&id);
+    running()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id);
     set_state(&app, &id, "Stopped");
     Ok(())
 }
@@ -894,7 +929,7 @@ pub async fn send_server_command(
     let _ = &app;
     let sender = running()
         .lock()
-        .unwrap()
+        .unwrap_or_else(|e| e.into_inner())
         .get(&id)
         .map(|r| r.sender.clone())
         .ok_or_else(|| "server is not running".to_owned())?;
@@ -1001,7 +1036,11 @@ pub async fn get_connect_status(
     let _ = &app;
     let dir = server_dir(&app, &id).await?;
     let meta = read_meta(&dir).await?;
-    let endpoint = connect_endpoints().lock().unwrap().get(&id).cloned();
+    let endpoint = connect_endpoints()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&id)
+        .cloned();
     Ok((meta.connect, endpoint))
 }
 

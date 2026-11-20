@@ -110,6 +110,7 @@
   // ---- java discovery state ----
   let runtimes = $state([]);
   let scanning = $state(false);
+  let javaScanned = $state(false);
   let javaError = $state('');
 
   // ---- new instance wizard (layout lives in NewInstanceModal) ----
@@ -159,15 +160,29 @@
   }
 
   async function scanJava() {
+    if (scanning) return;
     scanning = true;
     javaError = '';
     try {
       runtimes = await api('discover_java_installations');
+      javaScanned = true;
     } catch (e) {
       javaError = String(e);
     } finally {
       scanning = false;
     }
+  }
+
+  // Mode switches drop editor state: leaving the launcher must never leave a
+  // hidden Edit page (or its delete/menu popovers) armed when the user comes
+  // back from the Client dashboard.
+  function setMode(next) {
+    if (next === mode) return;
+    mode = next;
+    editFor = null;
+    menuFor = null;
+    deleteFor = null;
+    deleteError = '';
   }
 
   // ---- wizard flow ----
@@ -521,7 +536,9 @@
       minMem = javaPrefs.min_memory_mb;
       maxMem = javaPrefs.max_memory_mb;
       javaMsg = '';
-      if (runtimes.length === 0) await scanJava();
+      // lazy, once: the first Settings visit may kick off the disk scan, but
+      // the page renders instantly and later visits reuse the cached list
+      if (!javaScanned && runtimes.length === 0) void scanJava();
     } catch {
       // plain web build: no backend
     }
@@ -688,9 +705,7 @@
       } catch {
         // plain web build: no event pane
       }
-      await refreshAccounts();
-      await loadInstances();
-      await loadStorage();
+      await Promise.all([refreshAccounts(), loadInstances(), loadStorage()]);
       // desktop shortcut boot: auto-launch the instance the shortcut names
       try {
         const pending = await api('get_startup_launch');
@@ -828,7 +843,7 @@
                   : 'text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)'}"
                 role="tab"
                 aria-selected={mode === id}
-                onclick={() => (mode = id)}
+                onclick={() => setMode(id)}
               >
                 {label}
               </button>
