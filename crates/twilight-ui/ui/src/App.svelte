@@ -310,16 +310,17 @@
     selectedId = id;
   }
 
-  async function launchInstance(id, server = null) {
+  async function launchInstance(id, server = null, world = null) {
     if (gameRunning) return;
     const inst = instances.find((i) => i.id === id);
     const label = inst ? inst.name : id;
     gameRunning = true;
-    if (server) setStatus('status-launching-server', { name: label, server });
+    if (world) setStatus('status-launching-world', { name: label, world });
+    else if (server) setStatus('status-launching-server', { name: label, server });
     else setStatus('status-launching', { name: label });
     drawerOpen = true;
     try {
-      const code = await api('launch_instance', { instanceId: id, server });
+      const code = await api('launch_instance', { instanceId: id, server, world });
       logLine({ stream: 'stdout', line: t('console-exit-code', { code }) });
       await loadInstances();
       setStatus('status-ready');
@@ -895,6 +896,7 @@
           {deafMode}
           onback={() => (editFor = null)}
           onopenconsole={() => (drawerOpen = true)}
+          onlaunch={launchInstance}
         />
       {:else if active === 'settings'}
         <!-- full-page settings: the grid and context panel stay behind -->

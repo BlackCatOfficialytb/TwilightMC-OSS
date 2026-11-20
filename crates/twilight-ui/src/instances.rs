@@ -674,6 +674,38 @@ pub async fn list_screenshots(
     list_dir_files(&dir, &["png"]).await
 }
 
+/// Removes a screenshot from the instance's screenshots folder for good (the
+/// UI confirms first).
+#[tauri::command]
+pub async fn delete_screenshot(
+    app: AppHandle,
+    instance_id: String,
+    file_name: String,
+) -> Result<(), String> {
+    validate_instance_id(&instance_id)?;
+    if file_name.is_empty()
+        || !file_name.to_ascii_lowercase().ends_with(".png")
+        || file_name.contains('/')
+        || file_name.contains('\\')
+        || file_name.contains("..")
+        || file_name.contains(':')
+    {
+        return Err("invalid screenshot name".into());
+    }
+    let file = instances_root(&app)
+        .await?
+        .join(&instance_id)
+        .join("minecraft")
+        .join("screenshots")
+        .join(&file_name);
+    if !file.is_file() {
+        return Err(format!("screenshot {file_name} is not present"));
+    }
+    tokio::fs::remove_file(file)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Log browser data: every `.log` / `.txt` in the instance's `minecraft/logs`.
 #[tauri::command]
 pub async fn list_logs(app: AppHandle, instance_id: String) -> Result<Vec<FileEntry>, String> {

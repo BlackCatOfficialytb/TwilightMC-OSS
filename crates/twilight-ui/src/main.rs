@@ -17,6 +17,7 @@ mod shortcut;
 mod storage;
 mod twpack;
 mod versions;
+mod worlds;
 
 // Single source of truth for the header badge; falls out of the workspace
 // version and auto-bumps with the milestone train.
@@ -179,6 +180,7 @@ fn main() {
             modrinth::search_modrinth_mods,
             modrinth::install_modrinth_mod,
             modrinth::install_mod_with_deps,
+            modrinth::download_modrinth_pack,
             modrinth::suggest_accessibility_mods,
             modrinth::preview_mod_download_queue,
             modrinth::get_modrinth_project_details,
@@ -186,6 +188,10 @@ fn main() {
             modrinth::install_cleanroom_core_mods,
             curseforge::search_curseforge_mods,
             curseforge::install_curseforge_mod,
+            worlds::list_instance_worlds,
+            worlds::backup_instance_world,
+            worlds::list_world_backups,
+            worlds::restore_world_backup,
             launch::launch_instance,
             launch::kill_instance,
             instances::get_instances,
@@ -198,6 +204,7 @@ fn main() {
             instance::set_instance_group,
             instances::delete_instance,
             instances::list_screenshots,
+            instances::delete_screenshot,
             instances::list_logs,
             shortcut::create_desktop_shortcut,
             shortcut::get_startup_launch,
@@ -209,6 +216,9 @@ fn main() {
             mods::toggle_mod,
             mods::delete_mod,
             mods::import_mod,
+            mods::list_instance_packs,
+            mods::delete_pack,
+            mods::import_pack,
             modpack::inspect_modpack,
             modpack::install_mrpack,
             modpack::install_modpack,

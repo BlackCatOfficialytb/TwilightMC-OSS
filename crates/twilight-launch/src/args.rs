@@ -150,9 +150,9 @@ pub fn game_arguments(
             args.push(options.quick_play.server_port.unwrap_or(25565).to_string());
         }
     }
-    if let Some(world) = &options.quick_play.world
-        && traits.contains("feature:is_quick_play_singleplayer")
-    {
+    if let Some(world) = &options.quick_play.world {
+        // ponytail: gate on presence only — loader profiles never carry the
+        // quick-play trait, and pre-1.20 clients ignore the unknown flag
         args.push("--quickPlaySingleplayer".into());
         args.push(world.clone());
     }

@@ -35,12 +35,15 @@ static GAME_PID: AtomicU32 = AtomicU32::new(0);
 
 /// Launches the instance `instance_id` from the shared instance library with
 /// the UI storage layout: shared artifacts live under the app data dir,
-/// staging stays in the OS temp. `server` quick-joins an address (`--server`).
+/// staging stays in the OS temp. `server` quick-joins an address (`--server`);
+/// `world` launches straight into a singleplayer world folder
+/// (`--quickPlaySingleplayer`, 1.20+).
 #[tauri::command]
 pub async fn launch_instance(
     app: AppHandle,
     instance_id: String,
     server: Option<String>,
+    world: Option<String>,
 ) -> Result<i32, String> {
     if RUNNING
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
@@ -49,7 +52,7 @@ pub async fn launch_instance(
         return Err("a game is already running".to_owned());
     }
 
-    let result = run(&app, &instance_id, server).await;
+    let result = run(&app, &instance_id, server, world).await;
     GAME_PID.store(0, Ordering::SeqCst);
     RUNNING.store(false, Ordering::SeqCst);
     result
@@ -291,7 +294,12 @@ async fn run_horizon(
     Ok(status.code().unwrap_or(-1))
 }
 
-async fn run(app: &AppHandle, instance_id: &str, server: Option<String>) -> Result<i32, String> {
+async fn run(
+    app: &AppHandle,
+    instance_id: &str,
+    server: Option<String>,
+    world: Option<String>,
+) -> Result<i32, String> {
     // Prism/Freesm-style diagnostic header: the console drawer starts with the
     // launcher identity line, exactly like "Prism Launcher 8.0 (official)".
     let _ = app.emit(
@@ -437,6 +445,7 @@ async fn run(app: &AppHandle, instance_id: &str, server: Option<String>) -> Resu
         jvm_args,
         account,
         server,
+        world,
         dry_run: false,
     };
 

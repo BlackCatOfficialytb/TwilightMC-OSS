@@ -174,17 +174,21 @@ fn pick_version_entry(raw: &serde_json::Value) -> Result<Option<&serde_json::Val
     Ok(list.first())
 }
 
-/// (url, filename, sha1, size) of the primary `.jar` artifact of a version
-/// entry: the flag-marked primary minimizes ambiguity, falling back to the
-/// first `.jar` in the list when a version carries no primary marker.
-fn pick_primary_file(entry: &serde_json::Value) -> Option<(String, String, Option<String>, u64)> {
+/// (url, filename, sha1, size) of the primary artifact of a version entry:
+/// the flag-marked primary minimizes ambiguity, falling back to the first
+/// file matching one of `exts` when a version carries no primary marker.
+fn pick_primary_file(
+    entry: &serde_json::Value,
+    exts: &[&str],
+) -> Option<(String, String, Option<String>, u64)> {
     let files = entry.get("files")?.as_array()?;
-    let mut first_jar = None;
+    let mut first_match = None;
     for file in files {
         let Some(filename) = file.get("filename").and_then(serde_json::Value::as_str) else {
             continue;
         };
-        if !filename.to_ascii_lowercase().ends_with(".jar") {
+        let lower = filename.to_ascii_lowercase();
+        if !exts.iter().any(|ext| lower.ends_with(ext)) {
             continue;
         }
         let Some(url) = file.get("url").and_then(serde_json::Value::as_str) else {
@@ -202,11 +206,11 @@ fn pick_primary_file(entry: &serde_json::Value) -> Option<(String, String, Optio
         if file.get("primary") == Some(&serde_json::Value::Bool(true)) {
             return Some(candidate);
         }
-        if first_jar.is_none() {
-            first_jar = Some(candidate);
+        if first_match.is_none() {
+            first_match = Some(candidate);
         }
     }
-    first_jar
+    first_match
 }
 
 pub(crate) fn client_ua() -> &'static str {
@@ -217,11 +221,16 @@ pub(crate) fn client_ua() -> &'static str {
     )
 }
 
-/// Search facets block (`project_type:mod`, optional version + loader pins,
+/// Search facets block (project_type, optional version + loader pins,
 /// optional OR'd category filters). Quilt searches cover both the `quilt`
 /// and `fabric` category facets (OR groups), everything else pins one.
-fn search_facets(game_version: &str, loader: &str, categories: &[String]) -> serde_json::Value {
-    let mut facets = vec!["project_type:mod".to_owned()];
+fn search_facets(
+    project_type: &str,
+    game_version: &str,
+    loader: &str,
+    categories: &[String],
+) -> serde_json::Value {
+    let mut facets = vec![format!("project_type:{project_type}")];
     if !game_version.trim().is_empty() {
         facets.push(format!("versions:{}", game_version.trim()));
     }
@@ -241,8 +250,9 @@ fn search_facets(game_version: &str, loader: &str, categories: &[String]) -> ser
     serde_json::json!(groups)
 }
 
-/// Searches Modrinth mods (project_type pinned, version/loader facets when
-/// provided) — feeds the browser modal. Most-installed first on empty queries.
+/// Searches Modrinth (`project_type`: mod by default, resourcepack or shader
+/// for the pack tabs; version/loader facets when provided) — feeds the browser
+/// modal. Most-installed first on empty queries.
 #[tauri::command]
 pub async fn search_modrinth_mods(
     query: String,
@@ -250,6 +260,7 @@ pub async fn search_modrinth_mods(
     loader: String,
     categories: Option<Vec<String>>,
     index: Option<String>,
+    project_type: Option<String>,
 ) -> Result<Vec<ModSearchResult>, String> {
     let url = reqwest::Url::parse_with_params(
         format!("{API_BASE}/search").as_str(),
@@ -266,6 +277,7 @@ pub async fn search_modrinth_mods(
             (
                 "facets",
                 &search_facets(
+                    project_type.as_deref().unwrap_or("mod").trim(),
                     game_version.trim(),
                     loader.trim(),
                     &categories.unwrap_or_default(),
@@ -319,24 +331,34 @@ fn validate_project_id(project_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// `/project/{id}/version` URL pinned to one game version + loader.
+/// `/project/{id}/version` URL pinned to one game version (+ loader pin only
+/// when provided — pack searches run keyless of loaders).
 fn versions_url(
     api_base: &str,
     project_id: &str,
     game_version: &str,
     loader: &str,
 ) -> Result<reqwest::Url, String> {
+    let base = format!("{api_base}/project/{project_id}/version");
+    let tag = loader.trim().to_ascii_lowercase();
+    if tag.is_empty() {
+        return reqwest::Url::parse_with_params(
+            base.as_str(),
+            &[(
+                "game_versions",
+                &serde_json::json!([game_version.trim()]).to_string(),
+            )],
+        )
+        .map_err(|e| e.to_string());
+    }
     reqwest::Url::parse_with_params(
-        format!("{api_base}/project/{project_id}/version").as_str(),
+        base.as_str(),
         &[
             (
                 "game_versions",
                 &serde_json::json!([game_version.trim()]).to_string(),
             ),
-            (
-                "loaders",
-                &serde_json::json!([loader.trim().to_ascii_lowercase()]).to_string(),
-            ),
+            ("loaders", &serde_json::json!([tag]).to_string()),
         ],
     )
     .map_err(|e| e.to_string())
@@ -427,7 +449,7 @@ async fn install_project_with_deps(
         );
     }
 
-    let Some((url, filename, sha1, _size)) = pick_primary_file(&entry) else {
+    let Some((url, filename, sha1, _size)) = pick_primary_file(&entry, &[".jar"]) else {
         return Err(format!(
             "version {} carries no .jar artifact",
             entry
@@ -471,6 +493,56 @@ pub async fn install_mod_with_deps(
         &mut visited,
     )
     .await
+}
+
+/// Downloads one resourcepack or shaderpack: resolves the latest compatible
+/// Modrinth version of the project and fetches its primary file into
+/// `resourcepacks` / `shaderpacks`. Returns the installed file name.
+#[tauri::command]
+pub async fn download_modrinth_pack(
+    app: AppHandle,
+    instance_id: String,
+    project_id: String,
+    game_version: String,
+    project_type: String,
+) -> Result<String, String> {
+    let dir_name = match project_type.as_str() {
+        "resourcepack" => "resourcepacks",
+        "shader" => "shaderpacks",
+        other => return Err(format!("unsupported project type {other:?}")),
+    };
+    validate_instance_id(&instance_id)?;
+    validate_project_id(&project_id)?;
+    let root = instances_root(&app).await?;
+    let dir = root.join(&instance_id).join("minecraft").join(dir_name);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| e.to_string())?;
+    // loader "" = no loaders facet / pin: packs are loader-agnostic zips
+    let entry = fetch_compatible_version(
+        &reqwest::Client::new(),
+        API_BASE,
+        &project_id,
+        game_version.trim(),
+        "",
+    )
+    .await?
+    .ok_or_else(|| format!("no compatible version of {project_id} for this build"))?;
+    let Some((url, filename, sha1, _size)) = pick_primary_file(&entry, &[".zip"]) else {
+        return Err(format!(
+            "version {} carries no .zip artifact",
+            entry
+                .get("version_number")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?")
+        ));
+    };
+    let dest = dir.join(&filename);
+    ParallelDownloader::new(reqwest::Client::new(), 4)
+        .download_all(&[DownloadRequest { url, dest, sha1 }])
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(filename)
 }
 
 /// One queued mod of the batch download review: the browser passes the
@@ -646,7 +718,7 @@ async fn preview_project_with_deps(
         .await?;
     }
 
-    let Some((url, filename, sha1, size)) = pick_primary_file(&entry) else {
+    let Some((url, filename, sha1, size)) = pick_primary_file(&entry, &[".jar"]) else {
         return Err(format!(
             "version {} carries no .jar artifact",
             entry
@@ -1015,7 +1087,7 @@ mod tests {
         )
         .unwrap();
 
-        let (url, filename, sha1, _size) = pick_primary_file(&entry).unwrap();
+        let (url, filename, sha1, _size) = pick_primary_file(&entry, &[".jar"]).unwrap();
         assert_eq!(filename, "sodium.jar");
         assert_eq!(url, "https://cdn.modrinth.com/x/sodium.jar");
         assert_eq!(sha1.as_deref(), Some("abc123"));
@@ -1025,7 +1097,7 @@ mod tests {
             r#"{"files":[{"filename":"first.jar","url":"https://cdn/f.jar"}]}"#,
         )
         .unwrap();
-        let (_, filename, _, _) = pick_primary_file(&bare).unwrap();
+        let (_, filename, _, _) = pick_primary_file(&bare, &[".jar"]).unwrap();
         assert_eq!(filename, "first.jar");
 
         // empty version list means "no compatible build"
@@ -1046,15 +1118,20 @@ mod tests {
     #[test]
     fn facets_pin_project_type_gaps_stay_lean() {
         assert_eq!(
-            search_facets("1.21.4", "Fabric", &[]),
+            search_facets("mod", "1.21.4", "Fabric", &[]),
             serde_json::json!([
                 ["project_type:mod", "versions:1.21.4"],
                 ["categories:fabric"]
             ])
         );
         assert_eq!(
-            search_facets("  ", "", &[]),
+            search_facets("mod", "  ", "", &[]),
             serde_json::json!([["project_type:mod"]])
+        );
+        // pack tabs pin resourcepack/shader and skip the loader facet
+        assert_eq!(
+            search_facets("resourcepack", "1.21.4", "", &[]),
+            serde_json::json!([["project_type:resourcepack", "versions:1.21.4"]])
         );
     }
 
@@ -1063,6 +1140,7 @@ mod tests {
         // quilt OR fabric loaders, plus one OR group per picked category
         assert_eq!(
             search_facets(
+                "mod",
                 "1.21.4",
                 "Quilt",
                 &["Optimization".to_owned(), " Utility".to_owned()]

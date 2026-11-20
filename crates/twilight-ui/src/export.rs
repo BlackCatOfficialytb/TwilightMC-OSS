@@ -71,7 +71,7 @@ struct EntryMeta {
     offset: u64,
 }
 
-fn write_zip(dir: &Path, dest: &Path) -> Result<(), String> {
+pub(crate) fn write_zip(dir: &Path, dest: &Path) -> Result<(), String> {
     let mut paths = Vec::new();
     collect(dir, dir, 0, &mut paths)?;
     paths.sort_by(|a, b| a.1.cmp(&b.1));

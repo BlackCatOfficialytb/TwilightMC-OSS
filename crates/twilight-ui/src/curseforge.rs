@@ -10,7 +10,7 @@ use twilight_downloader::{DownloadRequest, ParallelDownloader};
 
 use crate::accounts::{load_settings, settings_path};
 use crate::instances::{instances_root, validate_instance_id};
-use crate::modpack::{curse_file_name, CF_API_BASE};
+use crate::modpack::{CF_API_BASE, curse_file_name};
 use crate::mods::mods_dir;
 
 /// One search hit of the CurseForge mods browser.
@@ -92,14 +92,12 @@ fn pick_primary_file(hit: &serde_json::Value) -> Option<(String, String, Option<
 pub(crate) fn parse_search_hits(raw: &serde_json::Value) -> Vec<CurseSearchResult> {
     raw.get("data")
         .and_then(|hits| hits.as_array())
-        .map(|hits| hits.iter().filter_map(|hit| parse_hit(hit)).collect())
+        .map(|hits| hits.iter().filter_map(parse_hit).collect())
         .unwrap_or_default()
 }
 
 fn parse_hit(hit: &serde_json::Value) -> Option<CurseSearchResult> {
-    let (download_url, file_name, sha1) = pick_primary_file(hit)
-        .map(|(url, name, sha1)| (url, name, sha1))
-        .unwrap_or_default();
+    let (download_url, file_name, sha1) = pick_primary_file(hit).unwrap_or_default();
     Some(CurseSearchResult {
         project_id: hit.get("id")?.as_u64()?,
         title: str_field(hit, "name"),
@@ -280,9 +278,10 @@ mod tests {
 
     #[test]
     fn parse_search_hits_reads_fields_and_marks_blocked() {
-        let raw: serde_json::Value =
-            serde_json::from_str(&search_json("https://mediafilez.forgecdn.net/files/jei.jar"))
-                .unwrap();
+        let raw: serde_json::Value = serde_json::from_str(&search_json(
+            "https://mediafilez.forgecdn.net/files/jei.jar",
+        ))
+        .unwrap();
         let hits = parse_search_hits(&raw);
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].project_id, 238222);
@@ -317,13 +316,10 @@ mod tests {
 
     #[tokio::test]
     async fn search_sends_key_and_parses_loopback_response() {
-        let (api, rx) = loopback_api(search_json(
-            "https://mediafilez.forgecdn.net/files/jei.jar",
-        ));
-        let hits =
-            search_curseforge_mods_core(&api, "test-key-123", "jei", "1.21.4", "fabric")
-                .await
-                .unwrap();
+        let (api, rx) = loopback_api(search_json("https://mediafilez.forgecdn.net/files/jei.jar"));
+        let hits = search_curseforge_mods_core(&api, "test-key-123", "jei", "1.21.4", "fabric")
+            .await
+            .unwrap();
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].file_name, "jei-1.21.4-fabric.jar");
         // the personal key travels in the x-api-key header, filters ride along
@@ -339,10 +335,9 @@ mod tests {
     #[tokio::test]
     async fn search_without_key_errors_before_any_network_call() {
         let (api, _rx) = loopback_api(search_json("https://mediafilez.forgecdn.net/files/x.jar"));
-        let err =
-            search_curseforge_mods_core(&api, "", "jei", "1.21.4", "fabric")
-                .await
-                .unwrap_err();
+        let err = search_curseforge_mods_core(&api, "", "jei", "1.21.4", "fabric")
+            .await
+            .unwrap_err();
         assert!(err.contains("no CurseForge API key"));
     }
 }

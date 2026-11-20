@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::AppHandle;
 
-use crate::instances::{instances_root, validate_instance_id};
+use crate::instances::{FileEntry, instances_root, list_dir_files, validate_instance_id};
 
 /// One installed mod file. `filename` is the exact on-disk name (with its
 /// state suffix) that the toggle/delete IPC round-trips unchanged; the table
@@ -193,6 +193,107 @@ pub async fn import_mod(
         .join(&file_name);
     if dest.exists() {
         return Err(format!("mod {file_name} already exists"));
+    }
+    tokio::fs::copy(&src, &dest)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Sub-directory of a pack kind (`resourcepack` | `shader`).
+pub(crate) fn packs_dir_name(project_type: &str) -> Result<&'static str, String> {
+    match project_type {
+        "resourcepack" => Ok("resourcepacks"),
+        "shader" => Ok("shaderpacks"),
+        other => Err(format!("unsupported pack kind {other:?}")),
+    }
+}
+
+/// Pack file names must stay plain single `.zip` components.
+fn validate_pack_filename(filename: &str) -> Result<(), String> {
+    if filename.is_empty()
+        || filename.contains('/')
+        || filename.contains('\\')
+        || filename.contains("..")
+        || filename.contains(':')
+    {
+        return Err("invalid pack filename".into());
+    }
+    if !filename.to_ascii_lowercase().ends_with(".zip") {
+        return Err("packs live as .zip archives".into());
+    }
+    Ok(())
+}
+
+async fn packs_dir(root: &Path, instance_id: &str, project_type: &str) -> Result<PathBuf, String> {
+    let dir = root
+        .join(instance_id)
+        .join("minecraft")
+        .join(packs_dir_name(project_type)?);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// Lists the instance's pack archives (`resourcepacks` or `shaderpacks`),
+/// newest-first. A missing directory is an empty list.
+#[tauri::command]
+pub async fn list_instance_packs(
+    app: AppHandle,
+    instance_id: String,
+    project_type: String,
+) -> Result<Vec<FileEntry>, String> {
+    validate_instance_id(&instance_id)?;
+    let root = instances_root(&app).await?;
+    let dir = packs_dir(&root, &instance_id, &project_type).await?;
+    list_dir_files(&dir, &["zip"]).await
+}
+
+/// Removes a listed pack archive from the instance for good.
+#[tauri::command]
+pub async fn delete_pack(
+    app: AppHandle,
+    instance_id: String,
+    project_type: String,
+    file_name: String,
+) -> Result<(), String> {
+    validate_instance_id(&instance_id)?;
+    validate_pack_filename(&file_name)?;
+    let root = instances_root(&app).await?;
+    let file = packs_dir(&root, &instance_id, &project_type)
+        .await?
+        .join(&file_name);
+    if !file.is_file() {
+        return Err(format!("pack {file_name} is not present"));
+    }
+    tokio::fs::remove_file(file)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Copies an external pack archive into the packs dir.
+#[tauri::command]
+pub async fn import_pack(
+    app: AppHandle,
+    instance_id: String,
+    project_type: String,
+    file_path: String,
+) -> Result<(), String> {
+    validate_instance_id(&instance_id)?;
+    let src = PathBuf::from(&file_path);
+    if !src.is_file() {
+        return Err(format!("file not found: {file_path}"));
+    }
+    let Some(file_name) = src.file_name().map(|n| n.to_string_lossy().to_string()) else {
+        return Err("invalid pack file name".into());
+    };
+    validate_pack_filename(&file_name)?;
+    let dest = packs_dir(&instances_root(&app).await?, &instance_id, &project_type)
+        .await?
+        .join(&file_name);
+    if dest.exists() {
+        return Err(format!("pack {file_name} already exists"));
     }
     tokio::fs::copy(&src, &dest)
         .await

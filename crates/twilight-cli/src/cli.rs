@@ -113,6 +113,9 @@ pub struct LaunchConfig {
     pub jvm_args: Vec<String>,
     /// Quick-play: join this server address right after the game starts.
     pub server: Option<String>,
+    /// Quick-play: launch straight into this singleplayer world folder
+    /// (`--quickPlaySingleplayer`, 1.20+; older clients ignore the flag).
+    pub world: Option<String>,
     /// Full account profile to launch with. `None` = offline account from
     /// `username` (the CLI default); the desktop UI passes the active account
     /// so Microsoft tokens and custom Yggdrasil servers reach the pipeline.
@@ -144,6 +147,7 @@ impl LaunchArgs {
             jvm_args: Vec::new(),
             account: None,
             server: self.server.clone(),
+            world: None,
             dry_run: self.dry_run,
         })
     }

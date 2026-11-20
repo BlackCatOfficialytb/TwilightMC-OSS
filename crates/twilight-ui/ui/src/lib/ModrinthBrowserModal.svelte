@@ -10,7 +10,12 @@
   import ModDownloadReviewModal from './ModDownloadReviewModal.svelte';
   import { t } from './i18n.svelte.ts';
 
-  let { instance, onclose, oninstalled } = $props();
+  let { instance, onclose, oninstalled, projectType = 'mod' } = $props();
+
+  // Pack mode (projectType: resourcepack | shader): searches run without
+  // loader facets, the queue/staging flow is skipped (packs have no
+  // dependencies) and the inspector installs the pack zip directly.
+  const isPack = projectType === 'resourcepack' || projectType === 'shader';
 
   // ---- source: Modrinth (default) or CurseForge ----
   // CurseForge search needs the personal API key from Settings; blocked
@@ -148,9 +153,11 @@
       invoke('search_modrinth_mods', {
         query: q,
         gameVersion: instance.minecraft_version,
-        loader: loaderTag,
+        // packs are loader-agnostic zips: no loaders facet, no loader pin
+        loader: isPack ? '' : loaderTag,
         categories: cats,
         index,
+        project_type: isPack ? projectType : undefined,
       })
         .then((rows) => {
           if (id === seq) {
@@ -181,7 +188,7 @@
       const info = await invoke('get_modrinth_project_details', {
         projectId: row.project_id,
         gameVersion: instance.minecraft_version,
-        loader: loaderTag,
+        loader: isPack ? '' : loaderTag,
       });
       if (token === detailsSeq) details = info;
     } catch (e) {
@@ -241,6 +248,28 @@
     }
   }
 
+  // ---- pack install (resourcepack / shader zip, no deps) ----
+  let packInstalling = $state(false);
+
+  async function installPack(row) {
+    packInstalling = true;
+    try {
+      const name = await invoke('download_modrinth_pack', {
+        instanceId: instance.id,
+        projectId: row.project_id,
+        gameVersion: instance.minecraft_version,
+        projectType,
+      });
+      installedNames = [...installedNames, name.toLowerCase()];
+      toast(t('packs-downloaded', { name }), 'success');
+      oninstalled?.(name);
+    } catch (e) {
+      toast(String(e), 'error');
+    } finally {
+      packInstalling = false;
+    }
+  }
+
   function inQueue(projectId) {
     return queue.some((q) => q.project_id === projectId);
   }
@@ -268,9 +297,16 @@
 
   onMount(() => {
     const closer = pushOverlay(() => onclose?.());
-    invoke('list_instance_mods', { instanceId: instance.id })
-      .then((mods) => (installedNames = mods.map((m) => m.filename.toLowerCase())))
-      .catch(() => {});
+    // installed badges: mods list for mods, pack list for packs
+    if (isPack) {
+      invoke('list_instance_packs', { instanceId: instance.id, projectType })
+        .then((files) => (installedNames = files.map((f) => f.name.toLowerCase())))
+        .catch(() => {});
+    } else {
+      invoke('list_instance_mods', { instanceId: instance.id })
+        .then((mods) => (installedNames = mods.map((m) => m.filename.toLowerCase())))
+        .catch(() => {});
+    }
     invoke('get_curseforge_api_key')
       .then((key) => (hasCfKey = !!String(key ?? '').trim()))
       .catch(() => {});
@@ -302,32 +338,35 @@
         </p>
       </div>
       <div class="flex items-center gap-2">
-        <div class="flex items-center gap-0.5 rounded border border-(--border-1) bg-(--bg-3) p-0.5">
-          <button
-            class="rounded px-2.5 py-1 text-(--step-meta) font-medium {source === 'modrinth'
-              ? 'bg-(--accent-1) text-(--on-accent)'
-              : 'text-(--fg-2) hover:text-(--fg-1)'}"
-            onclick={() => switchSource('modrinth')}
-          >
-            Modrinth
-          </button>
-          <button
-            class="rounded px-2.5 py-1 text-(--step-meta) font-medium {source === 'curseforge'
-              ? 'bg-(--accent-1) text-(--on-accent)'
-              : 'text-(--fg-2) hover:text-(--fg-1)'}"
-            onclick={() => switchSource('curseforge')}
-          >
-            CurseForge
-          </button>
-        </div>
+        {#if !isPack}
+          <div class="flex items-center gap-0.5 rounded border border-(--border-1) bg-(--bg-3) p-0.5">
+            <button
+              class="rounded px-2.5 py-1 text-(--step-meta) font-medium {source === 'modrinth'
+                ? 'bg-(--accent-1) text-(--on-accent)'
+                : 'text-(--fg-2) hover:text-(--fg-1)'}"
+              onclick={() => switchSource('modrinth')}
+            >
+              Modrinth
+            </button>
+            <button
+              class="rounded px-2.5 py-1 text-(--step-meta) font-medium {source === 'curseforge'
+                ? 'bg-(--accent-1) text-(--on-accent)'
+                : 'text-(--fg-2) hover:text-(--fg-1)'}"
+              onclick={() => switchSource('curseforge')}
+            >
+              CurseForge
+            </button>
+          </div>
+        {/if}
         <button class="text-(--fg-2) hover:text-(--fg-1)" onclick={() => onclose?.()}>✕</button>
       </div>
     </div>
 
     <!-- three panes -->
     <div class="flex min-h-0 flex-1">
-      <!-- left: filters (Modrinth facets; CurseForge search has none) -->
-      {#if source === 'modrinth'}
+      <!-- left: filters (Modrinth facets; CurseForge search has none; packs
+           have no mod categories) -->
+      {#if source === 'modrinth' && !isPack}
         <aside class="flex w-[200px] shrink-0 flex-col gap-4 overflow-y-auto border-r border-(--border-1) p-3">
           <section>
             <h4 class="text-(--step-caption) font-semibold uppercase tracking-wide text-(--fg-2)">
@@ -494,7 +533,18 @@
             </div>
           </div>
 
-          {#if source === 'modrinth'}
+          {#if source === 'curseforge'}
+            <div class="border-b border-(--border-1) p-3">
+              <button
+                class="flex w-full items-center justify-center gap-1.5 rounded bg-(--accent-1) px-4 py-1.5 text-(--step-body) font-medium text-(--on-accent) hover:bg-(--accent-1-hover) disabled:opacity-40"
+                disabled={cfInstalling}
+                title={t('curseforge-install')}
+                onclick={() => installCurse(selected)}
+              >
+                <LauncherIcon name="download" size={13} /> {t('curseforge-install')}
+              </button>
+            </div>
+          {:else}
             <div class="border-b border-(--border-1) p-3">
               <label
                 class="text-(--step-caption) font-semibold uppercase tracking-wide text-(--fg-2)"
@@ -522,17 +572,16 @@
                   {t('modrinth-latest-compatible')}
                 </div>
               {/if}
-            </div>
-          {:else}
-            <div class="border-b border-(--border-1) p-3">
-              <button
-                class="flex w-full items-center justify-center gap-1.5 rounded bg-(--accent-1) px-4 py-1.5 text-(--step-body) font-medium text-(--on-accent) hover:bg-(--accent-1-hover) disabled:opacity-40"
-                disabled={cfInstalling}
-                title={t('curseforge-install')}
-                onclick={() => installCurse(selected)}
-              >
-                <LauncherIcon name="download" size={13} /> {t('curseforge-install')}
-              </button>
+              {#if isPack}
+                <button
+                  class="mt-2 flex w-full items-center justify-center gap-1.5 rounded bg-(--accent-1) px-4 py-1.5 text-(--step-body) font-medium text-(--on-accent) hover:bg-(--accent-1-hover) disabled:opacity-40"
+                  disabled={packInstalling}
+                  title={t('packs-download-title')}
+                  onclick={() => installPack(selected)}
+                >
+                  <LauncherIcon name="download" size={13} /> {t('packs-download')}
+                </button>
+              {/if}
             </div>
           {/if}
 
@@ -551,8 +600,9 @@
       </aside>
     </div>
 
-    <!-- bottom staging bar (Modrinth queue flow; CurseForge installs directly) -->
-    {#if source === 'modrinth'}
+    <!-- bottom staging bar (Modrinth queue flow; CurseForge installs directly,
+         packs download the zip straight from the inspector) -->
+    {#if source === 'modrinth' && !isPack}
       <div class="flex items-center justify-between gap-2 border-t border-(--border-1) px-4 py-3">
         <span class="text-(--step-body) text-(--fg-2)">
           {queue.length === 0

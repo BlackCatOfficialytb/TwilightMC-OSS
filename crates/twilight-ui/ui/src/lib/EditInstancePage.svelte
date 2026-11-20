@@ -1,22 +1,29 @@
 <script>
   // Full-page edit-instance view (SettingsPage grammar): left navigation
-  // rail over five sections and a spacious content column. The mods tab is
-  // fully live (list/toggle/delete/add + Modrinth browser); screenshots and
-  // logs browse the instance's game folders through the new listing
-  // commands; components and settings keep their milestone placeholders.
+  // rail over eight sections and a spacious content column. The mods tab is
+  // fully live (list/toggle/delete/add + Modrinth browser); worlds manage
+  // zip backups and restores with quick-play launch; resource/shader packs
+  // list/add/delete/browse Modrinth; screenshots open in a lightbox with
+  // copy/delete; logs browse the instance's game folders through the new
+  // listing commands; components and settings keep their milestone
+  // placeholders.
   import { onMount } from 'svelte';
   import Twemoji from './Twemoji.svelte';
   import { pushOverlay, popOverlay } from './overlays.js';
   import { iconKeyAsset } from './twemoji.js';
+  import { toast, confirmAlert } from './alerts.svelte.js';
   import InstanceIconPicker from './InstanceIconPicker.svelte';
   import ModrinthBrowserModal from './ModrinthBrowserModal.svelte';
   import { t } from './i18n.svelte.ts';
 
-  let { instance, storage = null, blindMode = false, deafMode = false, onback, onopenconsole } = $props();
+  let { instance, storage = null, blindMode = false, deafMode = false, onback, onopenconsole, onlaunch } = $props();
 
   const sections = [
     { id: 'components', label: 'edit-components', icon: '🧱' },
     { id: 'mods', label: 'edit-mods', icon: '🧩' },
+    { id: 'worlds', label: 'edit-worlds', icon: '🌍' },
+    { id: 'resourcepacks', label: 'edit-resourcepacks', icon: '🎨' },
+    { id: 'shaderpacks', label: 'edit-shaderpacks', icon: '✨' },
     { id: 'screenshots', label: 'edit-screenshots', icon: '🖼' },
     { id: 'logs', label: 'edit-logs', icon: '📜' },
     { id: 'settings', label: 'edit-settings', icon: '⚙' },
@@ -146,6 +153,12 @@
   function gamePath(...parts) {
     const root = storage ? storage.instances_dir.replace(/\\/g, '/') : '';
     return [root, instance.id, 'minecraft', ...parts].filter(Boolean).join('/');
+  }
+
+  // the backups folder sits next to minecraft, not inside it
+  function backupsPath() {
+    const root = storage ? storage.instances_dir.replace(/\\/g, '/') : '';
+    return [root, instance.id, 'backups'].filter(Boolean).join('/');
   }
 
   // tauri asset-protocol URL for a full filesystem path (thumbnails)
@@ -304,13 +317,213 @@
     }
   }
 
+  // ---- worlds / backups state ----
+  let worlds = $state([]);
+  let worldBackups = $state([]);
+  let worldsBusy = $state(false);
+  let worldsMsg = $state('');
+
+  async function listWorlds() {
+    worldsBusy = true;
+    try {
+      worlds = await window.__TAURI__.core.invoke('list_instance_worlds', { instanceId: instance.id });
+      worldBackups = await window.__TAURI__.core.invoke('list_world_backups', { instanceId: instance.id });
+      worldsMsg = '';
+    } catch (e) {
+      worldsMsg = String(e);
+    } finally {
+      worldsBusy = false;
+    }
+  }
+
+  async function backupWorld(w) {
+    worldsBusy = true;
+    try {
+      const path = await window.__TAURI__.core.invoke('backup_instance_world', {
+        instanceId: instance.id,
+        worldName: w.name,
+      });
+      toast(t('worlds-backup-done', { name: w.name, path }), 'success');
+      await listWorlds();
+    } catch (e) {
+      worldsMsg = String(e);
+      worldsBusy = false;
+      return;
+    }
+    worldsBusy = false;
+  }
+
+  async function restoreWorldBackup(b) {
+    const ok = await confirmAlert({
+      title: t('worlds-restore-confirm-title'),
+      message: t('worlds-restore-confirm', { name: b.name }),
+      confirmText: t('common-restore'),
+    });
+    if (!ok) return;
+    worldsBusy = true;
+    try {
+      const name = await window.__TAURI__.core.invoke('restore_world_backup', {
+        instanceId: instance.id,
+        backupName: b.name,
+      });
+      toast(t('worlds-restore-done', { name }), 'success');
+      await listWorlds();
+    } catch (e) {
+      worldsMsg = String(e);
+      worldsBusy = false;
+      return;
+    }
+    worldsBusy = false;
+  }
+
+  function launchWorld(w) {
+    onlaunch?.(instance.id, null, w.name);
+  }
+
+  // ---- resource/shader packs state ----
+  let packs = $state([]);
+  let packsBusy = $state(false);
+  let packsMsg = $state('');
+  let packBrowseOpen = $state(false);
+  // the pack tab in view ('resourcepacks' | 'shaderpacks'); shared by the
+  // list/add/delete handlers and the Modrinth browser
+  let packKind = $state('resourcepacks');
+
+  async function listPacks() {
+    packsBusy = true;
+    try {
+      packs = await window.__TAURI__.core.invoke('list_instance_packs', {
+        instanceId: instance.id,
+        projectType: packKind === 'shaderpacks' ? 'shader' : 'resourcepack',
+      });
+      packsMsg = '';
+    } catch (e) {
+      packsMsg = String(e);
+    } finally {
+      packsBusy = false;
+    }
+  }
+
+  async function addPack() {
+    const open = window.__TAURI__?.dialog?.open;
+    if (!open) {
+      packsMsg = t('status-file-picker-unavailable');
+      return;
+    }
+    let picked;
+    try {
+      picked = await open({
+        multiple: true,
+        title: t('packs-add-title'),
+        filters: [{ name: t('filter-zip-archive'), extensions: ['zip'] }],
+      });
+    } catch (e) {
+      packsMsg = String(e);
+      return;
+    }
+    const paths = picked ? [].concat(picked) : [];
+    if (!paths.length) return;
+    packsBusy = true;
+    try {
+      for (const path of paths) {
+        await window.__TAURI__.core.invoke('import_pack', {
+          instanceId: instance.id,
+          projectType: packKind === 'shaderpacks' ? 'shader' : 'resourcepack',
+          filePath: path,
+        });
+      }
+      packsMsg = '';
+    } catch (e) {
+      packsMsg = String(e);
+    } finally {
+      packsBusy = false;
+    }
+    await listPacks();
+  }
+
+  async function deletePack(p) {
+    const ok = await confirmAlert({
+      title: t('packs-delete-confirm-title'),
+      message: t('packs-delete-confirm', { name: p.name }),
+      confirmText: t('common-delete'),
+    });
+    if (!ok) return;
+    packsBusy = true;
+    try {
+      await window.__TAURI__.core.invoke('delete_pack', {
+        instanceId: instance.id,
+        projectType: packKind === 'shaderpacks' ? 'shader' : 'resourcepack',
+        fileName: p.name,
+      });
+      packsMsg = '';
+    } catch (e) {
+      packsMsg = String(e);
+    } finally {
+      packsBusy = false;
+    }
+    await listPacks();
+  }
+
+  // ---- screenshots lightbox ----
+  let lightbox = $state(null); // the open FileEntry (or null)
+
+  function openLightbox(shot) {
+    lightbox = shot;
+  }
+
+  function closeLightbox() {
+    lightbox = null;
+  }
+
+  async function copyText(text, key) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast(t(key), 'success');
+    } catch (e) {
+      toast(String(e), 'error');
+    }
+  }
+
+  async function copyLightboxImage() {
+    try {
+      const resp = await fetch(assetSrc(gamePath('screenshots', lightbox.name)));
+      const blob = await resp.blob();
+      await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+      toast(t('screenshots-copied-image'), 'success');
+    } catch (e) {
+      toast(String(e), 'error');
+    }
+  }
+
+  async function deleteLightbox() {
+    const shot = lightbox;
+    const ok = await confirmAlert({
+      title: t('screenshots-delete-confirm-title'),
+      message: t('screenshots-delete-confirm', { name: shot.name }),
+      confirmText: t('common-delete'),
+    });
+    if (!ok) return;
+    try {
+      await window.__TAURI__.core.invoke('delete_screenshot', {
+        instanceId: instance.id,
+        fileName: shot.name,
+      });
+      lightbox = null;
+      await listFiles('list_screenshots');
+    } catch (e) {
+      toast(String(e), 'error');
+    }
+  }
+
   function openFolder(path) {
     window.__TAURI__.core.invoke('open_path', { path }).catch((e) => (filesMsg = String(e)));
   }
 
-  function openScreenshot(name) {
-    openFolder(gamePath('screenshots', name));
-  }
+  // lazy per-tab loads: worlds and packs fetch whenever their tab opens
+  $effect(() => {
+    if (section === 'worlds') listWorlds();
+    else if (section === 'resourcepacks' || section === 'shaderpacks') listPacks();
+  });
 
   onMount(() => {
     listMods();
@@ -489,6 +702,184 @@
             <Twemoji emoji="📂" /> {t('edit-open-mods')}
           </button>
         </div>
+      {:else if section === 'worlds'}
+        <h2 class="text-[16px] font-semibold">{t('edit-worlds-title')}</h2>
+        <p class="mt-1 text-[12px] text-(--text-muted)">
+          {t('edit-worlds-desc')}
+        </p>
+
+        <div class="mt-6 flex items-center justify-between">
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('worlds-installed', { count: worlds.length })}</span>
+          <button class="text-[12px] text-(--text-muted) hover:text-(--text-main) disabled:opacity-40" disabled={worldsBusy} onclick={listWorlds}>
+            ↻ {t('common-refresh')}
+          </button>
+        </div>
+        <table class="mt-2 w-full overflow-hidden rounded border border-(--border) bg-(--bg-subtle) text-[12px]">
+          <tbody>
+            {#each worlds as w (w.name)}
+              <tr class="flex items-center gap-3 border-b border-(--border) px-3 py-2 last:border-b-0">
+                <td class="min-w-0 flex-1">
+                  <div class="truncate" title={w.name}>{w.name}</div>
+                  <div class="text-[10px] text-(--text-muted)">{fmtSize(w.size)} · {fmtTime(w.modified)}</div>
+                </td>
+                <td class="shrink-0">
+                  <button
+                    class="rounded px-2 py-1 text-[11px] font-medium text-(--accent) hover:bg-(--brand-tint) disabled:opacity-40"
+                    title={t('worlds-launch-title', { name: w.name })}
+                    disabled={worldsBusy}
+                    onclick={() => launchWorld(w)}
+                  >
+                    ▶ {t('worlds-launch')}
+                  </button>
+                </td>
+                <td class="shrink-0">
+                  <button
+                    class="rounded px-2 py-1 text-[11px] text-(--text-muted) hover:bg-(--bg-canvas) hover:text-(--text-main) disabled:opacity-40"
+                    title={t('worlds-backup-title', { name: w.name })}
+                    disabled={worldsBusy}
+                    onclick={() => backupWorld(w)}
+                  >
+                    {t('worlds-backup')}
+                  </button>
+                </td>
+              </tr>
+            {:else}
+              <tr>
+                <td class="px-3 py-3 text-(--text-muted)">
+                  {#if worldsBusy}
+                    {t('worlds-loading')}
+                  {:else}
+                    {t('worlds-empty')}
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+
+        <div class="mt-6 flex items-center justify-between">
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('worlds-backups', { count: worldBackups.length })}</span>
+          <button
+            class="text-[12px] text-(--text-muted) hover:text-(--text-main) disabled:opacity-40"
+            title={storage ? t('worlds-open-backups-title') : t('common-unknown')}
+            disabled={!storage}
+            onclick={() => openFolder(backupsPath())}
+          >
+            <Twemoji emoji="📂" /> {t('worlds-open-backups')}
+          </button>
+        </div>
+        <table class="mt-2 w-full overflow-hidden rounded border border-(--border) bg-(--bg-subtle) text-[12px]">
+          <tbody>
+            {#each worldBackups as b (b.name)}
+              <tr class="flex items-center gap-3 border-b border-(--border) px-3 py-2 last:border-b-0">
+                <td class="min-w-0 flex-1">
+                  <div class="truncate" title={b.name}>{b.name}</div>
+                  <div class="text-[10px] text-(--text-muted)">{fmtSize(b.size)} · {fmtTime(b.modified)}</div>
+                </td>
+                <td class="shrink-0">
+                  <button
+                    class="rounded px-2 py-1 text-[11px] font-medium text-(--accent) hover:bg-(--brand-tint) disabled:opacity-40"
+                    title={t('worlds-restore-title', { name: b.name })}
+                    disabled={worldsBusy}
+                    onclick={() => restoreWorldBackup(b)}
+                  >
+                    {t('common-restore')}
+                  </button>
+                </td>
+              </tr>
+            {:else}
+              <tr>
+                <td class="px-3 py-3 text-(--text-muted)">
+                  {#if worldsBusy}
+                    {t('worlds-loading')}
+                  {:else}
+                    {t('worlds-backups-empty')}
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+        {#if worldsMsg}
+          <p class="mt-2 text-[12px] text-rose-400">{worldsMsg}</p>
+        {/if}
+      {:else if section === 'resourcepacks' || section === 'shaderpacks'}
+        <h2 class="text-[16px] font-semibold">
+          {t(section === 'shaderpacks' ? 'edit-shaderpacks-title' : 'edit-resourcepacks-title')}
+        </h2>
+        <p class="mt-1 text-[12px] text-(--text-muted)">
+          {t(section === 'shaderpacks' ? 'edit-shaderpacks-desc' : 'edit-resourcepacks-desc')}
+        </p>
+
+        <div class="mt-6 flex items-center justify-between">
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('packs-installed', { count: packs.length })}</span>
+          <button class="text-[12px] text-(--text-muted) hover:text-(--text-main) disabled:opacity-40" disabled={packsBusy} onclick={listPacks}>
+            ↻ {t('common-refresh')}
+          </button>
+        </div>
+        <button
+          class="mt-2 w-full rounded border border-(--border) bg-(--bg-subtle) px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-canvas) hover:text-(--text-main)"
+          title={t('packs-browse-title')}
+          onclick={() => {
+            packKind = section;
+            packBrowseOpen = true;
+          }}
+        >
+          ⤓ {t(section === 'shaderpacks' ? 'packs-browse-shaders' : 'packs-browse-packs')}
+        </button>
+        <table class="mt-3 w-full overflow-hidden rounded border border-(--border) bg-(--bg-subtle) text-[12px]">
+          <tbody>
+            {#each packs as p (p.name)}
+              <tr class="flex items-center gap-3 border-b border-(--border) px-3 py-2 last:border-b-0">
+                <td class="min-w-0 flex-1">
+                  <div class="truncate" title={p.name}>{p.name}</div>
+                  <div class="text-[10px] text-(--text-muted)">{fmtSize(p.size)} · {fmtTime(p.modified)}</div>
+                </td>
+                <td class="shrink-0">
+                  <button
+                    class="rounded px-1.5 py-0.5 text-rose-400 hover:bg-rose-500/10 disabled:opacity-40"
+                    title={t('packs-delete-title', { name: p.name })}
+                    aria-label={t('packs-delete-title', { name: p.name })}
+                    disabled={packsBusy}
+                    onclick={() => deletePack(p)}
+                  >
+                    ✕
+                  </button>
+                </td>
+              </tr>
+            {:else}
+              <tr>
+                <td class="px-3 py-3 text-(--text-muted)">
+                  {#if packsBusy}
+                    {t('packs-loading')}
+                  {:else}
+                    {t('packs-empty')}
+                  {/if}
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+        {#if packsMsg}
+          <p class="mt-2 text-[12px] text-rose-400">{packsMsg}</p>
+        {/if}
+        <div class="mt-3 flex items-center gap-2">
+          <button
+            class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
+            disabled={packsBusy}
+            onclick={addPack}
+          >
+            ＋ {t('packs-add')}
+          </button>
+          <button
+            class="rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
+            disabled={!storage}
+            title={storage ? (section === 'shaderpacks' ? t('packs-open-shaders-title') : t('packs-open-packs-title')) : t('common-unknown')}
+            onclick={() => openFolder(gamePath(section === 'shaderpacks' ? 'shaderpacks' : 'resourcepacks'))}
+          >
+            <Twemoji emoji="📂" /> {t(section === 'shaderpacks' ? 'packs-open-shaders' : 'packs-open-packs')}
+          </button>
+        </div>
       {:else if section === 'screenshots'}
         <h2 class="text-[16px] font-semibold">{t('edit-screenshots-title')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">
@@ -503,11 +894,11 @@
               role="button"
               tabindex="0"
               title="{shot.name} · {fmtSize(shot.size)} · {fmtTime(shot.modified)}"
-              onclick={() => openScreenshot(shot.name)}
+              onclick={() => openLightbox(shot)}
               onkeydown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
-                  openScreenshot(shot.name);
+                  openLightbox(shot);
                 }
               }}
             >
@@ -730,5 +1121,70 @@
       onclose={() => (browserOpen = false)}
       oninstalled={() => listMods()}
     />
+  {/if}
+
+  {#if packBrowseOpen}
+    <!-- pack browsing: resourcepack/shader searches run without loader pins -->
+    <ModrinthBrowserModal
+      {instance}
+      projectType={packKind === 'shaderpacks' ? 'shader' : 'resourcepack'}
+      onclose={() => (packBrowseOpen = false)}
+      oninstalled={() => listPacks()}
+    />
+  {/if}
+
+  {#if lightbox}
+    <!-- screenshots lightbox: the clicked image at full size -->
+    <div
+      role="presentation"
+      class="fixed inset-0 z-50 flex flex-col items-center justify-center p-8"
+      style="background: var(--scrim)"
+      onclick={(e) => {
+        if (e.target === e.currentTarget) closeLightbox();
+      }}
+      onkeydown={(e) => e.key === 'Escape' && closeLightbox()}
+    >
+      <img
+        src={assetSrc(gamePath('screenshots', lightbox.name))}
+        alt={lightbox.name}
+        class="max-h-full max-w-full rounded border border-(--border-1) object-contain shadow-2xl"
+        draggable="false"
+      />
+      <div class="mt-3 max-w-full truncate text-[12px] text-(--fg-2)" title={lightbox.name}>
+        {lightbox.name}
+      </div>
+      <div class="mt-2 flex flex-wrap items-center justify-center gap-2">
+        <button
+          class="rounded bg-(--accent-1) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-1-hover)"
+          onclick={copyLightboxImage}
+        >
+          {t('screenshots-copy-image')}
+        </button>
+        <button
+          class="rounded border border-(--border-1) px-3 py-1.5 text-[12px] text-(--fg-2) hover:text-(--fg-1)"
+          onclick={() => copyText(gamePath('screenshots', lightbox.name), 'screenshots-copied-path')}
+        >
+          {t('screenshots-copy-path')}
+        </button>
+        <button
+          class="rounded border border-(--border-1) px-3 py-1.5 text-[12px] text-(--fg-2) hover:text-(--fg-1)"
+          onclick={() => openFolder(gamePath('screenshots', lightbox.name))}
+        >
+          {t('screenshots-open-folder')}
+        </button>
+        <button
+          class="rounded px-3 py-1.5 text-[12px] text-rose-400 hover:bg-rose-500/10"
+          onclick={deleteLightbox}
+        >
+          {t('common-delete')}
+        </button>
+        <button
+          class="rounded border border-(--border-1) px-3 py-1.5 text-[12px] text-(--fg-2) hover:text-(--fg-1)"
+          onclick={closeLightbox}
+        >
+          {t('common-close')}
+        </button>
+      </div>
+    </div>
   {/if}
 </div>

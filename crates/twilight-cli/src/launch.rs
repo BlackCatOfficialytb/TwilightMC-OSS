@@ -509,7 +509,7 @@ pub async fn run_launch_with(
         quick_play: QuickPlay {
             server_address: cfg.server.clone(),
             server_port: None,
-            world: None,
+            world: cfg.world.clone(),
         },
         ..Default::default()
     };
@@ -901,6 +901,7 @@ mod tests {
             jvm_args: Vec::new(),
             account: None,
             server: None,
+            world: None,
             dry_run: true,
         }
     }
