@@ -371,7 +371,7 @@ settings-delete-theme = Delete { $name }
 settings-language = Language
 settings-language-desc = Choose the launcher language. Changes apply immediately.
 language-en-US = English (US)
-language-vi-VN = Tiếng Việt
+language-vi-VN = Tiếng Việt (In progress)
 settings-java-title = Java & Memory
 settings-java-desc = Which JVM runs the game and how much memory it gets.
 settings-java-runtime = Java runtime
@@ -470,6 +470,7 @@ settings-about-channel = pre-release UI · Bolide channel (alpha builds, may cra
 settings-github = GitHub repository
 settings-releases = Releases (stable builds)
 settings-report = Report an issue
+settings-kofi = Support on Ko-fi
 settings-about-footer = An open-source Minecraft launcher. Vanilla, Fabric and Quilt today; more loaders land in later milestones.
 
 ## Edit instance

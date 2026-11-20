@@ -28,21 +28,14 @@ function isLocale(value: unknown): value is Locale {
 }
 
 function detectLocale(): Locale {
+  // ponytail: first launch always starts canonical en-US — no navigator
+  // auto-switch. Upgrade path: re-add detection once vi-VN passes Crowdin
+  // review, keyed off the catalog status header.
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (isLocale(saved)) return saved;
   } catch {
     // localStorage can be unavailable (privacy modes); fall through.
-  }
-  if (typeof navigator !== 'undefined') {
-    const languages = navigator.languages?.length
-      ? navigator.languages
-      : [navigator.language];
-    for (const language of languages) {
-      const tag = language.toLowerCase();
-      if (tag.startsWith('vi')) return 'vi-VN';
-      if (tag.startsWith('en')) return 'en-US';
-    }
   }
   return FALLBACK_LOCALE;
 }

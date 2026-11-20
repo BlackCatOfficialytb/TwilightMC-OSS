@@ -1,5 +1,6 @@
 # TwilightMC launcher — Tiếng Việt (vi-VN).
 # Không đặt biểu tượng/emoji trong tệp này: biểu tượng do LauncherIcon/Twemoji đảm nhiệm.
+# Status: Fuzzy / In progress — pending Crowdin review.
 
 ## Dùng chung
 common-cancel = Hủy
@@ -359,7 +360,7 @@ settings-delete-theme = Xóa { $name }
 settings-language = Ngôn ngữ
 settings-language-desc = Chọn ngôn ngữ của trình khởi chạy. Thay đổi có hiệu lực ngay.
 language-en-US = English (US)
-language-vi-VN = Tiếng Việt
+language-vi-VN = Tiếng Việt (In progress)
 settings-java-title = Java & Bộ nhớ
 settings-java-desc = JVM nào chạy trò chơi và lượng bộ nhớ được cấp.
 settings-java-runtime = Môi trường chạy Java
@@ -458,6 +459,9 @@ settings-about-channel = giao diện tiền phát hành · kênh Bolide (bản a
 settings-github = Kho GitHub
 settings-releases = Bản phát hành (bản ổn định)
 settings-report = Báo lỗi
+
+settings-kofi = Ủng hộ trên Ko-fi
+
 settings-about-footer = Trình khởi chạy Minecraft mã nguồn mở. Hiện hỗ trợ Vanilla, Fabric và Quilt; nhiều loader khác sẽ có trong các cột mốc sau.
 
 ## Chỉnh sửa bản cài

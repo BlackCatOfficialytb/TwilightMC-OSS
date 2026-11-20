@@ -788,19 +788,6 @@
           {/if}
         </button>
       {/each}
-
-      <button
-        class="flex h-9 items-center gap-2.5 rounded px-2.5 text-left {sidebarExpanded ? '' : 'justify-center'} text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-        title={t('nav-add-instance')}
-        onclick={openWizard}
-      >
-        <span class="flex w-5 shrink-0 items-center justify-center">
-          <LauncherIcon name="new" size={15} />
-        </span>
-        {#if sidebarExpanded}
-          <span class="truncate text-[13px]">{t('nav-add-instance')}</span>
-        {/if}
-      </button>
     </div>
 
     <!-- account card: navigates to the dedicated Accounts page -->

@@ -997,6 +997,9 @@
           <button class="text-[12px] text-(--accent) hover:underline" onclick={() => onopenurl?.(`${REPO}/issues`)}>
             ↗ {t('settings-report')}
           </button>
+          <button class="text-[12px] text-(--accent) hover:underline" onclick={() => onopenurl?.('https://ko-fi.com/quanvm0501alt1')}>
+            ↗ {t('settings-kofi')}
+          </button>
         </div>
         <p class="mt-6 text-[12px] text-(--text-muted)">
           {t('settings-about-footer')}
