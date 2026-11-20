@@ -36,10 +36,9 @@ pub const ELYBY_ACCOUNT_BASE: &str = "https://account.ely.by";
 /// OAuth2 scopes Freesm requests; `offline_access` yields a refresh token.
 pub const ELYBY_OAUTH2_SCOPE: &str = "account_info offline_access minecraft_server_session";
 
-/// Freesm's registered public client id (`Launcher_ELYBY_CLIENT_ID`); pure
-/// public-client OAuth2 — replaceable via settings or
-/// `TWILIGHT_ELYBY_CLIENT_ID`.
-pub const DEFAULT_ELYBY_CLIENT_ID: &str = "freesmlauncher";
+/// TwilightMC's registered Ely.by OAuth2 application id; pure public-client
+/// OAuth2 — replaceable via settings or `TWILIGHT_ELYBY_CLIENT_ID`.
+pub const DEFAULT_ELYBY_CLIENT_ID: &str = "twilightmc";
 
 /// Ely.by skinsystem root — the texture fallback for classic accounts.
 pub const ELYBY_SKINSYSTEM_BASE: &str = "https://skinsystem.ely.by";
@@ -969,7 +968,7 @@ mod tests {
         // the form fields mirror ElyDeviceCodeStep exactly
         assert_eq!(
             server.body("api/oauth2/v1/devicecode").await,
-            "client_id=freesmlauncher&scope=account_info%20offline_access%20minecraft_server_session"
+            "client_id=twilightmc&scope=account_info%20offline_access%20minecraft_server_session"
         );
 
         assert_eq!(
@@ -1033,7 +1032,7 @@ mod tests {
             .unwrap();
         assert_eq!(token.access_token, "t1");
         let body = server.body("api/oauth2/v1/token").await;
-        assert!(body.starts_with("client_id=freesmlauncher&"), "{body}");
+        assert!(body.starts_with("client_id=twilightmc&"), "{body}");
         assert!(body.contains("grant_type=authorization_code"), "{body}");
         assert!(body.contains("code=the-code"), "{body}");
         assert!(

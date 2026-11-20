@@ -46,7 +46,7 @@ pub(crate) struct Settings {
     #[serde(default)]
     pub(crate) msa_client_id: Option<String>,
     /// Overridable Ely.by OAuth application id (browser/device flows); empty
-    /// = Freesm's registered public client id.
+    /// = TwilightMC's registered public client id.
     #[serde(default)]
     pub(crate) elyby_client_id: Option<String>,
     /// UI mode: `launcher` (full library) or `client` (minimal dashboard).
@@ -155,11 +155,10 @@ async fn add_offline(path: &Path, username: &str) -> Result<Account, String> {
 
 async fn remove(path: &Path, settings_path: &Path, id: &str) -> Result<(), String> {
     let mut store = load_accounts(path).await;
-    let before = store.accounts.len();
-    store.accounts.retain(|a| a.id != id);
-    if store.accounts.len() == before {
+    let Some(existing) = store.find(id).cloned() else {
         return Err(format!("unknown account {id}"));
-    }
+    };
+    store.accounts.retain(|a| a.id != existing.id);
     store.save(path).await.map_err(|e| e.to_string())?;
     let mut settings = load_settings(settings_path).await;
     if settings.active_account.as_deref() == Some(id) {
@@ -185,10 +184,18 @@ async fn get_active(accounts: &Path, settings: &Path) -> Option<Account> {
     store.find(&active_id).cloned()
 }
 
-/// Inserts or replaces an account by id and persists the store.
+/// Inserts or replaces an account by id and persists the store. An existing
+/// entry with the same identity (id, or same type + same non-nil UUID —
+/// Ely.by profile renames) is replaced in place instead of duplicated.
 async fn upsert(path: &Path, account: Account) -> Result<Account, String> {
     let mut store = load_accounts(path).await;
-    if let Some(existing) = store.accounts.iter_mut().find(|a| a.id == account.id) {
+    let same_identity = |a: &Account| {
+        a.id == account.id
+            || (a.uuid == account.uuid
+                && a.account_type == account.account_type
+                && !account.uuid.is_nil())
+    };
+    if let Some(existing) = store.accounts.iter_mut().find(|a| same_identity(a)) {
         *existing = account.clone();
     } else {
         store.add(account.clone());
@@ -212,7 +219,7 @@ fn microsoft_auth(settings: &Settings) -> MicrosoftAuth {
 }
 
 /// Configured Ely.by OAuth application id: the `TWILIGHT_ELYBY_CLIENT_ID`
-/// environment variable wins, then the settings value, then Freesm's
+/// environment variable wins, then the settings value, then TwilightMC's
 /// registered public client id. (Split from the env read so tests stay
 /// hermetic.)
 fn elyby_client_id(settings: &Settings) -> String {
@@ -980,17 +987,17 @@ mod tests {
 
     #[test]
     fn elyby_client_id_resolves_env_settings_then_default() {
-        // no env, no usable setting → Freesm's registered public client id
+        // no env, no usable setting → TwilightMC's registered public client id
         assert_eq!(
             elyby_client_id_from_env(None, &Settings::default()),
-            "freesmlauncher"
+            "twilightmc"
         );
         // blank settings are ignored like a missing one
         let settings = Settings {
             elyby_client_id: Some("   ".into()),
             ..Settings::default()
         };
-        assert_eq!(elyby_client_id_from_env(None, &settings), "freesmlauncher");
+        assert_eq!(elyby_client_id_from_env(None, &settings), "twilightmc");
         // settings override
         let settings = Settings {
             elyby_client_id: Some(" settings-client ".into()),

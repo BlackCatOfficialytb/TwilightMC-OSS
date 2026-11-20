@@ -176,11 +176,23 @@
         <h2 class="truncate text-[15px] font-semibold">{selected.id}</h2>
         <div class="mt-0.5 flex items-center gap-2 text-[11px] text-(--text-muted)">
           <span class={pill(selected.state)}>{t(`server-state-${selected.state.toLowerCase()}`)}</span>
+          {#if selected.orphaned}
+            <span class="rounded-full bg-rose-500/15 px-2 py-0.5 text-[10px] font-medium text-rose-500">{t('server-orphaned-badge')}</span>
+          {/if}
           <span>{softwareLabel(selected.software)} {selected.version}</span>
           <span>:{selected.port}</span>
         </div>
       </div>
       <div class="ml-auto flex items-center gap-1.5">
+        {#if selected.orphaned}
+          <button
+            class="rounded border border-rose-500/40 px-2.5 py-1.5 text-[11.5px] text-rose-400 hover:bg-rose-500/10 disabled:opacity-40"
+            disabled={busy !== ''}
+            onclick={() => act('kill_orphaned_server', selected.id)}
+          >
+            {t('server-kill-orphaned')}
+          </button>
+        {/if}
         {#if selected.state === 'Running' || selected.state === 'Starting'}
           <button
             class="rounded border border-(--border) px-2.5 py-1.5 text-[11.5px] hover:border-(--accent) disabled:opacity-40"
@@ -309,57 +321,28 @@
               </div>
             {/if}
 
-            <div class="mt-3 grid grid-cols-2 gap-1.5">
-              {#if s.state === 'Running' || s.state === 'Starting'}
-                <button
-                  class="rounded border border-(--border) px-2 py-1.5 text-[11px] hover:border-(--accent) disabled:opacity-40"
-                  disabled={busy !== ''}
-                  onclick={() => act('stop_server', s.id)}
-                >
-                  {t('server-graceful-stop')}
-                </button>
-                <button
-                  class="rounded border border-rose-500/40 px-2 py-1.5 text-[11px] text-rose-400 hover:bg-rose-500/10 disabled:opacity-40"
-                  disabled={busy !== ''}
-                  onclick={() => act('kill_server', s.id)}
-                >
-                  {t('action-kill')}
-                </button>
-              {:else}
-                <button
-                  class="rounded border border-(--accent) px-2 py-1.5 text-[11px] font-medium text-(--accent) hover:bg-(--accent-hover) disabled:opacity-40"
-                  disabled={busy !== ''}
-                  onclick={() => act('start_server', s.id)}
-                >
-                  {t('server-start')}
-                </button>
-                <button
-                  class="rounded border border-(--border) px-2 py-1.5 text-[11px] hover:border-(--accent) disabled:opacity-40"
-                  disabled={busy !== ''}
-                  onclick={() => act('restart_server', s.id)}
-                >
-                  {t('server-restart')}
-                </button>
-              {/if}
+            {#if s.orphaned}
+              <div class="mt-2 rounded border border-rose-500/40 bg-rose-500/10 px-2 py-1.5">
+                <p class="text-[10.5px] text-rose-500">{t('server-orphaned-badge')}</p>
+              </div>
+            {/if}
+
+            <div class="mt-3 grid gap-1.5">
               <button
-                class="col-span-2 rounded bg-(--accent) px-2 py-1.5 text-[11px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
+                class="rounded bg-(--accent) px-2 py-1.5 text-[11px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
                 onclick={() => manage(s)}
               >
                 {t('servers-manage')} →
               </button>
-              <button
-                class="rounded border border-(--border) px-2 py-1.5 text-[11px] hover:border-(--accent)"
-                onclick={() => openFolder(s.id)}
-              >
-                {t('server-open-folder')}
-              </button>
-              <button
-                class="rounded border border-rose-500/40 px-2 py-1.5 text-[11px] text-rose-400 hover:bg-rose-500/10 disabled:opacity-40"
-                disabled={busy !== ''}
-                onclick={() => deleteServer(s.id)}
-              >
-                {t('server-delete')}
-              </button>
+              {#if s.orphaned}
+                <button
+                  class="rounded border border-rose-500/40 px-2 py-1.5 text-[11px] text-rose-400 hover:bg-rose-500/10 disabled:opacity-40"
+                  disabled={busy !== ''}
+                  onclick={() => act('kill_orphaned_server', s.id)}
+                >
+                  {t('server-kill-orphaned')}
+                </button>
+              {/if}
             </div>
           </div>
         {/each}

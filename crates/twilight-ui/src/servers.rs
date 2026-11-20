@@ -109,9 +109,12 @@ pub struct ServerRow {
     pub java_path: Option<String>,
     pub auto_eula: bool,
     pub state: String,
+    /// Live PID sidecar without a registry entry (app restarted, game still
+    /// running); the card offers a kill-orphaned-process action.
+    pub orphaned: bool,
 }
 
-fn to_row(meta: &ServerMeta, id: &str, state: String) -> ServerRow {
+fn to_row(meta: &ServerMeta, id: &str, state: String, orphaned: bool) -> ServerRow {
     ServerRow {
         id: id.to_owned(),
         name: id.to_owned(),
@@ -128,6 +131,7 @@ fn to_row(meta: &ServerMeta, id: &str, state: String) -> ServerRow {
         java_path: meta.java_path.clone(),
         auto_eula: meta.auto_eula,
         state,
+        orphaned,
     }
 }
 
@@ -621,8 +625,9 @@ fn make_emit(app: &AppHandle, id: &str) -> std::sync::Arc<dyn Fn(String) + Send 
     })
 }
 
-/// Registers the exit watcher: state back to Stopped, registry cleanup.
-fn watch_exit(app: &AppHandle, id: &str, mut child: tokio::process::Child) {
+/// Registers the exit watcher: state back to Stopped, registry + pid
+/// sidecar cleanup.
+fn watch_exit(app: &AppHandle, id: &str, dir: PathBuf, mut child: tokio::process::Child) {
     let app = app.clone();
     let id = id.to_owned();
     tauri::async_runtime::spawn(async move {
@@ -631,6 +636,7 @@ fn watch_exit(app: &AppHandle, id: &str, mut child: tokio::process::Child) {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(&id);
+        remove_pid_file(&dir).await;
         set_state(&app, &id, "Stopped");
     });
 }
@@ -659,13 +665,16 @@ async fn start_server_inner(app: &AppHandle, id: &str) -> Result<(), String> {
         }
     };
 
-    // configs: eula + properties (java) or Pumpkin.toml (native)
+    // configs: eula + properties (java) or pumpkin.toml (native)
     if meta.software.is_native() {
-        let toml_path = dir.join("Pumpkin.toml");
+        let toml_path = dir.join("pumpkin.toml");
         if !toml_path.is_file() {
-            tokio::fs::write(&toml_path, config::pumpkin_toml(meta.port))
-                .await
-                .map_err(|e| e.to_string())?;
+            tokio::fs::write(
+                &toml_path,
+                config::pumpkin_toml(meta.port, !meta.offline_mode),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
         }
     } else {
         let eula = dir.join("eula.txt");
@@ -780,6 +789,7 @@ async fn start_server_inner(app: &AppHandle, id: &str) -> Result<(), String> {
     match process::spawn(&spawn_spec, emit).await {
         Ok((child, sender)) => {
             let pid = child.id().unwrap_or(0);
+            write_pid_file(&dir, pid).await;
             running().lock().unwrap_or_else(|e| e.into_inner()).insert(
                 id.to_owned(),
                 Running {
@@ -788,7 +798,7 @@ async fn start_server_inner(app: &AppHandle, id: &str) -> Result<(), String> {
                     started_at: now_secs(),
                 },
             );
-            watch_exit(app, id, child);
+            watch_exit(app, id, dir, child);
         }
         Err(e) => {
             set_state(app, id, "Stopped");
@@ -826,7 +836,8 @@ pub async fn list_servers(app: AppHandle) -> Result<Vec<ServerRow>, String> {
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
-            rows.push(to_row(&meta, &id, state_of(&id)));
+            let orphaned = scan_orphan(&path, &id).await;
+            rows.push(to_row(&meta, &id, state_of(&id), orphaned));
         }
     }
     rows.sort_by_key(|r| r.created);
@@ -877,7 +888,7 @@ pub async fn create_server(app: AppHandle, config: CreateServer) -> Result<Serve
         auto_eula: true,
     };
     write_meta(&dir, &meta).await?;
-    Ok(to_row(&meta, &id, "Stopped".into()))
+    Ok(to_row(&meta, &id, "Stopped".into(), false))
 }
 
 /// Deletes a server directory (not while running).
@@ -932,6 +943,88 @@ async fn kill_pid(pid: u32) -> Result<(), String> {
         .ok_or_else(|| "kill failed".to_owned())
 }
 
+// ---- pid sidecar / orphan scan ----
+
+/// PID sidecar persisted on start: `<server_dir>/.twilight-server.pid`.
+fn pid_file(dir: &Path) -> PathBuf {
+    dir.join(".twilight-server.pid")
+}
+
+async fn write_pid_file(dir: &Path, pid: u32) {
+    if pid != 0 {
+        let _ = tokio::fs::write(pid_file(dir), pid.to_string()).await;
+    }
+}
+
+async fn read_pid_file(dir: &Path) -> Option<u32> {
+    tokio::fs::read_to_string(pid_file(dir))
+        .await
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+}
+
+async fn remove_pid_file(dir: &Path) {
+    let _ = tokio::fs::remove_file(pid_file(dir)).await;
+}
+
+/// True when `pid` names a live process (sysinfo refresh of exactly it).
+fn pid_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    let Ok(mut guard) = sys_cache().lock() else {
+        return false;
+    };
+    if guard.is_none() {
+        *guard = System::new().ok();
+    }
+    let Some(system) = guard.as_mut() else {
+        return false;
+    };
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[Pid::from_u32(pid)]),
+        true,
+        ProcessRefreshKind::nothing().with_cpu().with_memory(),
+    );
+    system.process(Pid::from_u32(pid)).is_some()
+}
+
+/// Orphan scan for one server: a live PID sidecar with no `Running`
+/// registry entry means the app restarted (or crashed) while the game
+/// server kept running. Stale sidecars (dead pid, untracked) are pruned.
+async fn scan_orphan(dir: &Path, id: &str) -> bool {
+    let tracked = running()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains_key(id);
+    if tracked {
+        return false;
+    }
+    match read_pid_file(dir).await {
+        Some(pid) if pid_alive(pid) => true,
+        Some(_) => {
+            remove_pid_file(dir).await;
+            false
+        }
+        None => false,
+    }
+}
+
+/// Force-kills an orphaned game-server process (live PID sidecar left
+/// behind by an app restart/crash) and clears the sidecar.
+#[tauri::command]
+pub async fn kill_orphaned_server(app: AppHandle, id: String) -> Result<(), String> {
+    let dir = server_dir(&app, &id).await?;
+    let pid = read_pid_file(&dir)
+        .await
+        .filter(|&p| pid_alive(p))
+        .ok_or_else(|| "no orphaned process for this server".to_owned())?;
+    kill_pid(pid).await?;
+    remove_pid_file(&dir).await;
+    set_state(&app, &id, "Stopped");
+    Ok(())
+}
+
 /// Graceful stop: `stop` down stdin; force-kill fallback after 15s.
 #[tauri::command]
 pub async fn stop_server(app: AppHandle, id: String) -> Result<(), String> {
@@ -959,6 +1052,9 @@ pub async fn stop_server(app: AppHandle, id: String) -> Result<(), String> {
     if let Some(pid) = pid.filter(|p| *p != 0) {
         let _ = kill_pid(pid).await;
     }
+    if let Ok(dir) = server_dir(&app, &id).await {
+        remove_pid_file(&dir).await;
+    }
     running()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -977,6 +1073,9 @@ pub async fn kill_server(app: AppHandle, id: String) -> Result<(), String> {
         .map(|r| r.pid);
     if let Some(pid) = pid.filter(|p| *p != 0) {
         kill_pid(pid).await?;
+    }
+    if let Ok(dir) = server_dir(&app, &id).await {
+        remove_pid_file(&dir).await;
     }
     running()
         .lock()
@@ -1041,16 +1140,39 @@ pub async fn update_server_properties(
     let dir = server_dir(&app, &id).await?;
     let meta = read_meta(&dir).await?;
     if meta.software.is_native() {
-        let raw = tokio::fs::read_to_string(dir.join("Pumpkin.toml"))
+        let raw = tokio::fs::read_to_string(dir.join("pumpkin.toml"))
             .await
-            .unwrap_or_else(|_| config::pumpkin_toml(meta.port));
+            .unwrap_or_else(|_| config::pumpkin_toml(meta.port, !meta.offline_mode));
         let mut out = raw;
         for (key, value) in &properties {
-            if key == "server-port" {
-                out = config::update_toml_value(&out, "server", "port", value);
+            match key.as_str() {
+                // Pumpkin 0.2.x reads these from `[networking.java]`
+                "server-port" => {
+                    out = config::update_toml_value(
+                        &out,
+                        "networking.java",
+                        "address",
+                        &format!("\"0.0.0.0:{value}\""),
+                    );
+                }
+                "online-mode" => {
+                    out = config::update_toml_value(&out, "networking.java", "online_mode", value);
+                }
+                "max-players" => {
+                    out = config::update_toml_value(&out, "networking.java", "max_players", value);
+                }
+                "motd" => {
+                    out = config::update_toml_value(
+                        &out,
+                        "networking.java",
+                        "motd",
+                        &format!("\"{value}\""),
+                    );
+                }
+                _ => {}
             }
         }
-        tokio::fs::write(dir.join("Pumpkin.toml"), out)
+        tokio::fs::write(dir.join("pumpkin.toml"), out)
             .await
             .map_err(|e| e.to_string())?;
         return Ok(());
@@ -1118,6 +1240,28 @@ pub async fn get_connect_status(
         .get(&id)
         .cloned();
     Ok((meta.connect, endpoint))
+}
+
+/// Enables/disables the Minekube Connect tunnel (any time after creation);
+/// the plugin jar auto-installs on the next server start.
+#[tauri::command]
+pub async fn set_connect_enabled(app: AppHandle, id: String, enabled: bool) -> Result<(), String> {
+    let dir = server_dir(&app, &id).await?;
+    let mut meta = read_meta(&dir).await?;
+    meta.connect = enabled;
+    write_meta(&dir, &meta).await?;
+    Ok(())
+}
+
+/// Removes the Minekube Connect plugin jar and disables the tunnel.
+#[tauri::command]
+pub async fn remove_connect(app: AppHandle, id: String) -> Result<(), String> {
+    let dir = server_dir(&app, &id).await?;
+    let mut meta = read_meta(&dir).await?;
+    meta.connect = false;
+    write_meta(&dir, &meta).await?;
+    let _ = tokio::fs::remove_file(dir.join("plugins").join("connect-plugin.jar")).await;
+    Ok(())
 }
 
 /// Version lists for the wizard's step 2 (empty = manual installer).
@@ -1294,6 +1438,7 @@ pub struct ServerMetrics {
     pub max_memory_bytes: u64,
     pub disk_bytes: u64,
     pub uptime_secs: u64,
+    pub orphaned: bool,
 }
 
 /// Cached sysinfo handle: kept alive between calls so CPU% is a real delta
@@ -1396,7 +1541,8 @@ pub async fn get_server_metrics(app: AppHandle, id: String) -> Result<ServerMetr
     } else {
         (0.0, 0, 0)
     };
-    let disk_bytes = tokio::task::spawn_blocking(move || cached_disk_size(dir.clone()))
+    let orphaned = scan_orphan(&dir, &id).await;
+    let disk_bytes = tokio::task::spawn_blocking(move || cached_disk_size(dir))
         .await
         .map_err(|e| e.to_string())?;
     Ok(ServerMetrics {
@@ -1406,6 +1552,7 @@ pub async fn get_server_metrics(app: AppHandle, id: String) -> Result<ServerMetr
         max_memory_bytes: u64::from(meta.max_memory_mb) * 1024 * 1024,
         disk_bytes,
         uptime_secs,
+        orphaned,
     })
 }
 
@@ -1791,7 +1938,7 @@ fn backups_dir(dir: &Path) -> PathBuf {
 const BACKUP_ROOTS: &[&str] = &[
     "world",
     "server.properties",
-    "Pumpkin.toml",
+    "pumpkin.toml",
     "eula.txt",
     "server.json",
 ];
@@ -2046,7 +2193,7 @@ mod server_manager_tests {
     fn editable_extensions_match_text_configs_only() {
         for name in [
             "server.properties",
-            "Pumpkin.toml",
+            "pumpkin.toml",
             "config.yml",
             "config.yaml",
             "settings.json",
@@ -2082,5 +2229,33 @@ mod server_manager_tests {
         assert!(dest_for_entry(&root, "C:/abs.dat").is_none());
         assert!(dest_for_entry(&root, "dir/").is_none());
         assert!(dest_for_entry(&root, "").is_none());
+    }
+
+    #[test]
+    fn pid_alive_distinguishes_zero_and_live_pids() {
+        assert!(!pid_alive(0));
+        // this test process is alive
+        assert!(pid_alive(std::process::id()));
+    }
+
+    #[tokio::test]
+    async fn pid_file_roundtrip_and_orphan_scan() {
+        let root = temp_root("pid-file");
+        // no sidecar yet: not orphaned
+        assert!(!scan_orphan(&root, "srv").await);
+        // live pid (this test process) with no registry entry → orphaned
+        write_pid_file(&root, std::process::id()).await;
+        assert!(scan_orphan(&root, "srv").await);
+        // a live scan keeps the sidecar
+        assert!(read_pid_file(&root).await.is_some());
+        // dead pid (above every platform pid_max) → stale sidecar pruned
+        write_pid_file(&root, u32::MAX - 1).await;
+        assert!(!scan_orphan(&root, "srv").await);
+        assert!(!pid_file(&root).exists());
+        // roundtrip + explicit removal
+        write_pid_file(&root, 12345).await;
+        assert_eq!(read_pid_file(&root).await, Some(12345));
+        remove_pid_file(&root).await;
+        assert_eq!(read_pid_file(&root).await, None);
     }
 }

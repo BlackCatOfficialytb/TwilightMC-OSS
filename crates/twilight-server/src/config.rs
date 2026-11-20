@@ -108,9 +108,13 @@ pub fn default_server_properties(port: u16) -> String {
     defaults.iter().map(|(k, v)| format!("{k}={v}\n")).collect()
 }
 
-/// Minimal `Pumpkin.toml` for native Pumpkin servers (line-based, no toml dep).
-pub fn pumpkin_toml(port: u16) -> String {
-    format!("[server]\nport = {port}\n")
+/// Minimal `pumpkin.toml` for native Pumpkin servers (line-based, no toml
+/// dep): the lowercase root file with the `[networking.java]` section
+/// upstream 0.2.x actually reads — `[server] port` is silently ignored.
+pub fn pumpkin_toml(port: u16, online_mode: bool) -> String {
+    format!(
+        "# Managed by TwilightMC\n[networking.java]\naddress = \"0.0.0.0:{port}\"\nonline_mode = {online_mode}\nmax_players = 20\nmotd = \"A TwilightMC Server\"\n"
+    )
 }
 
 /// `user_jvm_args.txt` for installer-based loaders (Forge/NeoForge): the
@@ -211,7 +215,12 @@ mod tests {
     fn defaults_and_pumpkin_toml() {
         assert!(default_server_properties(25565).contains("server-port=25565"));
         assert!(default_server_properties(25565).contains("online-mode=true"));
-        assert_eq!(pumpkin_toml(25566), "[server]\nport = 25566\n");
+        // offline server → online_mode = false, upstream `[networking.java]`
+        assert_eq!(
+            pumpkin_toml(25566, false),
+            "# Managed by TwilightMC\n[networking.java]\naddress = \"0.0.0.0:25566\"\nonline_mode = false\nmax_players = 20\nmotd = \"A TwilightMC Server\"\n"
+        );
+        assert!(pumpkin_toml(25565, true).contains("online_mode = true"));
     }
 
     #[test]

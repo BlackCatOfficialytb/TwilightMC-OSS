@@ -206,8 +206,13 @@ impl AccountStore {
         self.accounts.push(account);
     }
 
+    /// Finds an account by its canonical id or its UUID string — callers may
+    /// pass either form, and legacy stores hold `username@ely.by` ids while
+    /// newer ones hold UUIDs.
     pub fn find(&self, id: &str) -> Option<&Account> {
-        self.accounts.iter().find(|a| a.id == id)
+        self.accounts
+            .iter()
+            .find(|a| a.id == id || a.uuid.to_string() == id)
     }
 
     /// Loads the store from disk.
@@ -305,5 +310,19 @@ mod tests {
     async fn missing_store_is_an_io_error() {
         let err = AccountStore::load(Path::new("/definitely/not/a/real/path.json")).await;
         assert!(matches!(err, Err(AuthError::Io(_))));
+    }
+
+    #[test]
+    fn find_resolves_canonical_id_or_uuid() {
+        let uuid = uuid::Uuid::parse_str("5951a9e3-2ea0-41b4-a032-b63284ba3efb").unwrap();
+        let mut store = AccountStore::default();
+        store.add(Account::elyby("quanvm", uuid, None));
+        // exact canonical id
+        assert!(store.find("quanvm@ely.by").is_some());
+        // the UUID string resolves the same row (id-form tolerance)
+        assert!(store.find("5951a9e3-2ea0-41b4-a032-b63284ba3efb").is_some());
+        // unknown ids stay unknown
+        assert!(store.find("other@ely.by").is_none());
+        assert!(store.find("nope").is_none());
     }
 }
