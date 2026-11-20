@@ -7,6 +7,7 @@
   // a missing/broken texture falls back to the default Steve model.
   import { onMount } from 'svelte';
   import { skinDataUri } from './accounts.svelte.js';
+  import { t } from './i18n.svelte.ts';
 
   // skinview3d pulls all of Three.js, so it is loaded on demand: the launcher
   // shell stays small until a 3D viewer actually mounts (Accounts page or the
@@ -181,7 +182,7 @@
     class="flex items-center justify-center rounded border border-(--border) bg-(--bg-subtle) text-center text-[11px] text-(--text-muted)"
     style="width:{width}px;height:{height}px"
   >
-    3D preview unavailable
+    {t('skin-3d-unavailable')}
   </p>
 {/if}
 {#if showToggle}
@@ -189,10 +190,10 @@
     class="rounded border border-(--border) px-2.5 py-1 text-[11px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) {outerLayer
       ? 'text-(--accent)'
       : ''}"
-    title="Toggle the hat/jacket outer layer"
+    title={t('skin-outer-toggle')}
     aria-pressed={outerLayer}
     onclick={() => (outerLayer = !outerLayer)}
   >
-    Outer layer: {outerLayer ? 'on' : 'off'}
+    {t('skin-outer', { state: outerLayer ? t('common-on') : t('common-off') })}
   </button>
 {/if}

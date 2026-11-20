@@ -4,6 +4,7 @@
   // bg surface, hairline border and the 120ms fade (no bouncy springs).
   import { alertState, closeDialog } from './alerts.svelte.js';
   import LauncherIcon from './LauncherIcon.svelte';
+  import { t } from './i18n.svelte.ts';
 
   // variant → glyph + tint
   const VARIANTS = {
@@ -57,7 +58,7 @@
     <div
       role="alertdialog"
       aria-modal="true"
-      aria-label={dialog.title || 'Alert'}
+      aria-label={dialog.title || t('alert-title')}
       class="w-[380px] rounded-lg border border-(--border-1) bg-(--bg-2) shadow-2xl animate-[fade-in_120ms_ease-out]"
       onkeydown={onKeydown}
     >
@@ -88,14 +89,14 @@
             class="rounded px-3 py-1.5 text-(--step-body) text-(--fg-2) hover:bg-(--bg-3) hover:text-(--fg-1)"
             onclick={cancel}
           >
-            {dialog.cancelLabel ?? 'Cancel'}
+            {dialog.cancelLabel ?? t('alert-cancel')}
           </button>
         {/if}
         <button
           class="rounded bg-(--accent-1) px-4 py-1.5 text-(--step-body) font-medium text-(--on-accent) hover:bg-(--accent-1-hover)"
           onclick={accept}
         >
-          {dialog.confirmLabel ?? 'OK'}
+          {dialog.confirmLabel ?? t('alert-ok')}
         </button>
       </div>
     </div>

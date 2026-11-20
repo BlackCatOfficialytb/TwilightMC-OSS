@@ -12,6 +12,7 @@
     normalizeHex,
     themePreset,
   } from './theme';
+  import { t } from './i18n.svelte.ts';
 
   // The active theme id: its builtin accent and suggested palette drive
   // everything here, and a theme switch re-grounds the picker.
@@ -70,8 +71,8 @@
         ? 'ring-2 ring-(--accent-1) ring-offset-2 ring-offset-(--bg-surface)'
         : 'border border-(--border) hover:opacity-80'}"
       style="background:{p.hex}"
-      title="{p.name}{p.isBuiltin ? ' (built-in)' : ''}"
-      aria-label="{p.name} accent"
+      title={p.isBuiltin ? `${p.name} (${t('accent-builtin')})` : p.name}
+      aria-label={t('accent-preset-title', { name: p.name })}
       aria-pressed={isActive(p)}
       onclick={() => pickPreset(p)}
     ></button>
@@ -87,8 +88,8 @@
     }}
     onchange={(e) => applyCustom(e.currentTarget.value, true)}
     class="h-7 w-9 cursor-pointer rounded border border-(--border) bg-(--bg-subtle) p-0.5"
-    title="Custom accent color"
-    aria-label="Custom accent color"
+    title={t('accent-custom')}
+    aria-label={t('accent-custom')}
   />
   <input
     value={customHex}
@@ -100,12 +101,12 @@
     class="h-7 w-24 rounded border border-(--border) bg-(--bg-subtle) px-2 font-mono text-[11px] uppercase outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
     spellcheck="false"
     placeholder={builtin}
-    aria-label="Accent hex value"
-    title="Accent hex value"
+    aria-label={t('accent-hex')}
+    title={t('accent-hex')}
   />
   {#if invalid}
-    <span class="text-[11px] text-rose-400">invalid hex</span>
+    <span class="text-[11px] text-rose-400">{t('accent-invalid')}</span>
   {:else}
-    <span class="text-[11px] text-(--text-muted)">live preview</span>
+    <span class="text-[11px] text-(--text-muted)">{t('accent-live')}</span>
   {/if}
 </div>

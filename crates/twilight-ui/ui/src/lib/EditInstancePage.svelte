@@ -10,15 +10,16 @@
   import { iconKeyAsset } from './twemoji.js';
   import InstanceIconPicker from './InstanceIconPicker.svelte';
   import ModrinthBrowserModal from './ModrinthBrowserModal.svelte';
+  import { t } from './i18n.svelte.ts';
 
   let { instance, storage = null, blindMode = false, deafMode = false, onback, onopenconsole } = $props();
 
   const sections = [
-    { id: 'components', label: 'Version Components', icon: '🧱' },
-    { id: 'mods', label: 'Mods', icon: '🧩' },
-    { id: 'screenshots', label: 'Screenshots', icon: '🖼' },
-    { id: 'logs', label: 'Logs', icon: '📜' },
-    { id: 'settings', label: 'Settings', icon: '⚙' },
+    { id: 'components', label: 'edit-components', icon: '🧱' },
+    { id: 'mods', label: 'edit-mods', icon: '🧩' },
+    { id: 'screenshots', label: 'edit-screenshots', icon: '🖼' },
+    { id: 'logs', label: 'edit-logs', icon: '📜' },
+    { id: 'settings', label: 'edit-settings', icon: '⚙' },
   ];
   let section = $state('mods');
 
@@ -41,7 +42,7 @@
   async function exportAs(kind) {
     const save = window.__TAURI__?.dialog?.save;
     if (!save) {
-      exportNotice = 'File picker unavailable in this build.';
+      exportNotice = t('status-file-picker-unavailable');
       return;
     }
     exportBusy = true;
@@ -50,11 +51,11 @@
       const base = instance.name.replace(/[\\/:*?"<>|]/g, '_');
       const ext = kind === 'twpack' ? 'twpack' : 'zip';
       const dest = await save({
-        title: kind === 'twpack' ? 'Export instance as .twpack' : 'Export instance as .zip',
+        title: kind === 'twpack' ? t('dialog-export-twpack') : t('dialog-export-zip'),
         defaultPath: `${base}.${ext}`,
         filters: [
           {
-            name: kind === 'twpack' ? 'Twilight pack' : 'Zip archive',
+            name: kind === 'twpack' ? t('filter-twilight-pack') : t('filter-zip-archive'),
             extensions: [ext],
           },
         ],
@@ -65,7 +66,7 @@
         instanceId: instance.id,
         destPath: dest,
       });
-      exportNotice = `Exported to ${path}.`;
+      exportNotice = t('status-exported', { path });
     } catch (e) {
       exportNotice = String(e);
     } finally {
@@ -89,7 +90,7 @@
       // the parent grid re-reads on navigation; mirror the accepted name
       instance.name = row.name;
       draftName = row.name;
-      nameNotice = `Renamed to ${row.name}.`;
+      nameNotice = t('status-renamed', { name: instance.name, newName: row.name });
     } catch (e) {
       nameNotice = String(e);
     }
@@ -118,11 +119,11 @@
 
   async function applyCustomIcon() {
     const open = window.__TAURI__?.dialog?.open;
-    if (!open) throw new Error('Image picker unavailable in this build.');
+    if (!open) throw new Error(t('status-file-picker-unavailable'));
     const picked = await open({
       multiple: false,
-      title: 'Choose an instance icon',
-      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'webp', 'ico'] }],
+      title: t('wizard-choose-icon'),
+      filters: [{ name: t('filter-images'), extensions: ['png', 'jpg', 'jpeg', 'webp', 'ico'] }],
     });
     if (!picked) return null;
     const path = await window.__TAURI__.core.invoke('set_instance_icon', {
@@ -161,7 +162,7 @@
 
   function fmtTime(unixSeconds) {
     if (!unixSeconds) return '';
-    return new Date(unixSeconds * 1000).toLocaleString();
+    return formatDate(unixSeconds * 1000);
   }
 
   function visibleMods() {
@@ -213,7 +214,7 @@
           loader: instance.loader_type.toLowerCase(),
         });
       }
-      modsMsg = 'Accessibility mods installed.';
+      modsMsg = t('edit-assist-installed');
     } catch (e) {
       modsMsg = String(e);
     } finally {
@@ -259,15 +260,15 @@
   async function addMod() {
     const open = window.__TAURI__?.dialog?.open;
     if (!open) {
-      modsMsg = 'File picker unavailable in this build.';
+      modsMsg = t('status-file-picker-unavailable');
       return;
     }
     let picked;
     try {
       picked = await open({
         multiple: true,
-        title: 'Add mods',
-        filters: [{ name: 'Mods', extensions: ['jar'] }],
+        title: t('edit-add-mods-title'),
+        filters: [{ name: t('filter-mods'), extensions: ['jar'] }],
       });
     } catch (e) {
       modsMsg = String(e);
@@ -322,15 +323,15 @@
   <!-- left navigation rail -->
   <nav
     class="flex w-56 shrink-0 flex-col border-r border-(--border) bg-(--bg-subtle) p-3"
-    aria-label="Instance sections"
+    aria-label={t('edit-sections-aria')}
   >
     <button
       class="mb-3 flex h-9 items-center gap-2 rounded px-2.5 text-left text-[13px] font-medium text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main)"
-      title="Back to the instance library"
+      title={t('settings-back-title')}
       onclick={onback}
     >
       <span class="w-5 shrink-0 text-center text-[15px]">←</span>
-      <span class="truncate">Back to Instances</span>
+      <span class="truncate">{t('edit-back')}</span>
     </button>
     <div class="mb-3 border-b border-(--border) px-2.5 pb-3">
       <div class="truncate text-[13px] font-semibold" title={instance.name}>{instance.name}</div>
@@ -350,7 +351,7 @@
           <span class="flex w-5 shrink-0 items-center justify-center text-[15px]">
             <Twemoji emoji={s.icon} size={15} />
           </span>
-          <span class="truncate">{s.label}</span>
+          <span class="truncate">{t(s.label)}</span>
         </button>
       {/each}
     </div>
@@ -360,23 +361,25 @@
   <div class="min-w-0 flex-1 overflow-y-auto">
     <div class="mx-auto max-w-2xl p-8">
       {#if section === 'components'}
-        <h2 class="text-[16px] font-semibold">Version Components</h2>
+        <h2 class="text-[16px] font-semibold">{t('edit-components-title')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">
-          The version stack this instance launches with.
+          {t('edit-components-desc')}
         </p>
 
         <div class="mt-6 rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px]">
-          <div class="font-medium">Minecraft {instance.minecraft_version}</div>
-          <div class="mt-1 text-(--text-muted)">Loader: {instance.loader_type}</div>
+          <div class="font-medium">{t('edit-components-mc', { version: instance.minecraft_version })}</div>
+          <div class="mt-1 text-(--text-muted)">{t('edit-components-loader', { loader: instance.loader_type })}</div>
           <div class="mt-1 text-(--text-muted)">
-            Last played: {instance.last_played ? new Date(instance.last_played * 1000).toLocaleString() : 'never'}
+            {instance.last_played
+              ? t('edit-components-last', { date: formatDate(instance.last_played * 1000) })
+              : t('instance-never-played')}
           </div>
-          <p class="mt-3 text-[11px] text-(--text-muted)">Version component switching (up/downgrade with progression) lands in a later milestone.</p>
+          <p class="mt-3 text-[11px] text-(--text-muted)">{t('edit-components-future')}</p>
         </div>
       {:else if section === 'mods'}
-        <h2 class="text-[16px] font-semibold">Mods</h2>
+        <h2 class="text-[16px] font-semibold">{t('edit-mods')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">
-          Every <span class="font-mono">.jar</span> in this instance's mods folder; toggling renames it in place.
+          {t('edit-mods-desc')}
         </p>
 
         {#if (blindMode || deafMode) && (instance.loader_type === 'Fabric' || instance.loader_type === 'Quilt') && missingKeyMods.length}
@@ -387,36 +390,39 @@
           >
             <p class="text-[12px] text-amber-400">
               <strong>{missingKeyMods.map((id) => ASSIST_LABELS[id] ?? id).join(' and ')}</strong>
-              {missingKeyMods.length > 1 ? 'are' : 'is'} not installed yet — recommended for your
-              accessibility profile. Required dependencies (e.g. Fabric API) install automatically.
+              {t('edit-assist-missing', {
+                mods: missingKeyMods.map((id) => ASSIST_LABELS[id] ?? id).join(' and '),
+                count: missingKeyMods.length,
+              })}
             </p>
             <button
               class="mt-2 rounded border border-amber-500/40 px-3 py-1.5 text-[12px] font-medium text-amber-400 hover:bg-amber-500/20 disabled:opacity-40"
               disabled={modsBusy || assistInstalling}
               onclick={installKeyMods}
             >
-              {assistInstalling ? 'Installing…' : 'Install Recommended Accessibility Mods'}
+              {assistInstalling ? t('edit-assist-installing') : t('edit-assist-install')}
             </button>
           </div>
         {/if}
 
         <div class="mt-6 flex items-center justify-between">
-          <span class="text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">Installed ({mods.length})</span>
+          <span class="text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('edit-mods-installed', { count: mods.length })}</span>
           <button class="text-[12px] text-(--text-muted) hover:text-(--text-main) disabled:opacity-40" disabled={modsBusy} onclick={listMods}>
-            ↻ Refresh
+            ↻ {t('common-refresh')}
           </button>
         </div>
         <input
           class="mt-2 h-9 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-          placeholder="Filter installed mods…"
+          placeholder={t('edit-filter-mods')}
           bind:value={modsQuery}
+          aria-label={t('edit-filter-mods')}
         />
         <button
           class="mt-2 w-full rounded border border-(--border) bg-(--bg-subtle) px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-canvas) hover:text-(--text-main)"
-          title="Browse and install mods straight from Modrinth"
+          title={t('edit-get-more-mods-title')}
           onclick={() => (browserOpen = true)}
         >
-          ⤓ Get More Mods
+          ⤓ {t('edit-get-more-mods')}
         </button>
         <table class="mt-3 w-full overflow-hidden rounded border border-(--border) bg-(--bg-subtle) text-[12px]">
           <tbody>
@@ -431,7 +437,7 @@
                     class="flex h-5 w-9 shrink-0 items-center rounded-full border border-(--border) px-0.5 {mod.is_enabled
                       ? 'justify-end bg-(--accent)'
                       : 'justify-start bg-(--bg-canvas)'}"
-                    title={mod.is_enabled ? 'Disable' : 'Enable'}
+                    title={mod.is_enabled ? t('edit-disable') : t('edit-enable')}
                     disabled={modsBusy}
                     onclick={() => toggleMod(mod)}
                   >
@@ -441,7 +447,8 @@
                 <td class="shrink-0">
                   <button
                     class="rounded px-1.5 py-0.5 text-rose-400 hover:bg-rose-500/10 disabled:opacity-40"
-                    title="Delete {mod.display_name}"
+                    title={t('edit-delete-mod', { name: mod.display_name })}
+                    aria-label={t('edit-delete-mod', { name: mod.display_name })}
                     disabled={modsBusy}
                     onclick={() => deleteMod(mod)}
                   >
@@ -453,9 +460,9 @@
               <tr>
                 <td class="px-3 py-3 text-(--text-muted)">
                   {#if modsBusy}
-                    Loading mods…
+                    {t('edit-mods-loading')}
                   {:else}
-                    No mods installed — use ＋ Add Mod to pick .jar files, or ⤓ Get More Mods.
+                    {t('edit-mods-empty')}
                   {/if}
                 </td>
               </tr>
@@ -471,21 +478,21 @@
             disabled={modsBusy}
             onclick={addMod}
           >
-            ＋ Add Mod
+            ＋ {t('edit-add-mod')}
           </button>
           <button
             class="rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
             disabled={!storage}
-            title={storage ? 'Opens the instance mods folder' : 'Storage unknown'}
+            title={storage ? t('edit-open-mods-title') : t('common-unknown')}
             onclick={() => openFolder(gamePath('mods'))}
           >
-            <Twemoji emoji="📂" /> Open Mods Folder
+            <Twemoji emoji="📂" /> {t('edit-open-mods')}
           </button>
         </div>
       {:else if section === 'screenshots'}
-        <h2 class="text-[16px] font-semibold">Screenshots</h2>
+        <h2 class="text-[16px] font-semibold">{t('edit-screenshots-title')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">
-          Every PNG in <span class="font-mono">minecraft/screenshots</span>, newest first.
+          {t('edit-screenshots-desc')}
         </p>
 
         <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -517,9 +524,9 @@
           {:else}
             <p class="col-span-full rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px] text-(--text-muted)">
               {#if filesBusy}
-                Loading screenshots…
+                {t('edit-screenshots-loading')}
               {:else}
-                No screenshots yet — press F2 in game to capture one.
+                {t('edit-screenshots-empty')}
               {/if}
             </p>
           {/each}
@@ -529,15 +536,15 @@
         {/if}
         <button
           class="mt-3 rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-          title="Opens the screenshots folder"
+          title={t('edit-open-screenshots-title')}
           onclick={() => openFolder(gamePath('screenshots'))}
         >
-          <Twemoji emoji="📂" /> Open Screenshots Folder
+          <Twemoji emoji="📂" /> {t('edit-open-screenshots')}
         </button>
       {:else if section === 'logs'}
-        <h2 class="text-[16px] font-semibold">Logs</h2>
+        <h2 class="text-[16px] font-semibold">{t('edit-logs-title')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">
-          Log files in <span class="font-mono">minecraft/logs</span>, newest first. Live game output renders in the console drawer.
+          {t('edit-logs-desc')}
         </p>
 
         <table class="mt-6 w-full overflow-hidden rounded border border-(--border) bg-(--bg-subtle) text-[12px]">
@@ -551,10 +558,10 @@
                 <td class="shrink-0">
                   <button
                     class="rounded px-2 py-1 text-[11px] text-(--text-muted) hover:bg-(--bg-canvas) hover:text-(--text-main)"
-                    title="Opens this log file"
+                    title={t('edit-open-log-title')}
                     onclick={() => openFolder(gamePath('logs', log.name))}
                   >
-                    Open
+                    {t('common-open')}
                   </button>
                 </td>
               </tr>
@@ -562,9 +569,9 @@
               <tr>
                 <td class="px-3 py-3 text-(--text-muted)">
                   {#if filesBusy}
-                    Loading logs…
+                    {t('edit-logs-loading')}
                   {:else}
-                    No log files yet — logs appear after the first launch.
+                    {t('edit-logs-empty')}
                   {/if}
                 </td>
               </tr>
@@ -579,30 +586,30 @@
             class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
             onclick={() => onopenconsole?.()}
           >
-            ▤ Open console
+            ▤ {t('edit-open-console')}
           </button>
           <button
             class="rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-            title="Opens the logs folder"
+            title={t('edit-open-logs-title')}
             onclick={() => openFolder(gamePath('logs'))}
           >
-            <Twemoji emoji="📂" /> Open Logs Folder
+            <Twemoji emoji="📂" /> {t('edit-open-logs')}
           </button>
         </div>
       {:else}
-        <h2 class="text-[16px] font-semibold">Instance Settings</h2>
-        <p class="mt-1 text-[12px] text-(--text-muted)">On-disk layout of this instance.</p>
+        <h2 class="text-[16px] font-semibold">{t('edit-settings-title')}</h2>
+        <p class="mt-1 text-[12px] text-(--text-muted)">{t('edit-settings-desc')}</p>
 
         <div class="mt-6 rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px]">
-          <div class="font-medium">Instance name</div>
+          <div class="font-medium">{t('edit-name')}</div>
           <p class="mt-1 text-[11px] text-(--text-muted)">
-            The display name across the grid and context panel; the folder id stays put.
+            {t('edit-name-desc')}
           </p>
           <div class="mt-3 flex items-center gap-2">
             <input
               class="h-8 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-2) px-2.5 text-(--step-body) text-(--fg-1) outline-none focus:border-(--accent-1)"
               bind:value={draftName}
-              aria-label="Instance name"
+              aria-label={t('edit-name')}
               onkeydown={(e) => {
                 if (e.key === 'Enter') commitNameEdit();
               }}
@@ -613,22 +620,22 @@
               disabled={!draftName.trim() || draftName.trim() === instance.name}
               onclick={commitNameEdit}
             >
-              Rename
+              {t('common-rename')}
             </button>
           </div>
           {#if nameNotice}
             <p class="mt-2 text-[11px] text-(--fg-2)">{nameNotice}</p>
           {/if}
           <div class="mt-2 space-y-1 font-mono text-[11px] text-(--text-muted)" title={gamePath()}>
-            <div class="break-all">Game folder: {gamePath()}</div>
-            <div class="break-all">Mods folder: {gamePath('mods')}</div>
+            <div class="break-all">{t('edit-game-folder', { path: gamePath() })}</div>
+            <div class="break-all">{t('edit-mods-folder', { path: gamePath('mods') })}</div>
           </div>
         </div>
 
         <div class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px]">
-          <div class="font-medium">Instance icon</div>
+          <div class="font-medium">{t('edit-icon-title')}</div>
           <p class="mt-1 text-[11px] text-(--text-muted)">
-            Pick a bundled launcher icon, a Twemoji, or a custom image.
+            {t('edit-icon-desc')}
           </p>
           <div class="mt-3 flex items-center gap-3">
             <span
@@ -641,7 +648,7 @@
               class="rounded border border-(--accent) bg-(--accent)/15 px-3 py-1.5 text-[12px] font-medium text-(--accent) hover:bg-(--accent)/25"
               onclick={() => (iconPickerOpen = true)}
             >
-              Change icon…
+              {t('edit-change-icon')}
             </button>
             {#if iconKey}
               <button
@@ -649,7 +656,7 @@
                 class="rounded px-2.5 py-1.5 text-[11px] text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main)"
                 onclick={() => applyIconKey('')}
               >
-                Reset
+                {t('common-reset')}
               </button>
             {/if}
           </div>
@@ -659,11 +666,9 @@
         </div>
 
         <div class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px]">
-          <div class="font-medium">Export</div>
+          <div class="font-medium">{t('edit-export-title')}</div>
           <p class="mt-1 text-[11px] text-(--text-muted)">
-            A <span class="font-mono">.zip</span> keeps every file verbatim. A
-            <span class="font-mono">.twpack</span> is a 7z pack of mods, configs, resource and shader
-            packs — logs, crash reports and natives are skipped.
+            {t('edit-export-desc')}
           </p>
           <div class="mt-3 flex flex-wrap gap-2">
             <button
@@ -672,7 +677,7 @@
               disabled={exportBusy}
               onclick={() => exportAs('zip')}
             >
-              Export .zip
+              {t('edit-export-zip')}
             </button>
             <button
               type="button"
@@ -680,7 +685,7 @@
               disabled={exportBusy}
               onclick={() => exportAs('twpack')}
             >
-              Export .twpack
+              {t('edit-export-twpack')}
             </button>
           </div>
           {#if exportNotice}
@@ -693,15 +698,14 @@
             role="alert"
             class="mt-4 rounded border border-red-500/40 bg-red-500/10 p-3 text-[11px] leading-relaxed text-red-300"
           >
-            <p class="font-semibold text-red-400">Warning (Advanced Users)</p>
+            <p class="font-semibold text-red-400">{t('edit-cleanroom-title')}</p>
             <p class="mt-1">
-              CleanroomMC runs 1.12.2 on modern Java (21+). Do NOT use it unless you understand how
-              it works — it is prone to crashes and only a limited subset of Forge mods support it.
+              {t('edit-cleanroom-body')}
             </p>
           </div>
         {/if}
 
-        <p class="mt-3 text-[11px] text-(--text-muted)">Renaming, loader switching and per-instance java overrides land in a later milestone; use the context panel for groups and copies.</p>
+        <p class="mt-3 text-[11px] text-(--text-muted)">{t('edit-future')}</p>
       {/if}
     </div>
   </div>

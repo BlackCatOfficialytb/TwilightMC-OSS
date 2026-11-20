@@ -4,6 +4,7 @@
   // styled with the OpenDesign tokens and a 120ms fade (no bouncy springs).
   import { alertState, dismissToast } from './alerts.svelte.js';
   import LauncherIcon from './LauncherIcon.svelte';
+  import { t } from './i18n.svelte.ts';
 
   const KINDS = {
     info: { icon: 'about', tint: 'border-(--accent-1)/50' },
@@ -61,7 +62,7 @@
       class="pointer-events-auto flex w-full items-start gap-2.5 rounded-lg border {(
         KINDS[t.kind] ?? KINDS.info
       ).tint} bg-(--bg-2) p-3 text-left shadow-xl animate-[fade-in_120ms_ease-out] hover:bg-(--bg-3)"
-      title="Click to dismiss"
+      title={t('toast-dismiss')}
       onclick={() => dismissToast(t.id)}
     >
       <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-(--bg-3)">
