@@ -54,6 +54,8 @@
 
 <div
   class="pointer-events-none fixed right-4 bottom-4 z-[80] flex w-80 flex-col gap-2"
+  role="region"
+  aria-label={t('toast-region-label')}
   onmouseenter={pauseAll}
   onmouseleave={resumeAll}
 >

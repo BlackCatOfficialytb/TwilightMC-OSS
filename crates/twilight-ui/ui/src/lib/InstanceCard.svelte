@@ -110,7 +110,12 @@
 
   {#if menuOpen}
     <!-- backdrop click closes; menu entries stop the card's own handlers -->
-    <div class="fixed inset-0 z-20" onclick={onclosemenu}></div>
+    <div
+      class="fixed inset-0 z-20"
+      role="presentation"
+      onclick={onclosemenu}
+      onkeydown={(e) => e.key === 'Escape' && onclosemenu()}
+    ></div>
     <div class="absolute top-9 right-2 z-30 w-44 rounded border border-(--border) bg-(--bg-surface) py-1 shadow-xl">
       <button
         class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--bg-subtle) disabled:opacity-40"

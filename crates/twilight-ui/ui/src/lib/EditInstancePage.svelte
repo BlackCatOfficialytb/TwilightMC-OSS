@@ -39,8 +39,14 @@
 
   // ---- icon state ----
   let iconPickerOpen = $state(false);
-  let iconKey = $state(instance.icon_key ?? '');
+  let iconKey = $state('');
   let iconNotice = $state('');
+
+  // keep the icon draft in sync when the edited instance changes (picking
+  // only touches iconKey, so a choice in flight is never clobbered)
+  $effect(() => {
+    iconKey = instance.icon_key ?? '';
+  });
 
   // ---- export state ----
   let exportNotice = $state('');
@@ -82,8 +88,14 @@
   }
 
   // ---- rename state ----
-  let draftName = $state(instance.name);
+  let draftName = $state('');
   let nameNotice = $state('');
+
+  // sync the rename draft when the edited instance changes; typing only
+  // touches draftName, so keystrokes survive the sync
+  $effect(() => {
+    draftName = instance.name;
+  });
 
   async function commitNameEdit() {
     const value = draftName.trim();

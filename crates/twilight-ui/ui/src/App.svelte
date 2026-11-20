@@ -751,8 +751,17 @@
       : 'w-16'}"
   >
     <div
-      class="flex h-10 items-center gap-2 border-b border-(--border) px-1"
+      class="flex h-10 cursor-pointer items-center gap-2 border-b border-(--border) px-1 select-none"
+      role="button"
+      tabindex="0"
+      aria-expanded={sidebarExpanded}
       ondblclick={() => (sidebarExpanded = !sidebarExpanded)}
+      onkeydown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          sidebarExpanded = !sidebarExpanded;
+        }
+      }}
     >
       <img src="/logo.png" alt={t('app-name')} draggable="false" class="h-7 w-7 shrink-0" />
       {#if sidebarExpanded}
@@ -1164,8 +1173,12 @@
     <!-- Install Modpack: drop target + path/URL -->
     <div
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      role="presentation"
       onclick={(e) => {
         if (e.target === e.currentTarget && !modpackBusy) modpackOpen = false;
+      }}
+      onkeydown={(e) => {
+        if (e.key === 'Escape' && !modpackBusy) modpackOpen = false;
       }}
     >
       <div class="w-[480px] rounded-lg border border-(--border) bg-(--bg-surface) shadow-2xl">
@@ -1179,6 +1192,8 @@
         <div class="p-4">
           <div
             class="flex h-36 flex-col items-center justify-center rounded border border-dashed border-(--border) text-center text-(--text-muted) hover:border-(--accent)"
+            role="region"
+            aria-label={t('install-modpack-drop')}
             ondragover={(e) => e.preventDefault()}
             ondrop={(e) => {
               e.preventDefault();
@@ -1222,8 +1237,12 @@
     <!-- Delete instance confirmation -->
     <div
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      role="presentation"
       onclick={(e) => {
         if (e.target === e.currentTarget && !deleteBusy) deleteFor = null;
+      }}
+      onkeydown={(e) => {
+        if (e.key === 'Escape' && !deleteBusy) deleteFor = null;
       }}
     >
       <div class="w-[380px] rounded-lg border border-(--border) bg-(--bg-surface) p-5 shadow-2xl">

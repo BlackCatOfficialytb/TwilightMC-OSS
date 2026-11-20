@@ -26,6 +26,16 @@
     value = dialog?.value ?? '';
   });
 
+  let panel = $state(null);
+  let promptInput = $state(null);
+
+  // focus follows the dialog: prompts focus their input, other variants the
+  // panel itself (tabindex=-1) so Enter reaches onKeydown
+  $effect(() => {
+    if (dialog?.variant === 'prompt') promptInput?.focus();
+    else panel?.focus();
+  });
+
   function accept() {
     if (dialog?.variant === 'prompt') closeDialog(value);
     else closeDialog(true);
@@ -50,17 +60,21 @@
   <div
     class="fixed inset-0 z-[70] flex items-center justify-center"
     style="background: var(--scrim)"
+    role="presentation"
     onclick={(e) => {
       if (e.target === e.currentTarget) cancel();
     }}
+    onkeydown={(e) => e.key === 'Escape' && cancel()}
   >
-    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+    <!-- tabindex=-1 + programmatic focus keep the keyboard working -->
     <div
       role="alertdialog"
       aria-modal="true"
+      tabindex="-1"
       aria-label={dialog.title || t('alert-title')}
       class="w-[380px] rounded-lg border border-(--border-1) bg-(--bg-2) shadow-2xl animate-[fade-in_120ms_ease-out]"
       onkeydown={onKeydown}
+      bind:this={panel}
     >
       <div class="flex items-start gap-3 p-4">
         <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-(--bg-3)">
@@ -77,8 +91,8 @@
             <input
               class="mt-3 h-8 w-full rounded border border-(--border-1) bg-(--bg-3) px-2.5 text-(--step-body) text-(--fg-1) outline-none focus:border-(--accent-1)"
               bind:value
+              bind:this={promptInput}
               placeholder={dialog.placeholder ?? ''}
-              autofocus
             />
           {/if}
         </div>

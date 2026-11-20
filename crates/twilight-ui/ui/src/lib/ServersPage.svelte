@@ -408,9 +408,11 @@
   <div
     class="fixed inset-0 z-[70] flex items-center justify-center"
     style="background: var(--scrim)"
+    role="presentation"
     onclick={(e) => {
       if (e.target === e.currentTarget) propsOpen = false;
     }}
+    onkeydown={(e) => e.key === 'Escape' && (propsOpen = false)}
   >
     <div
       role="dialog"

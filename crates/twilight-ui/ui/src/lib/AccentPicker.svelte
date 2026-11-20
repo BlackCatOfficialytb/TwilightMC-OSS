@@ -26,7 +26,8 @@
   });
 
   let current = $state(getSavedAccent());
-  let customHex = $state(current ?? builtin);
+  // onMount, the sync effect below grounds it from the live accent
+  let customHex = $state('');
   let invalid = $state(false);
 
   // a theme switch re-grounds the hex field (applyTheme already re-homed

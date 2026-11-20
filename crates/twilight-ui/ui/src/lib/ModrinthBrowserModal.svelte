@@ -15,7 +15,7 @@
   // Pack mode (projectType: resourcepack | shader): searches run without
   // loader facets, the queue/staging flow is skipped (packs have no
   // dependencies) and the inspector installs the pack zip directly.
-  const isPack = projectType === 'resourcepack' || projectType === 'shader';
+  const isPack = $derived(projectType === 'resourcepack' || projectType === 'shader');
 
   // ---- source: Modrinth (default) or CurseForge ----
   // CurseForge search needs the personal API key from Settings; blocked

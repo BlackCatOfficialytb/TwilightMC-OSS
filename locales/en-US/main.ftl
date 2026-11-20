@@ -34,6 +34,7 @@ alert-title = Alert
 alert-cancel = Cancel
 alert-ok = OK
 toast-dismiss = Click to dismiss
+toast-region-label = Notifications
 toast-logs-copied = Logs copied to clipboard.
 toast-copy-failed = Copy failed: { $error }
 toast-launch-failed = Launch failed: { $error }

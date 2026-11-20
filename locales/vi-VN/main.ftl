@@ -35,6 +35,7 @@ alert-title = Thông báo
 alert-cancel = Hủy
 alert-ok = OK
 toast-dismiss = Nhấn để đóng
+toast-region-label = Thông báo
 toast-logs-copied = Đã sao chép nhật ký vào clipboard.
 toast-copy-failed = Sao chép thất bại: { $error }
 toast-launch-failed = Khởi chạy thất bại: { $error }

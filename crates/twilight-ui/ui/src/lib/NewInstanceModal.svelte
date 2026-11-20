@@ -343,9 +343,11 @@
 
 <div
   class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+  role="presentation"
   onclick={(e) => {
     if (e.target === e.currentTarget) onclose?.();
   }}
+  onkeydown={(e) => e.key === 'Escape' && onclose?.()}
 >
   <div
     class="flex h-[580px] w-[900px] flex-col overflow-hidden rounded-lg border border-(--border) bg-(--bg-surface) shadow-2xl"

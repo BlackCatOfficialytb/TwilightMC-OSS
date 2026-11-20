@@ -21,9 +21,11 @@
 <!-- backdrop click closes; panel click does not -->
 <div
   class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+  role="presentation"
   onclick={(e) => {
     if (e.target === e.currentTarget) onclose?.();
   }}
+  onkeydown={(e) => e.key === 'Escape' && onclose?.()}
 >
   <div class="flex max-h-[85vh] w-[560px] flex-col rounded-lg border border-(--border) bg-(--bg-surface) shadow-2xl">
     <div class="flex items-center justify-between border-b border-(--border) px-4 py-3">
