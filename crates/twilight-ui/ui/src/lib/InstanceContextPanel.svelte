@@ -5,6 +5,7 @@
   // bubble up as callbacks.
   import LauncherIcon from './LauncherIcon.svelte';
   import { iconKeyAsset } from './twemoji.js';
+  import { t, formatDate, formatDuration } from './i18n.svelte.ts';
 
   let {
     instance,
@@ -77,40 +78,17 @@
     return [storage.instances_dir.replace(/\\/g, '/'), instance.id].join('/');
   }
 
-  // dd/mm/yyyy hh:mm:ss in the user's local zone.
-  function fmtStamp(unix) {
-    const date = new Date(unix * 1000);
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-  }
-
-  // Top two non-zero units: "2 days 3 hours", "5 minutes 12 seconds".
-  function fmtDuration(total) {
-    const seconds = Math.max(0, Math.floor(total));
-    const units = [
-      [86400, 'day'],
-      [3600, 'hour'],
-      [60, 'minute'],
-      [1, 'second'],
-    ];
-    const parts = [];
-    let rest = seconds;
-    for (const [size, label] of units) {
-      const value = Math.floor(rest / size);
-      if (value) {
-        parts.push(`${value} ${label}${value === 1 ? '' : 's'}`);
-        rest -= value * size;
-        if (parts.length === 2) break;
-      }
-    }
-    return parts.length ? parts.join(' ') : '0 seconds';
-  }
-
-  // i18n-ready: this whole sentence becomes one translation template later.
+  // i18n-ready: the whole sentence is one Fluent template with Intl-formatted
+  // date and plural-selected duration pieces.
   const metaLine = $derived.by(() => {
-    const base = `Minecraft ${instance.minecraft_version}`;
-    if (!instance.last_played) return base;
-    return `${base}, last played on ${fmtStamp(instance.last_played)}, total played for ${fmtDuration(instance.total_time_played)}`;
+    if (!instance.last_played) {
+      return t('instance-meta-never', { version: instance.minecraft_version });
+    }
+    return t('instance-meta-played', {
+      version: instance.minecraft_version,
+      date: formatDate(instance.last_played * 1000),
+      duration: formatDuration(instance.total_time_played),
+    });
   });
 
   function pickGroup(value) {
@@ -122,7 +100,7 @@
 
 <aside
   class="ctx-in flex w-[280px] shrink-0 flex-col overflow-y-auto border-l border-(--border) bg-(--bg-surface) p-3.5"
-  aria-label="Selected instance details"
+  aria-label={t('ctx-aria')}
 >
   <div class="flex items-start justify-between gap-2">
     <span class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-(--accent)/15">
@@ -142,8 +120,8 @@
     <button
       type="button"
       class="rounded p-1 text-[13px] leading-none text-(--text-muted) transition-colors hover:bg-(--bg-subtle) hover:text-(--text-main) focus-visible:ring-1 focus-visible:ring-(--accent) focus-visible:outline-none"
-      title="Close panel (Esc)"
-      aria-label="Clear selection and close the instance panel"
+      title={t('ctx-close-title')}
+      aria-label={t('ctx-close-aria')}
       onclick={() => onclose?.()}
     >
       ✕
@@ -154,7 +132,7 @@
       <input
         class="h-7 w-full rounded border border-(--accent) bg-(--bg-surface) px-2 text-[13px] font-medium outline-none"
         bind:value={draftName}
-        aria-label="Instance name"
+        aria-label={t('instance-name')}
         onkeydown={(e) => {
           if (e.key === 'Enter') commitRename();
           else if (e.key === 'Escape') cancelRename();
@@ -167,8 +145,8 @@
         <button
           type="button"
           class="shrink-0 rounded p-0.5 text-[10px] text-(--text-muted) opacity-0 transition-opacity hover:text-(--accent) focus-visible:opacity-100 group-hover/name:opacity-100"
-          title="Rename instance"
-          aria-label="Rename instance"
+          title={t('ctx-rename-title')}
+          aria-label={t('ctx-rename-aria')}
           onclick={startRename}
         >
           ✎
@@ -180,7 +158,7 @@
     <span class="rounded bg-(--accent)/15 px-2 py-0.5 text-[10px] font-medium text-(--accent)">{instance.minecraft_version}</span>
     <span class="rounded px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide {loaderPill}">{instance.loader_type}</span>
     {#if instance.group}
-      <span class="rounded bg-(--bg-subtle) px-2 py-0.5 text-[10px] font-medium text-(--text-muted)" title="Group">▤ {instance.group}</span>
+      <span class="rounded bg-(--bg-subtle) px-2 py-0.5 text-[10px] font-medium text-(--text-muted)" title={t('ctx-group')}>▤ {instance.group}</span>
     {/if}
   </div>
   <div class="mt-2 truncate font-mono text-[10px] text-(--text-muted)" title={instancePath()}>{instancePath()}</div>
@@ -189,19 +167,19 @@
     <button
       class="flex w-full items-center justify-center gap-1.5 rounded bg-(--accent) px-3 py-2 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
       disabled={gameRunning}
-      title={gameRunning ? 'A game is already running' : `Launch ${instance.name}`}
+      title={gameRunning ? t('ctx-launch-running') : t('ctx-launch-title', { name: instance.name })}
       onclick={onlaunch}
     >
-      <LauncherIcon name="launch" size={13} /> Launch
+      <LauncherIcon name="launch" size={13} /> {t('action-launch')}
     </button>
 
     {#if gameRunning}
       <button
         class="flex w-full items-center justify-center gap-1.5 rounded px-3 py-2 text-[12px] font-medium text-rose-400 hover:bg-rose-500/10"
-        title="Stop the running game"
+        title={t('ctx-kill-title')}
         onclick={onkill}
       >
-        <LauncherIcon name="kill" size={13} /> Kill
+        <LauncherIcon name="kill" size={13} /> {t('action-kill')}
       </button>
     {/if}
 
@@ -209,15 +187,15 @@
       class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
       onclick={onedit}
     >
-      <LauncherIcon name="edit" size={13} /> Edit
+      <LauncherIcon name="edit" size={13} /> {t('action-edit')}
     </button>
 
     <button
       class="flex w-full items-center rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-      title="Move this instance to another group"
+      title={t('ctx-change-group-title')}
       onclick={() => (groupOpen = !groupOpen)}
     >
-      <span>▤ Change Group</span>
+      <span>▤ {t('action-change-group')}</span>
       <span class="ml-auto text-[9px]">{groupOpen ? '▴' : '▾'}</span>
     </button>
     {#if groupOpen}
@@ -228,7 +206,7 @@
             : 'font-medium text-(--accent)'}"
           onclick={() => pickGroup('')}
         >
-          No group
+          {t('ctx-group-none')}
         </button>
         {#each groups as g (g)}
           <button
@@ -243,7 +221,7 @@
         <div class="mt-1 flex gap-1">
           <input
             class="h-7 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-surface) px-2 text-[11px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-            placeholder="New group…"
+            placeholder={t('ctx-new-group')}
             bind:value={newGroup}
             onkeydown={(e) => {
               if (e.key === 'Enter' && newGroup.trim()) pickGroup(newGroup);
@@ -254,7 +232,7 @@
             disabled={!newGroup.trim()}
             onclick={() => pickGroup(newGroup)}
           >
-            Add
+            {t('ctx-add-group')}
           </button>
         </div>
       </div>
@@ -263,49 +241,49 @@
     <button
       class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
       disabled={!storage}
-      title={storage ? 'Opens the instance folder' : 'Storage unknown'}
+      title={storage ? t('ctx-folder-title') : t('ctx-folder-unknown')}
       onclick={onopenfolder}
     >
-      <LauncherIcon name="folder" size={13} /> Folder
+      <LauncherIcon name="folder" size={13} /> {t('action-folder')}
     </button>
     <button
       class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-      title="Export this instance as a .zip"
+      title={t('ctx-export-zip-title')}
       onclick={onexport}
     >
-      <LauncherIcon name="export" size={13} /> Export
+      <LauncherIcon name="export" size={13} /> {t('action-export')}
     </button>
     <button
       class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-      title="Export this instance as a compressed .twpack (7z)"
+      title={t('ctx-export-twpack-title')}
       onclick={ontwpack}
     >
-      <LauncherIcon name="package" size={13} /> Export .twpack
+      <LauncherIcon name="package" size={13} /> {t('action-export-twpack')}
     </button>
     <button
       class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-      title="Clone this instance"
+      title={t('ctx-copy-title')}
       onclick={oncopy}
     >
-      <LauncherIcon name="copy" size={13} /> Copy
+      <LauncherIcon name="copy" size={13} /> {t('action-copy')}
     </button>
     <button
       class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-rose-400 hover:bg-rose-500/10"
       onclick={ondelete}
     >
-      <LauncherIcon name="delete" size={13} /> Delete
+      <LauncherIcon name="delete" size={13} /> {t('action-delete')}
     </button>
     <button
       class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-      title="Create a desktop shortcut that launches this instance"
+      title={t('ctx-shortcut-title')}
       onclick={onshortcut}
     >
-      <LauncherIcon name="shortcut" size={13} /> Create Shortcut
+      <LauncherIcon name="shortcut" size={13} /> {t('action-shortcut')}
     </button>
   </div>
 
   <div class="mt-auto border-t border-(--border) pt-2.5">
     <p class="text-[10.5px] leading-relaxed text-(--text-muted)">{metaLine}</p>
-    <p class="mt-1 text-[10.5px] text-(--text-muted)">{modsCount ?? '…'} mods installed</p>
+    <p class="mt-1 text-[10.5px] text-(--text-muted)">{modsCount == null ? '…' : t('instance-mods-count', { count: modsCount })}</p>
   </div>
 </aside>

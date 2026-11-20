@@ -21,6 +21,7 @@
   import { topOverlay } from './lib/overlays.js';
   import { isDarkTheme, loadSavedAccent, normalizeThemeId, applyTheme } from './lib/theme';
   import { syncIconTheme } from './lib/icons';
+  import { t } from './lib/i18n.svelte.ts';
   // shared account state: one store drives the sidebar chip, the client
   // dashboard and the account manager modal
   import {
@@ -56,7 +57,18 @@
   loadSavedAccent();
 
   // No crutch states or animations: a busy desktop reads one crisp status word.
-  let status = $state('Ready');
+  // Statuses hold a message key + arguments (not a frozen string) so a live
+  // language switch also re-renders the header and client dashboard.
+  let status = $state({ key: 'status-ready', args: {} });
+  const statusText = $derived(status.key ? t(status.key, status.args) : status.text);
+
+  function setStatus(key, args = {}) {
+    status = { key, args };
+  }
+
+  function setStatusError(error) {
+    status = { key: null, args: {}, text: String(error) };
+  }
 
   // ---- sidebar / navigation ----
   let sidebarExpanded = $state(false);
@@ -87,17 +99,17 @@
   });
 
   const nav = [
-    { id: 'instances', label: 'Instances', icon: 'instances' },
-    { id: 'worlds', label: 'Servers & P2P', icon: 'worlds' },
-    { id: 'downloads', label: 'Downloads', icon: 'download' },
-    { id: 'settings', label: 'Settings', icon: 'settings' },
-    { id: 'accounts', label: 'Accounts', icon: 'accounts' },
+    { id: 'instances', label: 'nav-instances', icon: 'instances' },
+    { id: 'worlds', label: 'nav-servers', icon: 'worlds' },
+    { id: 'downloads', label: 'nav-downloads', icon: 'download' },
+    { id: 'settings', label: 'nav-settings', icon: 'settings' },
+    { id: 'accounts', label: 'nav-accounts', icon: 'accounts' },
   ];
 
   const sections = {
-    instances: ['Instances', 'Your library — open the wizard or drop a pack.'],
-    worlds: ['Servers & P2P', 'Create and run local servers with the Minekube Connect tunnel.'],
-    downloads: ['Downloads', 'Direct downloads land in a later milestone.'],
+    instances: ['page-instances-title', 'page-instances-subtitle'],
+    worlds: ['page-servers-title', 'page-servers-subtitle'],
+    downloads: ['page-downloads-title', 'page-downloads-subtitle'],
   };
 
   // ---- auth state ----
@@ -201,7 +213,7 @@
       modpackTarget = '';
       await loadInstances();
       if (id) selectedId = id;
-      status = 'Modpack installed.';
+      setStatus('status-modpack-installed');
     } catch (e) {
       modpackError = String(e);
     } finally {
@@ -257,7 +269,7 @@
     if (!gameRunning) return;
     try {
       await api('kill_instance');
-      logLine({ stream: 'stdout', line: 'kill requested' });
+      logLine({ stream: 'stdout', line: t('console-kill-requested') });
     } catch (e) {
       logLine({ stream: 'stderr', line: String(e) });
     }
@@ -303,41 +315,42 @@
     const inst = instances.find((i) => i.id === id);
     const label = inst ? inst.name : id;
     gameRunning = true;
-    status = server ? `Running ${label} → ${server}…` : `Running ${label}…`;
+    if (server) setStatus('status-launching-server', { name: label, server });
+    else setStatus('status-launching', { name: label });
     drawerOpen = true;
     try {
       const code = await api('launch_instance', { instanceId: id, server });
-      logLine({ stream: 'stdout', line: `launcher reports exit code ${code}` });
+      logLine({ stream: 'stdout', line: t('console-exit-code', { code }) });
       await loadInstances();
-      status = 'Ready';
+      setStatus('status-ready');
     } catch (e) {
       // every backend failure surfaces here: bright red in the auto-opened
       // drawer, never a silent no-op
       console.error('Launch failed:', e);
-      logLine({ stream: 'stderr', line: `[ERROR] Launch failed: ${e}` });
+      logLine({ stream: 'stderr', line: `[ERROR] ${t('status-launch-failed')}: ${e}` });
       if (String(e).includes('BareBones Template')) {
         // the mandatory Cleanroom gate: offer the install flows in a dialog
         // instead of a bare toast
         barebonesFor = id;
       } else {
-        toast(`Launch failed: ${e}`, 'error');
+        toast(t('toast-launch-failed', { error: String(e) }), 'error');
       }
-      status = 'Launch failed';
+      setStatus('status-launch-failed');
     } finally {
       gameRunning = false;
-      if (status !== 'Launch failed') status = 'Ready';
+      if (status.key !== 'status-launch-failed') setStatus('status-ready');
     }
   }
 
   function openInstanceDir() {
     if (!storage) return;
-    api('open_path', { path: storage.instances_dir }).catch((e) => (status = String(e)));
+    api('open_path', { path: storage.instances_dir }).catch((e) => setStatusError(e));
   }
 
   function openInstanceFolder(id) {
     if (!storage) return;
     api('open_path', { path: [storage.instances_dir.replace(/\\/g, '/'), id].join('/') }).catch(
-      (e) => (status = String(e)),
+      (e) => setStatusError(e),
     );
   }
 
@@ -355,7 +368,7 @@
       if (selectedId === deleteFor) selectedId = null;
       deleteFor = null;
       await loadInstances();
-      status = toTrash ? 'Instance moved to trash.' : 'Instance deleted.';
+      setStatus(toTrash ? 'status-instance-trash' : 'status-instance-deleted');
     } catch (e) {
       deleteError = String(e);
     } finally {
@@ -377,9 +390,10 @@
     try {
       await api('set_instance_group', { instanceId: selectedInst.id, group });
       await loadInstances();
-      status = group ? `Moved ${label} to ${group}.` : `${label} is ungrouped.`;
+      if (group) setStatus('status-moved-group', { name: label, group });
+      else setStatus('status-ungrouped', { name: label });
     } catch (e) {
-      status = String(e);
+      setStatusError(e);
     }
   }
 
@@ -390,11 +404,11 @@
       const row = await api('duplicate_instance', { instanceId: selectedInst.id });
       await loadInstances();
       selectedId = row.id;
-      toast(`Copied ${label}.`, 'success');
-      status = `Copied ${label}.`;
+      toast(t('status-copied', { name: label }), 'success');
+      setStatus('status-copied', { name: label });
     } catch (e) {
-      status = String(e);
-      toast(`Copy failed: ${e}`, 'error');
+      setStatusError(e);
+      toast(t('status-copy-failed', { error: String(e) }), 'error');
     }
   }
 
@@ -406,11 +420,11 @@
     let value = typeof target === 'string' ? target : null;
     if (value == null) {
       value = await promptAlert({
-        title: 'Rename instance',
-        message: `Choose a new display name for ${inst.name}.`,
+        title: t('prompt-rename-title'),
+        message: t('prompt-rename-message', { name: inst.name }),
         value: inst.name,
-        placeholder: 'Instance name',
-        confirmLabel: 'Rename',
+        placeholder: t('prompt-rename-placeholder'),
+        confirmLabel: t('prompt-rename-confirm'),
       });
       if (value == null || !value.trim() || value.trim() === inst.name) return;
     }
@@ -423,11 +437,11 @@
       await loadInstances();
       // keep the panel on this instance with its fresh row
       selectedId = row.id;
-      status = `Renamed ${label} to ${row.name}.`;
-      toast(`Renamed to ${row.name}.`, 'success');
+      setStatus('status-renamed', { name: label, newName: row.name });
+      toast(t('toast-renamed', { name: row.name }), 'success');
     } catch (e) {
-      status = String(e);
-      toast(`Rename failed: ${e}`, 'error');
+      setStatusError(e);
+      toast(t('toast-rename-failed', { error: String(e) }), 'error');
     }
   }
 
@@ -435,23 +449,23 @@
     if (!selectedInst) return;
     const save = window.__TAURI__?.dialog?.save;
     if (!save) {
-      status = 'File picker unavailable in this build.';
+      setStatus('status-file-picker-unavailable');
       return;
     }
     try {
       const dest = await save({
-        title: 'Export instance',
+        title: t('dialog-export-instance'),
         defaultPath: `${selectedInst.name.replace(/[\\/:*?"<>|]/g, '_')}.zip`,
-        filters: [{ name: 'Zip archive', extensions: ['zip'] }],
+        filters: [{ name: t('filter-zip-archive'), extensions: ['zip'] }],
       });
       if (!dest) return;
       const path = await api('export_instance_zip', {
         instanceId: selectedInst.id,
         destPath: dest,
       });
-      status = `Exported to ${path}.`;
+      setStatus('status-exported', { path });
     } catch (e) {
-      status = String(e);
+      setStatusError(e);
     }
   }
 
@@ -459,26 +473,26 @@
     if (!selectedInst) return;
     const save = window.__TAURI__?.dialog?.save;
     if (!save) {
-      status = 'File picker unavailable in this build.';
+      setStatus('status-file-picker-unavailable');
       return;
     }
     try {
       const dest = await save({
-        title: 'Export instance as .twpack',
+        title: t('dialog-export-twpack'),
         defaultPath: `${selectedInst.name.replace(/[\\/:*?"<>|]/g, '_')}.twpack`,
-        filters: [{ name: 'Twilight pack', extensions: ['twpack'] }],
+        filters: [{ name: t('filter-twilight-pack'), extensions: ['twpack'] }],
       });
       if (!dest) return;
-      status = 'Packing with 7z…';
+      setStatus('status-packing');
       const path = await api('export_instance_twpack', {
         instanceId: selectedInst.id,
         destPath: dest,
       });
-      status = `Exported to ${path}.`;
-      toast(`Exported ${selectedInst.name} as .twpack.`, 'success');
+      setStatus('status-exported', { path });
+      toast(t('toast-exported-twpack', { name: selectedInst.name }), 'success');
     } catch (e) {
-      status = String(e);
-      toast(`Export failed: ${e}`, 'error');
+      setStatusError(e);
+      toast(t('toast-export-failed', { error: String(e) }), 'error');
     }
   }
 
@@ -486,11 +500,11 @@
     if (!selectedInst) return;
     try {
       const path = await api('create_desktop_shortcut', { instanceId: selectedInst.id });
-      toast(`Shortcut created: ${path}`, 'success');
-      status = `Shortcut created: ${path}`;
+      toast(t('toast-shortcut-created', { path }), 'success');
+      setStatus('status-shortcut-created', { path });
     } catch (e) {
-      status = String(e);
-      toast(`Shortcut failed: ${e}`, 'error');
+      setStatusError(e);
+      toast(t('toast-shortcut-failed', { error: String(e) }), 'error');
     }
   }
 
@@ -498,7 +512,8 @@
     wizardOpen = false;
     await loadInstances();
     if (row?.id) selectedId = row.id;
-    status = warning || `Instance ${row?.name ?? ''} created.`;
+    if (warning) setStatusError(warning);
+    else setStatus('status-instance-created', { name: row?.name ?? '' });
   }
 
   // ---- edit instance (mods) ----
@@ -509,6 +524,7 @@
   // ---- right context panel (Yardarm grammar: selection drives it) ----
 
   const selectedInst = $derived(instances.find((i) => i.id === selectedId) ?? null);
+  const deleteTarget = $derived(instances.find((i) => i.id === deleteFor) ?? null);
   let ctxMods = $state(null);
   let ctxModsToken = 0;
   $effect(() => {
@@ -605,7 +621,7 @@
   }
 
   function openFolder(path) {
-    api('open_path', { path }).catch((e) => (status = String(e)));
+    api('open_path', { path }).catch((e) => setStatusError(e));
   }
 
   async function cleanStaging() {
@@ -622,11 +638,19 @@
   }
 
   function typeLabel(account) {
-    return (
-      { offline: 'Offline', microsoft: 'Microsoft', ely_by: 'Ely.by' }[account.account_type.type] ??
-      'Yggdrasil'
+    return t(
+      {
+        offline: 'account-type-offline',
+        microsoft: 'account-type-microsoft',
+        ely_by: 'account-type-elyby',
+      }[account.account_type.type] ?? 'account-type-yggdrasil'
     );
   }
+
+  // Keep the window title and <html lang> in sync with live language changes.
+  $effect(() => {
+    document.title = t('app-document-title');
+  });
 
   onMount(() => {
     const unlisteners = [];
@@ -729,11 +753,11 @@
       class="flex h-10 items-center gap-2 border-b border-(--border) px-1"
       ondblclick={() => (sidebarExpanded = !sidebarExpanded)}
     >
-      <img src="/logo.png" alt="TwilightMC" draggable="false" class="h-7 w-7 shrink-0" />
+      <img src="/logo.png" alt={t('app-name')} draggable="false" class="h-7 w-7 shrink-0" />
       {#if sidebarExpanded}
         <span class="flex min-w-0 items-center gap-1.5">
-          <span class="truncate text-[13px] font-semibold">TwilightMC</span>
-          <span class="shrink-0 rounded bg-(--accent-star)/15 px-1 py-0.5 text-[10px] font-medium text-(--accent-star)">pre-release UI</span>
+          <span class="truncate text-[13px] font-semibold">{t('app-name')}</span>
+          <span class="shrink-0 rounded bg-(--accent-star)/15 px-1 py-0.5 text-[10px] font-medium text-(--accent-star)">{t('app-channel')}</span>
         </span>
       {/if}
     </div>
@@ -745,7 +769,7 @@
           === item.id
             ? 'bg-(--accent) font-medium text-(--on-accent)'
             : 'text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)'}"
-          title={item.label}
+          title={t(item.label)}
           onclick={() => {
             active = item.id;
             editFor = null;
@@ -760,21 +784,21 @@
             <LauncherIcon name={item.icon} size={15} />
           </span>
           {#if sidebarExpanded}
-            <span class="truncate text-[13px]">{item.label}</span>
+            <span class="truncate text-[13px]">{t(item.label)}</span>
           {/if}
         </button>
       {/each}
 
       <button
         class="flex h-9 items-center gap-2.5 rounded px-2.5 text-left {sidebarExpanded ? '' : 'justify-center'} text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-        title="Add Instance"
+        title={t('nav-add-instance')}
         onclick={openWizard}
       >
         <span class="flex w-5 shrink-0 items-center justify-center">
           <LauncherIcon name="new" size={15} />
         </span>
         {#if sidebarExpanded}
-          <span class="truncate text-[13px]">Add Instance</span>
+          <span class="truncate text-[13px]">{t('nav-add-instance')}</span>
         {/if}
       </button>
     </div>
@@ -784,7 +808,7 @@
       class="mt-2 flex items-center gap-2 rounded border border-(--border) bg-(--bg-surface) p-2 {sidebarExpanded
         ? ''
         : 'justify-center'}"
-      title={activeAccount ? activeAccount.username : 'Manage accounts'}
+      title={activeAccount ? activeAccount.username : t('nav-manage-accounts')}
       onclick={() => {
         active = 'accounts';
         editFor = null;
@@ -799,9 +823,9 @@
       />
       {#if sidebarExpanded}
         <span class="min-w-0 flex-1 text-left">
-          <span class="block truncate text-[12px] font-medium">{activeAccount ? activeAccount.username : 'Accounts'}</span>
+          <span class="block truncate text-[12px] font-medium">{activeAccount ? activeAccount.username : t('nav-accounts')}</span>
           <span class="block text-[10px] text-(--text-muted)">
-            {activeAccount ? typeLabel(activeAccount) : 'manage & sign in'}
+            {activeAccount ? typeLabel(activeAccount) : t('nav-manage-signin')}
           </span>
         </span>
       {/if}
@@ -813,6 +837,8 @@
         ? ''
         : 'opacity-0 group-hover/nav:opacity-100'}"
       onclick={() => (sidebarExpanded = !sidebarExpanded)}
+      title={sidebarExpanded ? t('nav-collapse-sidebar') : t('nav-expand-sidebar')}
+      aria-label={sidebarExpanded ? t('nav-collapse-sidebar') : t('nav-expand-sidebar')}
     >
       {sidebarExpanded ? '«' : '»'}
     </button>
@@ -825,18 +851,18 @@
         {#if currentView === 'edit'}
           <button
             class="rounded px-2.5 py-1 text-[12px] font-medium text-(--text-muted) hover:bg-(--bg-surface) hover:text-(--text-main)"
-            title="Back to the instance library"
+            title={t('nav-back-instances-title')}
             onclick={() => (editFor = null)}
           >
-            ← Back to Instances
+            ← {t('header-back-instances')}
           </button>
           <span class="truncate text-[12px] font-medium text-(--text-muted)" title={editFor?.name}>{editFor?.name}</span>
         {:else}
-          <span class="rounded bg-(--accent)/15 px-2 py-0.5 text-xs font-medium text-(--accent)">TwilightMC Bolide (alpha-v{version})</span>
-          <span class="rounded bg-(--accent-star)/15 px-1.5 py-0.5 text-[10px] font-medium text-(--accent-star)">pre-release UI</span>
+          <span class="rounded bg-(--accent)/15 px-2 py-0.5 text-xs font-medium text-(--accent)">{t('app-version', { version })}</span>
+          <span class="rounded bg-(--accent-star)/15 px-1.5 py-0.5 text-[10px] font-medium text-(--accent-star)">{t('app-channel')}</span>
           <!-- Launcher | Client mode toggle -->
           <div class="ml-2 flex overflow-hidden rounded border border-(--border)" role="tablist">
-            {#each [['launcher', 'Launcher'], ['client', 'Client']] as [id, label]}
+            {#each [['launcher', 'mode-launcher'], ['client', 'mode-client']] as [id, label]}
               <button
                 class="px-3 py-1 text-[11px] font-semibold tracking-wide {mode === id
                   ? 'bg-(--accent) text-(--on-accent)'
@@ -845,13 +871,13 @@
                 aria-selected={mode === id}
                 onclick={() => setMode(id)}
               >
-                {label}
+                {t(label)}
               </button>
             {/each}
           </div>
         {/if}
       </div>
-      <span class="text-xs text-(--text-muted)" aria-live="polite">{status}</span>
+      <span class="text-xs text-(--text-muted)" aria-live="polite">{statusText}</span>
     </header>
 
     <main class="min-w-0 flex-1 overflow-y-auto p-6">
@@ -864,7 +890,7 @@
           instances={instances}
           active={activeAccount}
           {gameRunning}
-          {status}
+          {statusText}
           onlaunch={launchInstance}
           onopenconsole={() => (drawerOpen = true)}
           onrefresh={refreshAccounts}
@@ -914,7 +940,7 @@
             active = 'accounts';
             mode = 'launcher';
           }}
-          onopenurl={(url) => api('open_external_url', { url }).catch((e) => (status = String(e)))}
+          onopenurl={(url) => api('open_external_url', { url }).catch((e) => setStatusError(e))}
         />
       {:else if active === 'instances'}
         <!-- action toolbar -->
@@ -923,7 +949,7 @@
             class="flex items-center gap-1.5 rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
             onclick={openWizard}
           >
-            <LauncherIcon name="new" size={13} /> Add Instance
+            <LauncherIcon name="new" size={13} /> {t('action-add-instance')}
           </button>
           <button
             class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
@@ -931,14 +957,14 @@
             title={storage ? storage.instances_dir : ''}
             onclick={openInstanceDir}
           >
-            <LauncherIcon name="folder" size={14} /> Instance Folder
+            <LauncherIcon name="folder" size={14} /> {t('action-instance-folder')}
           </button>
           <button
             class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-            title="Install a Modrinth .mrpack into a new instance"
+            title={t('action-install-mrpack-title')}
             onclick={() => (modpackOpen = true)}
           >
-            <LauncherIcon name="package" size={14} /> Install .mrpack
+            <LauncherIcon name="package" size={14} /> {t('action-install-mrpack')}
           </button>
           <button
             class="flex items-center gap-1.5 rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
@@ -948,17 +974,17 @@
               if (!storage) loadStorage();
             }}
           >
-            <LauncherIcon name="settings" size={14} /> Settings
+            <LauncherIcon name="settings" size={14} /> {t('action-settings')}
           </button>
           <input
             class="h-8 w-64 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-            placeholder="Filter instances…"
+            placeholder={t('filter-instances')}
             bind:value={instanceQuery}
           />
           <span class="flex-1"></span>
           <button
             class="flex rounded px-2 py-1 text-sm text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-            title={isDarkTheme(theme) ? 'Twilight Light' : 'Twilight Dark'}
+            title={isDarkTheme(theme) ? t('theme-to-light') : t('theme-to-dark')}
             onclick={toggleTheme}
           >
             {#if isDarkTheme(theme)}
@@ -991,8 +1017,8 @@
       {:else if active === 'worlds'}
         <ServersPage />
       {:else}
-        <h2 class="text-lg font-semibold">{sections[active][0]}</h2>
-        <p class="mt-1 text-(--text-muted)">{sections[active][1]}</p>
+        <h2 class="text-lg font-semibold">{t(sections[active][0])}</h2>
+        <p class="mt-1 text-(--text-muted)">{t(sections[active][1])}</p>
       {/if}
     </main>
 
@@ -1005,16 +1031,16 @@
       <div class="flex h-10 shrink-0 items-center justify-between gap-2 px-3">
         <button
           class="flex min-w-0 flex-1 items-center gap-2 text-left text-[11px] font-semibold uppercase tracking-wide text-(--text-muted) hover:text-(--text-main)"
-          title={drawerOpen ? 'Collapse console' : 'Expand console'}
+          title={drawerOpen ? t('console-collapse') : t('console-expand')}
           onclick={() => (drawerOpen = !drawerOpen)}
         >
           <span
             class="h-2 w-2 shrink-0 rounded-full {gameRunning ? 'animate-pulse bg-green-500' : 'bg-(--border)'}"
           ></span>
           <LauncherIcon name="log" size={13} />
-          <span class="truncate">Console Drawer (Real-time logs)</span>
+          <span class="truncate">{t('console-title')}</span>
           {#if gameRunning}
-            <span class="shrink-0 text-[10px] font-medium normal-case tracking-normal text-green-500">running</span>
+            <span class="shrink-0 text-[10px] font-medium normal-case tracking-normal text-green-500">{t('console-running')}</span>
           {/if}
         </button>
         <div class="flex shrink-0 items-center gap-3 text-[11px]">
@@ -1026,7 +1052,7 @@
               clearLogs();
             }}
           >
-            Clear
+            {t('console-clear')}
           </button>
           <button
             class="text-(--text-muted) hover:text-(--text-main) disabled:opacity-40"
@@ -1036,26 +1062,26 @@
               copyLogs();
             }}
           >
-            Copy
+            {t('console-copy')}
           </button>
           <button
             class="text-rose-400 hover:text-rose-300 disabled:opacity-40"
             disabled={!gameRunning}
-            title="Kill the game process"
+            title={t('console-kill-title')}
             onclick={(e) => {
               e.stopPropagation();
               killGame();
             }}
           >
-            Kill
+            {t('console-kill')}
           </button>
           {#if drawerOpen}
             <button
               class="text-(--text-muted) hover:text-(--text-main)"
-              title="Collapse"
+              title={t('console-collapse-short')}
               onclick={() => (drawerOpen = false)}
             >
-              Hide
+              {t('console-hide')}
             </button>
           {/if}
         </div>
@@ -1066,7 +1092,7 @@
             {entry.line}
           </div>
         {:else}
-          <div class="text-(--text-muted)">Game output appears here once you launch.</div>
+          <div class="text-(--text-muted)">{t('console-empty')}</div>
         {/each}
       </div>
     </section>
@@ -1103,7 +1129,7 @@
         mrpackFor = null;
         await loadInstances();
         selectedId = id;
-        status = 'Modpack installed.';
+        setStatus('status-modpack-installed');
       }}
     />
   {/if}
@@ -1116,7 +1142,7 @@
         twpackFor = null;
         await loadInstances();
         selectedId = id;
-        status = '.twpack imported.';
+        setStatus('status-twpack-imported');
       }}
     />
   {/if}
@@ -1155,7 +1181,7 @@
     >
       <div class="w-[480px] rounded-lg border border-(--border) bg-(--bg-surface) shadow-2xl">
         <div class="flex items-center justify-between border-b border-(--border) px-4 py-3">
-          <h3 class="text-sm font-semibold">Install Modpack</h3>
+          <h3 class="text-sm font-semibold">{t('install-modpack-title')}</h3>
           <button
             class="text-(--text-muted) hover:text-(--text-main)"
             onclick={() => (modpackOpen = false)}>✕</button
@@ -1172,12 +1198,12 @@
             }}
           >
             <span class="text-xl">⤓</span>
-            <span class="mt-2 text-[12px]">Drop an <span class="text-(--text-main)">.mrpack</span> or <span class="text-(--text-main)">.twpack</span> here</span>
-            <span class="text-[11px]">or paste its path / URL below</span>
+            <span class="mt-2 text-[12px]">{t('install-modpack-drop')}</span>
+            <span class="text-[11px]">{t('install-modpack-or-paste')}</span>
           </div>
           <input
             class="mt-3 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[13px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-            placeholder="C:\downloads\pack.mrpack  |  https://modrinth.com/…"
+            placeholder={t('install-modpack-placeholder')}
             bind:value={modpackTarget}
           />
           {#if modpackError}
@@ -1189,14 +1215,14 @@
             class="rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:text-(--text-main)"
             onclick={() => (modpackOpen = false)}
           >
-            Cancel
+            {t('common-cancel')}
           </button>
           <button
             class="rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
             disabled={modpackBusy || !modpackTarget.trim()}
             onclick={installFromWizard}
           >
-            {modpackBusy ? 'Installing…' : 'Install .mrpack'}
+            {modpackBusy ? t('install-modpack-installing') : t('install-modpack-install')}
           </button>
         </div>
       </div>
@@ -1212,9 +1238,9 @@
       }}
     >
       <div class="w-[380px] rounded-lg border border-(--border) bg-(--bg-surface) p-5 shadow-2xl">
-        <h3 class="text-[14px] font-semibold">Delete instance</h3>
+        <h3 class="text-[14px] font-semibold">{t('delete-title')}</h3>
         <p class="mt-2 text-[12px] text-(--text-muted)">
-          Delete <span class="font-medium text-(--text-main)">{deleteFor}</span> and all of its game files?
+          {t('delete-body', { name: deleteTarget?.name ?? deleteFor })}
         </p>
         {#if deleteError}
           <p class="mt-2 rounded border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-[11px] text-rose-400">{deleteError}</p>
@@ -1225,23 +1251,23 @@
             disabled={deleteBusy}
             onclick={() => (deleteFor = null)}
           >
-            Cancel
+            {t('common-cancel')}
           </button>
           <button
             class="rounded border border-(--accent-star)/40 bg-(--accent-star)/10 px-3 py-1.5 text-[12px] font-medium text-(--accent-star) hover:bg-(--accent-star)/20 disabled:opacity-40"
             disabled={deleteBusy}
-            title="Moves the folder into .twilight-trash next to the instances root"
+            title={t('delete-move-trash-title')}
             onclick={() => confirmDelete(true)}
           >
-            <Twemoji emoji="♻" /> Move to Trash
+            <Twemoji emoji="♻" /> {t('delete-move-trash')}
           </button>
           <button
             class="rounded bg-rose-600 px-3 py-1.5 text-[12px] font-medium text-white hover:bg-rose-500 disabled:opacity-40"
             disabled={deleteBusy}
-            title="Removes this instance directory permanently"
+            title={t('delete-permanently-title')}
             onclick={() => confirmDelete(false)}
           >
-            ✕ Delete Permanently
+            ✕ {t('delete-permanently')}
           </button>
         </div>
       </div>

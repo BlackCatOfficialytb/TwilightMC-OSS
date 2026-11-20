@@ -8,12 +8,13 @@
   import Twemoji from './Twemoji.svelte';
   import LauncherIcon from './LauncherIcon.svelte';
   import { skinSource } from './accounts.svelte.js';
+  import { t } from './i18n.svelte.ts';
 
   let {
     instances = [],
     active = null,
     gameRunning = false,
-    status = 'Ready',
+    status = '',
     onlaunch,
     onopenconsole,
     onrefresh,
@@ -51,7 +52,7 @@
     pinError = '';
     const address = pinAddress.trim();
     if (!/^[a-z0-9.-]+(:\d{1,5})?$/i.test(address)) {
-      pinError = 'Address must be a hostname (optionally host:port).';
+      pinError = t('client-pin-invalid');
       return;
     }
     pins = [
@@ -77,7 +78,7 @@
   });
 
   const selectedLabel = $derived(
-    instances.find((i) => i.id === selectedInstance)?.name ?? 'no instance selected'
+    instances.find((i) => i.id === selectedInstance)?.name ?? t('client-no-instance')
   );
 
   function quickJoin(pin) {
@@ -92,14 +93,14 @@
   async function pickTexture(kind) {
     const open = window.__TAURI__?.dialog?.open;
     if (!open) {
-      cosmeticError = 'File picker unavailable in this build.';
+      cosmeticError = t('status-file-picker-unavailable');
       return;
     }
     try {
       const picked = await open({
         multiple: false,
-        title: kind === 'skin' ? 'Choose a skin PNG' : 'Choose a cape PNG',
-        filters: [{ name: 'PNG textures', extensions: ['png'] }],
+        title: kind === 'skin' ? t('choose-skin') : t('choose-cape'),
+        filters: [{ name: t('filter-png-textures'), extensions: ['png'] }],
       });
       if (!picked) return;
       cosmeticBusy = true;
@@ -131,9 +132,12 @@
   }
 
   function typeLabel(account) {
-    return (
-      { offline: 'Offline', microsoft: 'Microsoft', ely_by: 'Ely.by' }[account.account_type.type] ??
-      'Yggdrasil'
+    return t(
+      {
+        offline: 'account-type-offline',
+        microsoft: 'account-type-microsoft',
+        ely_by: 'account-type-elyby',
+      }[account.account_type.type] ?? 'account-type-yggdrasil'
     );
   }
 </script>
@@ -142,13 +146,13 @@
   {#if !active}
     <div class="flex flex-col items-center gap-3 rounded-lg border border-(--border) bg-(--bg-surface) px-6 py-12 text-center">
       <Twemoji emoji="👤" size={30} />
-      <p class="text-sm font-medium">No account selected</p>
+      <p class="text-sm font-medium">{t('client-no-account')}</p>
       <p class="max-w-sm text-[12px] text-(--text-muted)">
-        Pick or create an account to see your character here.
+        {t('client-no-account-body')}
       </p>
       <button
         class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
-        onclick={() => onopenaccounts?.()}>Open account manager</button
+        onclick={() => onopenaccounts?.()}>{t('client-open-accounts')}</button
       >
     </div>
   {:else}
@@ -173,22 +177,22 @@
         <div class="flex gap-2">
           <button
             class="rounded border border-(--border) px-2.5 py-1 text-[11px] hover:bg-(--bg-subtle)"
-            title="Swap the skin PNG"
+            title={t('client-skin-title')}
             disabled={cosmeticBusy}
-            onclick={() => pickTexture('skin')}>Skin…</button
+            onclick={() => pickTexture('skin')}>{t('client-skin')}</button
           >
           <button
             class="rounded border border-(--border) px-2.5 py-1 text-[11px] hover:bg-(--bg-subtle)"
-            title="Swap the cape PNG"
+            title={t('client-cape-title')}
             disabled={cosmeticBusy}
-            onclick={() => pickTexture('cape')}>Cape…</button
+            onclick={() => pickTexture('cape')}>{t('client-cape')}</button
           >
           {#if active.cape || active.skin}
             <button
               class="rounded border border-(--border) px-2.5 py-1 text-[11px] text-(--text-muted) hover:bg-(--bg-subtle)"
-              title="Back to the default look"
+              title={t('client-reset-title')}
               disabled={cosmeticBusy}
-              onclick={clearCape}>Reset</button
+              onclick={clearCape}>{t('client-reset')}</button
             >
           {/if}
         </div>
@@ -200,7 +204,7 @@
       <div class="flex min-w-0 flex-col gap-6">
         <!-- quick launch hub -->
         <div class="rounded-lg border border-(--border) bg-(--bg-surface) p-5">
-          <h3 class="text-[11px] font-semibold uppercase tracking-wider text-(--text-muted)">Quick launch</h3>
+          <h3 class="text-[11px] font-semibold uppercase tracking-wider text-(--text-muted)">{t('client-quick-launch')}</h3>
           <div class="mt-3 flex items-center gap-2">
             <select
               class="h-9 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2 text-[13px] outline-none focus:border-(--accent)"
@@ -209,13 +213,13 @@
               {#each instances as inst (inst.id)}
                 <option value={inst.id}>{inst.name}</option>
               {:else}
-                <option value="">No instances yet</option>
+                <option value="">{t('client-no-instances')}</option>
               {/each}
             </select>
             <button
               class="flex items-center gap-1.5 rounded px-2 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-              title="Open the console drawer"
-              onclick={() => onopenconsole?.()}><LauncherIcon name="log" size={12} /> Console</button
+              title={t('client-console-title')}
+              onclick={() => onopenconsole?.()}><LauncherIcon name="log" size={12} /> {t('client-console')}</button
             >
           </div>
           <button
@@ -223,7 +227,7 @@
             disabled={!selectedInstance || gameRunning}
             onclick={() => onlaunch?.(selectedInstance, null)}
           >
-            {gameRunning ? 'GAME RUNNING…' : 'LAUNCH GAME'}
+            {gameRunning ? t('client-game-running') : t('client-launch')}
           </button>
           <p class="mt-2 truncate text-center text-[11px] text-(--text-muted)">
             {gameRunning ? status : selectedLabel}
@@ -233,8 +237,8 @@
         <!-- my favorite servers: user-owned only -->
         <div class="rounded-lg border border-(--border) bg-(--bg-surface) p-5">
           <div class="flex items-center justify-between">
-            <h3 class="text-[11px] font-semibold uppercase tracking-wider text-(--text-muted)">My servers</h3>
-            <span class="text-[10px] text-(--text-muted)">only you decide what lives here</span>
+            <h3 class="text-[11px] font-semibold uppercase tracking-wider text-(--text-muted)">{t('client-my-servers')}</h3>
+            <span class="text-[10px] text-(--text-muted)">{t('client-servers-note')}</span>
           </div>
           {#each pins as pin, i (pin.address)}
             <div class="mt-2 flex items-center gap-2 rounded border border-(--border) bg-(--bg-subtle) px-3 py-2">
@@ -245,32 +249,32 @@
               <button
                 class="rounded bg-(--accent)/15 px-2.5 py-1 text-[11px] font-medium text-(--accent) hover:bg-(--accent)/25 disabled:opacity-40"
                 disabled={!selectedInstance || gameRunning}
-                title={`Join ${pin.address} with ${selectedLabel}`}
-                onclick={() => quickJoin(pin)}>Join</button
+                title={t('client-join-title', { address: pin.address, instance: selectedLabel })}
+                onclick={() => quickJoin(pin)}>{t('client-join')}</button
               >
               <button
                 class="rounded px-1.5 py-1 text-[11px] text-(--text-muted) hover:bg-red-500/10 hover:text-red-400"
-                title="Remove from my servers"
+                title={t('client-remove-pin')}
                 onclick={() => removePin(i)}>✕</button
               >
             </div>
           {:else}
-            <p class="mt-2 text-[12px] text-(--text-muted)">No pinned servers yet — add one below.</p>
+            <p class="mt-2 text-[12px] text-(--text-muted)">{t('client-no-pins')}</p>
           {/each}
           <form class="mt-3 flex flex-wrap gap-2" onsubmit={addPin}>
             <input
               class="h-8 w-32 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-              placeholder="Name"
+              placeholder={t('client-pin-name')}
               bind:value={pinName}
             />
             <input
               class="h-8 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-              placeholder="host.or.ip[:port]"
+              placeholder={t('client-pin-address')}
               bind:value={pinAddress}
             />
             <button
               type="submit"
-              class="rounded border border-(--border) px-3 py-1.5 text-[12px] hover:bg-(--bg-subtle)">＋ Pin</button
+              class="rounded border border-(--border) px-3 py-1.5 text-[12px] hover:bg-(--bg-subtle)">＋ {t('client-pin')}</button
             >
           </form>
           {#if pinError}

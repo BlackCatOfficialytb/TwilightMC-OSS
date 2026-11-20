@@ -1,5 +1,6 @@
 <script>
   import InstanceCard from './InstanceCard.svelte';
+  import { t } from './i18n.svelte.ts';
 
   // The responsive instance grid: cards fed by `scan_instances`, plus the
   // Prism-inspired empty states (search no-match and first-run welcome).
@@ -23,7 +24,7 @@
   } = $props();
 </script>
 
-<div class="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-3" role="listbox" aria-label="Instances">
+<div class="grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-3" role="listbox" aria-label={t('grid-aria')}>
   {#each instances as inst (inst.id)}
     <InstanceCard
       instance={inst}
@@ -47,18 +48,18 @@
       </div>
     {:else if query.trim()}
       <div class="col-span-full rounded border border-dashed border-(--border) bg-(--bg-subtle) p-6 text-center text-[12px] text-(--text-muted)">
-        No instances match "{query.trim()}".
+        {t('grid-no-match', { query: query.trim() })}
       </div>
     {:else}
       <div class="col-span-full flex flex-col items-center gap-3 rounded border border-dashed border-(--border) bg-(--bg-subtle) p-10 text-center">
         <img src="/logo.png" alt="" draggable="false" class="h-14 w-14 opacity-40" />
-        <p class="text-[13px] font-medium">No instances yet</p>
-        <p class="text-[12px] text-(--text-muted)">Create one from a version list, or drop a .mrpack / .twpack into the wizard.</p>
+        <p class="text-[13px] font-medium">{t('grid-empty-title')}</p>
+        <p class="text-[12px] text-(--text-muted)">{t('grid-empty-body')}</p>
         <button
           class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
           onclick={() => onadd?.()}
         >
-          ＋ Add Instance
+          ＋ {t('grid-add')}
         </button>
       </div>
     {/if}

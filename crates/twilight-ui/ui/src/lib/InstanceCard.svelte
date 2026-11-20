@@ -5,6 +5,7 @@
   // bubbles up as callbacks.
   import Twemoji from './Twemoji.svelte';
   import { iconKeyAsset } from './twemoji.js';
+  import { t, formatDate } from './i18n.svelte.ts';
 
   let {
     instance,
@@ -94,7 +95,7 @@
     </div>
     <button
       class="shrink-0 rounded px-1.5 text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-      title="Menu"
+      title={t('instance-menu')}
       onclick={(e) => {
         e.stopPropagation();
         ontogglemenu();
@@ -104,7 +105,7 @@
     </button>
   </div>
   <span class="text-[11px] text-(--text-muted)">
-    {instance.last_played ? new Date(instance.last_played * 1000).toLocaleDateString() : 'Never played'}
+    {instance.last_played ? formatDate(instance.last_played * 1000) : t('instance-never-played')}
   </span>
 
   {#if menuOpen}
@@ -119,7 +120,7 @@
           onplay();
         }}
       >
-        ▶ Play
+        ▶ {t('instance-play')}
       </button>
       <button
         class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--bg-subtle)"
@@ -128,7 +129,7 @@
           onedit();
         }}
       >
-        ✎ Edit Instance
+        ✎ {t('instance-edit')}
       </button>
       <button
         class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--bg-subtle)"
@@ -137,7 +138,7 @@
           onrename?.();
         }}
       >
-        ✎ Rename
+        ✎ {t('action-rename')}
       </button>
       <button
         class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--bg-subtle)"
@@ -146,13 +147,13 @@
           onopenfolder();
         }}
       >
-        <Twemoji emoji="📂" /> Open Folder
+        <Twemoji emoji="📂" /> {t('instance-open-folder')}
       </button>
       <button
         class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--bg-subtle)"
         onclick={onviewlogs}
       >
-        ▤ View Logs
+        ▤ {t('instance-view-logs')}
       </button>
       <div class="my-1 border-t border-(--border)"></div>
       <button
@@ -162,7 +163,7 @@
           ondelete();
         }}
       >
-        ✕ Delete
+        ✕ {t('instance-delete')}
       </button>
     </div>
   {/if}
