@@ -98,6 +98,13 @@ Twemoji tab reuse the same upstream art:
   diamond/creeper/enderman/netherstar/loader-brand set, GPL-3.0, credited to the
   Prism Launcher and MultiMC contributors. Vendored verbatim under
   `public/instance-icons/prism/` so the picker works fully offline.
+- **Extended classic set** — the remaining block, ore, item and mob icons
+  (cobblestone, sand, glass, bookshelf, furnace, chest, portal, coal,
+  redstone, lapis, emerald, apple, sword, pickaxe, zombie, spider, slime,
+  cow, pig, sheep, squid, Alex, …) were drawn for TwilightMC as original
+  16×16 pixel art, matching the scale and palette of the MultiMC classics.
+  They ship under the same AGPL-3.0-or-later license as the rest of the
+  launcher and carry no upstream attribution requirement.
 - **Twemoji instance tab** — the curated gaming/Minecraft subset (crossed swords,
   shield, pickaxe, bow, gem, fire, rocket, crab, star, compass, dragon, …) ships
   from the same CC-BY 4.0 set described above, under `public/twemoji/`.
