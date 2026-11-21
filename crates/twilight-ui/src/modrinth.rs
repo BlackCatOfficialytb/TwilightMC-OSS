@@ -398,6 +398,7 @@ async fn fetch_compatible_version(
 /// installing its `required` dependencies first (recursively, cycle-guarded
 /// via `visited`). Returns every downloaded file name in install order.
 /// AppHandle-free core for hermetic tests.
+#[allow(clippy::too_many_arguments)]
 async fn install_project_with_deps(
     client: &reqwest::Client,
     api_base: &str,
@@ -405,15 +406,29 @@ async fn install_project_with_deps(
     project_id: &str,
     game_version: &str,
     loader: &str,
+    parent: Option<&str>,
     visited: &mut HashSet<String>,
 ) -> Result<Vec<String>, String> {
     validate_project_id(project_id)?;
     if !visited.insert(project_id.to_owned()) {
         return Ok(Vec::new()); // dependency diamond / cycle: already handled
     }
-    let entry = fetch_compatible_version(client, api_base, project_id, game_version, loader)
-        .await?
-        .ok_or_else(|| format!("no compatible version of {project_id} for this build"))?;
+    let entry =
+        match fetch_compatible_version(client, api_base, project_id, game_version, loader).await? {
+            Some(entry) => entry,
+            None => {
+                return Err(incompatible_version_error(
+                    client,
+                    api_base,
+                    project_id,
+                    game_version,
+                    loader,
+                    parent,
+                    None,
+                )
+                .await);
+            }
+        };
 
     // required dependencies install before the main jar; Quilt rewires
     // `fabric-api` to `qfapi` so raw Fabric API jars never land on Quilt
@@ -443,6 +458,7 @@ async fn install_project_with_deps(
                 &dep,
                 game_version,
                 loader,
+                Some(project_id),
                 visited,
             ))
             .await?,
@@ -490,6 +506,7 @@ pub async fn install_mod_with_deps(
         &project_id,
         &game_version,
         &loader,
+        None,
         &mut visited,
     )
     .await
@@ -519,7 +536,7 @@ pub async fn download_modrinth_pack(
         .await
         .map_err(|e| e.to_string())?;
     // loader "" = no loaders facet / pin: packs are loader-agnostic zips
-    let entry = fetch_compatible_version(
+    let entry = match fetch_compatible_version(
         &reqwest::Client::new(),
         API_BASE,
         &project_id,
@@ -527,7 +544,21 @@ pub async fn download_modrinth_pack(
         "",
     )
     .await?
-    .ok_or_else(|| format!("no compatible version of {project_id} for this build"))?;
+    {
+        Some(entry) => entry,
+        None => {
+            return Err(incompatible_version_error(
+                &reqwest::Client::new(),
+                API_BASE,
+                &project_id,
+                game_version.trim(),
+                "",
+                None,
+                None,
+            )
+            .await);
+        }
+    };
     let Some((url, filename, sha1, _size)) = pick_primary_file(&entry, &[".zip"]) else {
         return Err(format!(
             "version {} carries no .zip artifact",
@@ -639,6 +670,49 @@ async fn fetch_project_title(
         .to_owned())
 }
 
+/// Human-readable "no compatible build" error: resolves the project title
+/// (and the parent mod that pulled it in, if any) so users see e.g.
+/// `ModernFix (nmDcB62a)` instead of a bare project id. Best-effort: title
+/// lookups fall back to the id and never mask the original failure.
+async fn incompatible_version_error(
+    client: &reqwest::Client,
+    api_base: &str,
+    project_id: &str,
+    game_version: &str,
+    loader: &str,
+    parent_id: Option<&str>,
+    parent_title: Option<&str>,
+) -> String {
+    let title = fetch_project_title(client, api_base, project_id)
+        .await
+        .unwrap_or_else(|_| project_id.to_owned());
+    let loader = loader.trim();
+    let loader_clause = if loader.is_empty() {
+        String::new()
+    } else {
+        format!(" ({loader})")
+    };
+    let mut message = format!(
+        "No compatible version of {title} ({project_id}) found for Minecraft {}{loader_clause}",
+        game_version.trim()
+    );
+    if parent_id.is_some() || parent_title.is_some() {
+        let parent = match (parent_title, parent_id) {
+            (Some(title), Some(id)) => format!("{title} ({id})"),
+            (Some(title), None) => title.to_owned(),
+            (None, Some(id)) => format!(
+                "{} ({id})",
+                fetch_project_title(client, api_base, id)
+                    .await
+                    .unwrap_or_else(|_| id.to_owned())
+            ),
+            (None, None) => unreachable!(),
+        };
+        message.push_str(&format!(", required by {parent}"));
+    }
+    message
+}
+
 /// Recursively resolves one queued mod plus its required dependencies into
 /// review rows (no downloads). Shared dependencies collect every parent;
 /// `in_progress` guards cycles the same way installs do.
@@ -675,9 +749,23 @@ async fn preview_project_with_deps(
         Some(v) => fetch_version_entry(client, api_base, project_id, v)
             .await?
             .ok_or_else(|| format!("version {v:?} of {project_id} is unavailable"))?,
-        None => fetch_compatible_version(client, api_base, project_id, game_version, loader)
+        None => match fetch_compatible_version(client, api_base, project_id, game_version, loader)
             .await?
-            .ok_or_else(|| format!("no compatible version of {project_id} for this build"))?,
+        {
+            Some(entry) => entry,
+            None => {
+                return Err(incompatible_version_error(
+                    client,
+                    api_base,
+                    project_id,
+                    game_version,
+                    loader,
+                    None,
+                    parent,
+                )
+                .await);
+            }
+        },
     };
     let title = match title {
         Some(t) => t.to_owned(),
@@ -980,6 +1068,7 @@ pub async fn install_cleanroom_core_mods(
                 slug,
                 "1.12.2",
                 "forge",
+                None,
                 &mut HashSet::new(),
             )
             .await?,
@@ -1344,6 +1433,7 @@ mod tests {
             "minecraft-access",
             "1.21.4",
             "fabric",
+            None,
             &mut visited,
         )
         .await
@@ -1400,6 +1490,7 @@ mod tests {
             "minecraft-access",
             "1.21.4",
             "quilt",
+            None,
             &mut visited,
         )
         .await
@@ -1409,6 +1500,45 @@ mod tests {
         assert_eq!(installed, vec!["qfapi.jar", "minecraft-access-quilt.jar"]);
         assert!(dir.join("qfapi.jar").is_file());
         assert!(!dir.join("fabric-api.jar").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn incompatible_install_error_names_title_version_and_parent() {
+        let api = loopback_api(|_base| {
+            vec![
+                // no build of the child mod matches the pinned game version
+                ("/v2/project/child/version", 200, "[]".to_owned()),
+                ("/v2/project/child", 200, r#"{"title":"Child Mod"}"#.to_owned()),
+                (
+                    "/v2/project/parent",
+                    200,
+                    r#"{"title":"Parent Mod"}"#.to_owned(),
+                ),
+            ]
+        });
+        let dir = std::env::temp_dir().join(format!("tw-error-format-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let client = reqwest::Client::new();
+        let mut visited = HashSet::new();
+
+        let err = install_project_with_deps(
+            &client,
+            &api,
+            &dir,
+            "child",
+            "1.21.4",
+            "fabric",
+            Some("parent"),
+            &mut visited,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err.contains("No compatible version of Child Mod (child)"));
+        assert!(err.contains("found for Minecraft 1.21.4 (fabric)"));
+        assert!(err.contains("required by Parent Mod (parent)"));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
