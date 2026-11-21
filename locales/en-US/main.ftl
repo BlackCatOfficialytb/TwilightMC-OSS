@@ -1,7 +1,9 @@
 # TwilightMC launcher — English (US), canonical source and fallback.
 # Keep icon glyphs out of this file: render them from LauncherIcon/Twemoji.
 
+
 ## Common
+
 common-cancel = Cancel
 common-save = Save
 common-close = Close
@@ -30,6 +32,7 @@ backend-unavailable = Tauri backend unavailable in this preview.
 app-document-title = TwilightMC (pre-release UI)
 
 ## Alerts and toasts
+
 alert-title = Alert
 alert-cancel = Cancel
 alert-ok = OK
@@ -46,6 +49,7 @@ toast-shortcut-created = Shortcut created: { $path }
 toast-shortcut-failed = Shortcut failed: { $error }
 
 ## Application shell
+
 app-name = TwilightMC
 app-channel = pre-release UI
 app-version = TwilightMC Bolide (alpha-v{ $version })
@@ -114,6 +118,7 @@ console-kill-requested = kill requested
 console-exit-code = launcher reports exit code { $code }
 
 ## Instance grid and card
+
 grid-aria = Instances
 grid-no-match = No instances match "{ $query }".
 grid-empty-title = No instances yet
@@ -128,13 +133,15 @@ instance-view-logs = View Logs
 instance-delete = Delete
 instance-meta-never = Minecraft { $version }
 instance-meta-played = Minecraft { $version }, last played on { $date }, total played for { $duration }
-instance-mods-count = { $count } { $count ->
-    [one] mod
-   *[other] mods
-  } installed
+instance-mods-count =
+    { $count } { $count ->
+        [one] mod
+       *[other] mods
+    } installed
 instance-name = Instance name
 
 ## Instance context panel
+
 ctx-aria = Selected instance details
 ctx-close-title = Close panel (Esc)
 ctx-close-aria = Clear selection and close the instance panel
@@ -169,20 +176,25 @@ action-shortcut = Create Shortcut
 action-rename = Rename
 
 ## Durations (Fluent plural selectors)
-duration-hours = { $hours ->
-    [one] { $hours } hour
-   *[other] { $hours } hours
-  }
-duration-minutes = { $minutes ->
-    [one] { $minutes } minute
-   *[other] { $minutes } minutes
-  }
-duration-seconds = { $seconds ->
-    [one] { $seconds } second
-   *[other] { $seconds } seconds
-  }
+
+duration-hours =
+    { $hours ->
+        [one] { $hours } hour
+       *[other] { $hours } hours
+    }
+duration-minutes =
+    { $minutes ->
+        [one] { $minutes } minute
+       *[other] { $minutes } minutes
+    }
+duration-seconds =
+    { $seconds ->
+        [one] { $seconds } second
+       *[other] { $seconds } seconds
+    }
 
 ## Client mode
+
 client-no-account = No account selected
 client-no-account-body = Pick or create an account to see your character here.
 client-open-accounts = Open account manager
@@ -211,6 +223,7 @@ client-pin = Pin
 client-pin-invalid = Address must be a hostname (optionally host:port).
 
 ## Accounts
+
 accounts-overview = Overview
 accounts-add = Add Account
 accounts-saved = Saved Accounts
@@ -259,6 +272,7 @@ choose-cape = Choose a cape PNG
 filter-png-textures = PNG textures
 
 ## Sign in
+
 signin-tab-offline = Offline
 signin-tab-elyby = Ely.by
 signin-tab-microsoft = Microsoft
@@ -299,6 +313,7 @@ signin-add-custom = Add custom account
 signin-custom-note = The launcher auto-fetches the SHA-256 verified authlib-injector agent into <shared>/libraries/ on the next launch of this account.
 
 ## Settings
+
 settings-sections-aria = Settings sections
 settings-back-title = Back to the instance library
 settings-appearance = Appearance
@@ -488,6 +503,7 @@ settings-kofi = Support on Ko-fi
 settings-about-footer = An open-source Minecraft launcher. Vanilla, Fabric and Quilt today; more loaders land in later milestones.
 
 ## Edit instance
+
 edit-sections-aria = Instance sections
 edit-back = Back to Instances
 edit-components = Version Components
@@ -594,15 +610,17 @@ edit-export-twpack = Export .twpack
 edit-cleanroom-title = Warning (Advanced Users)
 edit-cleanroom-body = CleanroomMC runs 1.12.2 on modern Java (21+). Do NOT use it unless you understand how it works — it is prone to crashes and only a limited subset of Forge mods support it.
 edit-future = Renaming, loader switching and per-instance java overrides land in a later milestone; use the context panel for groups and copies.
-edit-assist-missing = { $mods } { $count ->
-    [one] is
-   *[other] are
-  } not installed yet — recommended for your accessibility profile. Required dependencies (e.g. Fabric API) install automatically.
+edit-assist-missing =
+    { $mods } { $count ->
+        [one] is
+       *[other] are
+    } not installed yet — recommended for your accessibility profile. Required dependencies (e.g. Fabric API) install automatically.
 edit-assist-install = Install Recommended Accessibility Mods
 edit-assist-installing = Installing…
 edit-assist-installed = Accessibility mods installed.
 
 ## New instance wizard
+
 wizard-type-releases = Releases
 wizard-type-snapshots = Snapshots
 wizard-type-betas = Betas
@@ -684,6 +702,7 @@ assist-visible-sound-hint = In-world block/entity sound highlights
 assist-soundsight-hint = Visual threat ring & enhanced subtitles
 
 ## Modrinth browser
+
 modrinth-title = Browse & Download Mods
 modrinth-subtitle = Modrinth · { $instance } · MC { $version }{ $loader }
 modrinth-categories = Categories
@@ -714,10 +733,11 @@ modrinth-loading-versions = Loading versions…
 modrinth-latest = Latest ({ $version })
 modrinth-latest-compatible = Latest compatible
 modrinth-no-mods = No mods selected
-modrinth-selected = { $count } { $count ->
-    [one] mod
-   *[other] mods
-  } selected
+modrinth-selected =
+    { $count } { $count ->
+        [one] mod
+       *[other] mods
+    } selected
 modrinth-clear = Clear
 modrinth-review = Review and Confirm…
 modrinth-review-title = Stages every queued mod plus its required dependencies for confirmation
@@ -751,6 +771,7 @@ modrinth-category-transportation = Transportation
 modrinth-category-game-mechanics = Game mechanics
 
 ## Mod download review
+
 review-title = Confirm download
 review-desc = You're about to download the following mods — only rows with a check will be downloaded.
 review-resolving = Resolving mods and their dependencies…
@@ -763,22 +784,25 @@ review-required-by = required by { $mods }
 review-already-installed = already installed
 review-selection = your selection
 review-empty = The queue is empty.
-review-downloading = Downloading { $count } { $count ->
-    [one] file
-   *[other] files
-  }…
+review-downloading =
+    Downloading { $count } { $count ->
+        [one] file
+       *[other] files
+    }…
 review-will-download = { $selected } of { $total } rows will download
 review-back = Back
 review-confirm = Confirm & Download
 review-confirm-button = Downloading…
 review-confirm-title = Downloads every checked file (SHA-1 verified) into this instance's mods folder
-review-downloaded = Downloaded { $count } { $count ->
-    [one] mod file
-   *[other] mod files
-  }.
+review-downloaded =
+    Downloaded { $count } { $count ->
+        [one] mod file
+       *[other] mod files
+    }.
 review-download-failed = Download failed: { $error }
 
 ## Pack install modals
+
 install-title = Install Modpack
 install-reading = Reading pack…
 install-instance-name = Instance name
@@ -798,6 +822,7 @@ twpack-import-title = Validates every archive path, then extracts into a new ins
 twpack-entries = { $count } entries
 
 ## Icon picker
+
 icons-title = Instance icon
 icons-close = Close
 icons-close-aria = Close icon picker
@@ -811,6 +836,7 @@ icons-copying = Copying…
 icons-choose-file = Choose file…
 
 ## Accent picker
+
 accent-builtin = built-in
 accent-preset-title = { $name } accent
 accent-preset-aria = { $name } accent color
@@ -820,11 +846,13 @@ accent-invalid = invalid hex
 accent-live = live preview
 
 ## 3D skin viewer
+
 skin-3d-unavailable = 3D preview unavailable
 skin-outer-toggle = Toggle the hat/jacket outer layer
 skin-outer = Outer layer: { $state }
 
 ## Servers
+
 servers-title = Servers & P2P
 servers-new = New Server
 servers-scanning = Scanning servers…
@@ -875,7 +903,6 @@ server-connect-remove = Remove Connect
 server-connect-enabled-toast = Minekube Connect enabled — the plugin installs on the next server start.
 server-connect-disabled-toast = Minekube Connect disabled.
 server-connect-removed = Minekube Connect plugin removed.
-
 # server control panel
 servers-manage = Manage
 server-tab-console = Console
@@ -937,6 +964,7 @@ server-backups-delete-confirm = Delete { $name }?
 server-network-connect-desc = Minekube Connect gives this server a public share address. Enable it in the creation wizard.
 
 ## New server wizard
+
 newserver-title = New Server
 newserver-aria = New server
 newserver-step1 = Pick the server software.
@@ -974,6 +1002,7 @@ software-neoforge-note = Mod loader, auto-installer
 software-steel-note = Native server, auto-download
 
 ## BareBones gate
+
 barebones-title = BareBones Template required
 barebones-aria = BareBones Template required
 barebones-message = CleanroomMC requires the BareBones Template (Cleanroom) mods (Fugue, MixinBooter, ConfigAnytime, Scalar Legacy) to boot 1.12.2 safely.
@@ -986,23 +1015,27 @@ barebones-open-note = Download the zip there, then import it above
 barebones-scalar = Scalar Legacy is CurseForge-only: the 1-click install covers the other three and the gate passes without it.
 barebones-close = Close
 barebones-launch = Launch 1.12.2
-barebones-installed = Installed { $count } { $count ->
-    [one] core mod
-   *[other] core mods
-  }: Fugue, MixinBooter, ConfigAnytime.
+barebones-installed =
+    Installed { $count } { $count ->
+        [one] core mod
+       *[other] core mods
+    }: Fugue, MixinBooter, ConfigAnytime.
 barebones-scalar-note = Scalar Legacy is CurseForge-only and was skipped — the gate is satisfied without it. Import the full BareBones zip if you want it too.
-barebones-imported = Imported { $name } { $version }: { $count } { $count ->
-    [one] override file
-   *[other] override files
-  }.
-barebones-skipped = { $count } { $count ->
-    [one] listed mod file was
-   *[other] listed mod files were
-  } not downloaded — add a CurseForge API key in Settings > API Keys to fetch them automatically.
+barebones-imported =
+    Imported { $name } { $version }: { $count } { $count ->
+        [one] override file
+       *[other] override files
+    }.
+barebones-skipped =
+    { $count } { $count ->
+        [one] listed mod file was
+       *[other] listed mod files were
+    } not downloaded — add a CurseForge API key in Settings > API Keys to fetch them automatically.
 barebones-import-filter = CurseForge modpack
 barebones-import-title = Import a CurseForge modpack zip
 
 ## Install prompts
+
 install-modpack-title = Install Modpack
 install-modpack-drop = Drop an .mrpack or .twpack here
 install-modpack-or-paste = or paste its path / URL below

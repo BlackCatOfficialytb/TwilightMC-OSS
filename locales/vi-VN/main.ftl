@@ -1,14 +1,15 @@
-# TwilightMC launcher — Tiếng Việt (vi-VN).
-# Không đặt biểu tượng/emoji trong tệp này: biểu tượng do LauncherIcon/Twemoji đảm nhiệm.
-# Status: Fuzzy / In progress — pending Crowdin review.
+# TwilightMC launcher — English (US), canonical source and fallback.
+# Keep icon glyphs out of this file: render them from LauncherIcon/Twemoji.
 
-## Dùng chung
+
+## Common
+
 common-cancel = Hủy
-common-restore = Khôi phục
 common-save = Lưu
 common-close = Đóng
 common-open = Mở
 common-reset = Đặt lại
+common-restore = Khôi phục
 common-delete = Xóa
 common-clear = Xóa hết
 common-copy = Sao chép
@@ -30,7 +31,8 @@ common-ok = OK
 backend-unavailable = Máy chủ Tauri không khả dụng trong bản xem trước này.
 app-document-title = TwilightMC (giao diện tiền phát hành)
 
-## Hộp thoại và thông báo
+## Alerts and toasts
+
 alert-title = Thông báo
 alert-cancel = Hủy
 alert-ok = OK
@@ -46,7 +48,8 @@ toast-export-failed = Xuất thất bại: { $error }
 toast-shortcut-created = Đã tạo lối tắt: { $path }
 toast-shortcut-failed = Tạo lối tắt thất bại: { $error }
 
-## Khung ứng dụng
+## Application shell
+
 app-name = TwilightMC
 app-channel = giao diện tiền phát hành
 app-version = TwilightMC Bolide (alpha-v{ $version })
@@ -114,7 +117,8 @@ console-empty = Nhật ký trò chơi sẽ xuất hiện ở đây sau khi bạn
 console-kill-requested = đã yêu cầu dừng
 console-exit-code = launcher báo mã thoát { $code }
 
-## Lưới và thẻ bản cài
+## Instance grid and card
+
 grid-aria = Bản cài
 grid-no-match = Không có bản cài nào khớp với "{ $query }".
 grid-empty-title = Chưa có bản cài
@@ -132,7 +136,8 @@ instance-meta-played = Minecraft { $version }, chơi lần cuối vào { $date }
 instance-mods-count = Đã cài { $count } mod
 instance-name = Tên bản cài
 
-## Bảng chi tiết bản cài
+## Instance context panel
+
 ctx-aria = Chi tiết bản cài đang chọn
 ctx-close-title = Đóng bảng (Esc)
 ctx-close-aria = Bỏ chọn và đóng bảng bản cài
@@ -166,12 +171,14 @@ action-delete = Xóa
 action-shortcut = Tạo lối tắt
 action-rename = Đổi tên
 
-## Thời lượng (bộ chọn số nhiều của Fluent)
+## Durations (Fluent plural selectors)
+
 duration-hours = { $hours } giờ
 duration-minutes = { $minutes } phút
 duration-seconds = { $seconds } giây
 
-## Chế độ Client
+## Client mode
+
 client-no-account = Chưa chọn tài khoản
 client-no-account-body = Chọn hoặc tạo tài khoản để xem nhân vật của bạn tại đây.
 client-open-accounts = Mở trình quản lý tài khoản
@@ -199,7 +206,8 @@ client-pin-address = host.or.ip[:port]
 client-pin = Ghim
 client-pin-invalid = Địa chỉ phải là hostname (tùy chọn host:port).
 
-## Tài khoản
+## Accounts
+
 accounts-overview = Tổng quan
 accounts-add = Thêm tài khoản
 accounts-saved = Tài khoản đã lưu
@@ -247,7 +255,8 @@ choose-skin = Chọn tệp PNG skin
 choose-cape = Chọn tệp PNG cape
 filter-png-textures = Tệp kết cấu PNG
 
-## Đăng nhập
+## Sign in
+
 signin-tab-offline = Offline
 signin-tab-elyby = Ely.by
 signin-tab-microsoft = Microsoft
@@ -287,7 +296,8 @@ signin-cape-png = PNG cape:
 signin-add-custom = Thêm tài khoản tùy chỉnh
 signin-custom-note = Trình khởi chạy tự tải tác nhân authlib-injector đã xác minh SHA-256 vào <shared>/libraries/ trong lần khởi chạy tiếp theo của tài khoản này.
 
-## Cài đặt
+## Settings
+
 settings-sections-aria = Các mục cài đặt
 settings-back-title = Quay lại thư viện bản cài
 settings-appearance = Giao diện
@@ -473,12 +483,11 @@ settings-about-channel = giao diện tiền phát hành · kênh Bolide (bản a
 settings-github = Kho GitHub
 settings-releases = Bản phát hành (bản ổn định)
 settings-report = Báo lỗi
-
 settings-kofi = Ủng hộ trên Ko-fi
-
 settings-about-footer = Trình khởi chạy Minecraft mã nguồn mở. Hiện hỗ trợ Vanilla, Fabric và Quilt; nhiều loader khác sẽ có trong các cột mốc sau.
 
-## Chỉnh sửa bản cài
+## Edit instance
+
 edit-sections-aria = Các mục của bản cài
 edit-back = Quay lại Bản cài
 edit-components = Thành phần phiên bản
@@ -585,12 +594,17 @@ edit-export-twpack = Xuất .twpack
 edit-cleanroom-title = Cảnh báo (Người dùng nâng cao)
 edit-cleanroom-body = CleanroomMC chạy 1.12.2 trên Java hiện đại (21+). KHÔNG dùng trừ khi bạn hiểu rõ cách hoạt động — nó dễ gặp lỗi và chỉ một tập nhỏ mod Forge hỗ trợ nó.
 edit-future = Đổi tên, chuyển loader và ghi đè Java riêng cho từng bản cài sẽ có trong cột mốc sau; hãy dùng bảng chi tiết để quản lý nhóm và bản sao.
-edit-assist-missing = { $mods } chưa được cài — được khuyến nghị cho hồ sơ trợ năng của bạn. Các phụ thuộc bắt buộc (ví dụ Fabric API) sẽ được cài tự động.
+edit-assist-missing =
+    { $mods } { $count ->
+        [one] is
+       *[other] are
+    } not installed yet — recommended for your accessibility profile. Required dependencies (e.g. Fabric API) install automatically.
 edit-assist-install = Cài các mod trợ năng được khuyến nghị
 edit-assist-installing = Đang cài…
 edit-assist-installed = Đã cài các mod trợ năng.
 
-## Trình hướng dẫn tạo bản cài
+## New instance wizard
+
 wizard-type-releases = Bản phát hành
 wizard-type-snapshots = Snapshot
 wizard-type-betas = Beta
@@ -671,7 +685,8 @@ assist-subtitles-hint = Dấu phụ đề định hướng trong thế giới
 assist-visible-sound-hint = Đánh dấu âm thanh khối/thực thể trong thế giới
 assist-soundsight-hint = Vòng cảnh báo trực quan & phụ đề nâng cao
 
-## Trình duyệt Modrinth
+## Modrinth browser
+
 modrinth-title = Duyệt & Tải mod
 modrinth-subtitle = Modrinth · { $instance } · MC { $version }{ $loader }
 modrinth-categories = Danh mục
@@ -735,7 +750,8 @@ modrinth-category-storage = Lưu trữ
 modrinth-category-transportation = Giao thông
 modrinth-category-game-mechanics = Cơ chế trò chơi
 
-## Xem lại tải mod
+## Mod download review
+
 review-title = Xác nhận tải xuống
 review-desc = Bạn sắp tải các mod sau — chỉ những dòng được đánh dấu mới được tải.
 review-resolving = Đang giải quyết mod và các phụ thuộc…
@@ -757,7 +773,8 @@ review-confirm-title = Tải mọi tệp được đánh dấu (xác minh SHA-1)
 review-downloaded = Đã tải { $count } tệp mod.
 review-download-failed = Tải xuống thất bại: { $error }
 
-## Hộp thoại cài gói
+## Pack install modals
+
 install-title = Cài modpack
 install-reading = Đang đọc gói…
 install-instance-name = Tên bản cài
@@ -776,7 +793,8 @@ twpack-import = Nhập .twpack
 twpack-import-title = Kiểm tra mọi đường dẫn trong kho lưu trữ rồi giải nén vào bản cài mới
 twpack-entries = { $count } mục
 
-## Bộ chọn biểu tượng
+## Icon picker
+
 icons-title = Biểu tượng bản cài
 icons-close = Đóng
 icons-close-aria = Đóng bộ chọn biểu tượng
@@ -789,7 +807,8 @@ icons-custom-desc = Chọn tệp PNG, JPG, SVG, WEBP hoặc ICO từ ổ đĩa. 
 icons-copying = Đang sao chép…
 icons-choose-file = Chọn tệp…
 
-## Bộ chọn màu nhấn
+## Accent picker
+
 accent-builtin = có sẵn
 accent-preset-title = Màu nhấn { $name }
 accent-preset-aria = Màu nhấn { $name }
@@ -798,12 +817,14 @@ accent-hex = Giá trị hex của màu nhấn
 accent-invalid = hex không hợp lệ
 accent-live = xem trước trực tiếp
 
-## Trình xem skin 3D
+## 3D skin viewer
+
 skin-3d-unavailable = Không thể xem trước 3D
 skin-outer-toggle = Bật/tắt lớp ngoài mũ/áo khoác
 skin-outer = Lớp ngoài: { $state }
 
-## Máy chủ
+## Servers
+
 servers-title = Máy chủ & P2P
 servers-new = Máy chủ mới
 servers-scanning = Đang quét máy chủ…
@@ -854,7 +875,6 @@ server-connect-remove = Gỡ Connect
 server-connect-enabled-toast = Đã bật Minekube Connect — plugin sẽ được cài khi khởi động máy chủ lần tới.
 server-connect-disabled-toast = Đã tắt Minekube Connect.
 server-connect-removed = Đã gỡ plugin Minekube Connect.
-
 # server control panel
 servers-manage = Quản lý
 server-tab-console = Bảng điều khiển
@@ -915,7 +935,8 @@ server-backups-restored = Đã khôi phục bản sao lưu — khởi động l�
 server-backups-delete-confirm = Xóa { $name }?
 server-network-connect-desc = Minekube Connect cấp cho máy chủ một địa chỉ chia sẻ công khai. Bật tính năng này trong trình hướng dẫn tạo máy chủ.
 
-## Trình hướng dẫn tạo máy chủ
+## New server wizard
+
 newserver-title = Máy chủ mới
 newserver-aria = Máy chủ mới
 newserver-step1 = Chọn phần mềm máy chủ.
@@ -952,7 +973,8 @@ software-forge-note = Bộ tải mod — tự động cài đặt
 software-neoforge-note = Bộ tải mod, tự động cài đặt
 software-steel-note = Máy chủ native, tự động tải xuống
 
-## Cổng BareBones
+## BareBones gate
+
 barebones-title = Cần BareBones Template
 barebones-aria = Cần BareBones Template
 barebones-message = CleanroomMC cần các mod BareBones Template (Cleanroom) (Fugue, MixinBooter, ConfigAnytime, Scalar Legacy) để khởi động 1.12.2 an toàn.
@@ -972,7 +994,8 @@ barebones-skipped = { $count } tệp mod trong danh sách không được tải 
 barebones-import-filter = Modpack CurseForge
 barebones-import-title = Nhập tệp zip modpack CurseForge
 
-## Lời nhắc cài đặt
+## Install prompts
+
 install-modpack-title = Cài modpack
 install-modpack-drop = Kéo thả tệp .mrpack hoặc .twpack vào đây
 install-modpack-or-paste = hoặc dán đường dẫn / URL bên dưới
