@@ -880,7 +880,7 @@
     <main class="min-w-0 flex-1 overflow-y-auto p-6">
       {#if currentView === 'accounts'}
         <!-- dedicated accounts page: shows in both launcher and client modes -->
-        <AccountsPage onback={() => (active = 'instances')} />
+        <AccountsPage onback={() => (active = 'instances')} onrefresh={refreshAccounts} />
       {:else if mode === 'client'}
         <!-- client dashboard: minimal quick-launch hub -->
         <ClientModePage

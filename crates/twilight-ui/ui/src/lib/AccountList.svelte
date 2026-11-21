@@ -8,6 +8,7 @@
   import SkinViewer3D from './SkinViewer3D.svelte';
   import SkinFace from './SkinFace.svelte';
   import { skinSource } from './accounts.svelte.js';
+  import { confirmAlert, toast } from './alerts.svelte.js';
   import { t } from './i18n.svelte.ts';
 
   let { accounts = [], active = null, onrefresh } = $props();
@@ -40,14 +41,22 @@
     }
   }
 
-  async function removeAccount(id) {
+  async function removeAccount(account) {
+    const confirmed = await confirmAlert({
+      title: t('accounts-remove-confirm-title', { name: account.username }),
+      message: t('accounts-remove-confirm'),
+      confirmText: t('account-remove'),
+    });
+    if (!confirmed) return;
     error = '';
     try {
-      await invoke('remove_account', { id });
-      if (editingId === id) editingId = null;
+      await invoke('remove_account', { id: account.id });
+      if (editingId === account.id) editingId = null;
       await onrefresh?.();
+      toast(t('accounts-removed'), 'success');
     } catch (e) {
       error = String(e);
+      toast(String(e), 'error');
     }
   }
 
@@ -189,7 +198,7 @@
           {/if}
           <button
             class="rounded px-2 py-1 text-[11px] text-(--text-muted) hover:bg-red-500/10 hover:text-red-400"
-            onclick={() => removeAccount(account.id)}>{t('account-remove')}</button
+            onclick={() => removeAccount(account)}>{t('account-remove')}</button
           >
         </div>
       </div>
