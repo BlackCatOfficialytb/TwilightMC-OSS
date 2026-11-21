@@ -4,6 +4,7 @@
   // plus a playtime/version footer. The parent owns selection; actions
   // bubble up as callbacks.
   import LauncherIcon from './LauncherIcon.svelte';
+  import InstanceIconPicker from './InstanceIconPicker.svelte';
   import { iconKeyAsset } from './twemoji.js';
   import { t, formatDate, formatDuration } from './i18n.svelte.ts';
 
@@ -31,6 +32,8 @@
   let newGroup = $state('');
   let renaming = $state(false);
   let draftName = $state('');
+  let iconPickerOpen = $state(false);
+  let iconNotice = $state('');
 
   function startRename() {
     draftName = instance.name;
@@ -73,6 +76,39 @@
     return instance.icon_path && convert ? convert(instance.icon_path) : '/logo.png';
   }
 
+  async function applyIconKey(key) {
+    iconNotice = '';
+    try {
+      await window.__TAURI__.core.invoke('set_instance_icon_key', {
+        instanceId: instance.id,
+        iconKey: key,
+      });
+      instance.icon_key = key;
+      instance.icon_path = null;
+    } catch (e) {
+      iconNotice = String(e);
+    }
+  }
+
+  async function applyCustomIcon() {
+    iconNotice = '';
+    const open = window.__TAURI__?.dialog?.open;
+    if (!open) throw new Error(t('status-file-picker-unavailable'));
+    const picked = await open({
+      multiple: false,
+      title: t('ctx-change-icon-title'),
+      filters: [{ name: t('filter-images'), extensions: ['png', 'jpg', 'jpeg', 'webp', 'ico'] }],
+    });
+    if (!picked) return null;
+    const path = await window.__TAURI__.core.invoke('set_instance_icon', {
+      instanceId: instance.id,
+      imagePath: String(picked),
+    });
+    instance.icon_key = null;
+    instance.icon_path = path;
+    return path;
+  }
+
   function instancePath() {
     if (!storage) return instance.id;
     return [storage.instances_dir.replace(/\\/g, '/'), instance.id].join('/');
@@ -103,7 +139,13 @@
   aria-label={t('ctx-aria')}
 >
   <div class="flex items-start justify-between gap-2">
-    <span class="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-(--accent)/15">
+    <button
+      type="button"
+      class="group/icon relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-transparent bg-(--accent)/15 transition-colors hover:border-(--accent) focus-visible:border-(--accent) focus-visible:outline-none"
+      title={t('ctx-change-icon-title')}
+      aria-label={t('ctx-change-icon-aria')}
+      onclick={() => (iconPickerOpen = true)}
+    >
       <img
         src={iconSrc()}
         alt=""
@@ -116,7 +158,11 @@
           }
         }}
       />
-    </span>
+      <span
+        class="absolute inset-0 flex items-center justify-center bg-black/55 text-[15px] text-white opacity-0 transition-opacity group-hover/icon:opacity-100"
+        aria-hidden="true">✎</span
+      >
+    </button>
     <button
       type="button"
       class="rounded p-1 text-[13px] leading-none text-(--text-muted) transition-colors hover:bg-(--bg-subtle) hover:text-(--text-main) focus-visible:ring-1 focus-visible:ring-(--accent) focus-visible:outline-none"
@@ -127,6 +173,9 @@
       ✕
     </button>
   </div>
+  {#if iconNotice}
+    <p role="alert" class="mt-1.5 text-[10.5px] text-rose-400">{iconNotice}</p>
+  {/if}
   <h3 class="mt-2.5 truncate text-[14px] font-semibold" title={instance.name}>
     {#if renaming}
       <input
@@ -287,3 +336,16 @@
     <p class="mt-1 text-[10.5px] text-(--text-muted)">{modsCount == null ? '…' : t('instance-mods-count', { count: modsCount })}</p>
   </div>
 </aside>
+
+{#if iconPickerOpen}
+  <InstanceIconPicker
+    currentKey={instance.icon_key ?? ''}
+    currentPath={instance.icon_path ?? ''}
+    onpick={(key) => {
+      applyIconKey(key);
+      iconPickerOpen = false;
+    }}
+    oncustom={applyCustomIcon}
+    onclose={() => (iconPickerOpen = false)}
+  />
+{/if}

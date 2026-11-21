@@ -1165,6 +1165,15 @@
       {blindMode}
       {deafMode}
       onclose={() => (wizardOpen = false)}
+      onimport={(path) => {
+        wizardOpen = false;
+        if (path.endsWith('.mrpack')) mrpackFor = path;
+        else if (path.endsWith('.twpack')) twpackFor = path;
+        else {
+          modpackOpen = true;
+          modpackTarget = path;
+        }
+      }}
       oncreated={onWizardCreated}
     />
   {/if}

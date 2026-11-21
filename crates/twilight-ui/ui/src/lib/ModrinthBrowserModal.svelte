@@ -19,6 +19,15 @@
   // dependencies) and the details column installs the pack zip directly.
   const isPack = $derived(projectType === 'resourcepack' || projectType === 'shader');
 
+  // CurseForge v1 project classes: 6 = mods, 12 = resource packs, 6552 = shaders.
+  const CF_CLASS_IDS = { mod: 6, resourcepack: 12, shader: 6552 };
+  const cfClassId = $derived(CF_CLASS_IDS[isPack ? projectType : 'mod']);
+
+  // Dynamic search prompt per platform + kind ("Search CurseForge shaders...").
+  const searchPlaceholder = $derived(
+    t(`browser-search-${source}-${isPack ? projectType : 'mod'}`),
+  );
+
   // ---- source: Modrinth (default) or CurseForge ----
   // CurseForge search needs the personal API key from Settings; blocked
   // files (no distribution URL) fall back to "Open in Browser" + manual
@@ -136,6 +145,7 @@
           query: q,
           gameVersion: instance.minecraft_version,
           loader: loaderTag,
+          classId: cfClassId,
         })
           .then((rows) => {
             if (id === seq) {
@@ -208,14 +218,23 @@
     }
     cfInstalling = true;
     try {
-      const name = await invoke('install_curseforge_mod', {
-        instanceId: instance.id,
-        downloadUrl: row.download_url,
-        fileName: row.file_name,
-        sha1: row.sha1 || null,
-      });
+      const name = isPack
+        ? await invoke('install_curseforge_pack', {
+            instanceId: instance.id,
+            downloadUrl: row.download_url,
+            fileName: row.file_name,
+            sha1: row.sha1 || null,
+            projectType,
+          })
+        : await invoke('install_curseforge_mod', {
+            instanceId: instance.id,
+            downloadUrl: row.download_url,
+            fileName: row.file_name,
+            sha1: row.sha1 || null,
+          });
       installedNames = [...installedNames, name.toLowerCase()];
-      toast(t('curseforge-installed', { name }), 'success');
+      toast(t(isPack ? 'packs-downloaded' : 'curseforge-installed', { name }), 'success');
+      oninstalled?.(name);
     } catch (e) {
       toast(String(e), 'error');
     } finally {
@@ -364,17 +383,15 @@
         >
           Modrinth
         </button>
-        {#if !isPack}
-          <button
-            class="rounded px-3 py-2 text-left text-(--step-card) font-medium {source === 'curseforge'
-              ? 'bg-(--accent-1) text-(--on-accent)'
-              : 'text-(--fg-1) hover:bg-(--bg-2)'}"
-            aria-pressed={source === 'curseforge'}
-            onclick={() => switchSource('curseforge')}
-          >
-            CurseForge
-          </button>
-        {/if}
+        <button
+          class="rounded px-3 py-2 text-left text-(--step-card) font-medium {source === 'curseforge'
+            ? 'bg-(--accent-1) text-(--on-accent)'
+            : 'text-(--fg-1) hover:bg-(--bg-2)'}"
+          aria-pressed={source === 'curseforge'}
+          onclick={() => switchSource('curseforge')}
+        >
+          CurseForge
+        </button>
       </aside>
 
       <!-- main column: top bar / split body / footer -->
@@ -394,7 +411,7 @@
           {/if}
           <input
             class="h-9 min-w-0 flex-1 rounded border border-(--border-1) bg-(--bg-3) px-3 text-(--step-card) text-(--fg-1) outline-none placeholder:text-(--fg-2) focus:border-(--accent-1)"
-            placeholder={t('modrinth-search')}
+            placeholder={searchPlaceholder}
             bind:value={query}
           />
         </div>
@@ -564,10 +581,11 @@
                   <button
                     class="flex w-full items-center justify-center gap-1.5 rounded bg-(--accent-1) px-4 py-1.5 text-(--step-body) font-medium text-(--on-accent) hover:bg-(--accent-1-hover) disabled:opacity-40"
                     disabled={cfInstalling}
-                    title={t('curseforge-install')}
+                    title={isPack ? t('packs-download-title') : t('curseforge-install')}
                     onclick={() => installCurse(selected)}
                   >
-                    <LauncherIcon name="download" size={13} /> {t('curseforge-install')}
+                    <LauncherIcon name="download" size={13} />
+                    {isPack ? t('packs-download') : t('curseforge-install')}
                   </button>
                 </div>
               {:else}

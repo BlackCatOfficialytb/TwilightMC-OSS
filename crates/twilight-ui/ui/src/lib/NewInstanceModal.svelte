@@ -9,7 +9,21 @@
   import InstanceIconPicker from './InstanceIconPicker.svelte';
   import { t } from './i18n.svelte.ts';
 
-  let { groups = [], blindMode = false, deafMode = false, onclose, oncreated } = $props();
+  let { groups = [], blindMode = false, deafMode = false, onimport, onclose, oncreated } = $props();
+
+  // Freesm/Prism platform rail: Custom is the live builder; Import hands the
+  // picked archive to the host (mrpack/twpack/CurseForge zip); the pack
+  // sources are announced but not wired yet.
+  const PLATFORMS = [
+    { id: 'custom', label: 'wizard-custom', enabled: true },
+    { id: 'import', label: 'wizard-import', enabled: true },
+    { id: 'atlauncher', label: 'ATLauncher', enabled: false },
+    { id: 'curseforge', label: 'CurseForge', enabled: false },
+    { id: 'ftb', label: 'FTB', enabled: false },
+    { id: 'modrinth', label: 'Modrinth', enabled: false },
+    { id: 'technic', label: 'Technic', enabled: false },
+  ];
+  let platform = $state('custom');
 
   const TYPE_FILTERS = [
     { id: 'release', label: 'wizard-type-releases' },
@@ -20,16 +34,21 @@
   ];
 
   const LOADERS = [
-    { id: '', label: 'None' },
-    { id: 'horizon', label: 'Horizon (Rust)' },
-    { id: 'neoforge', label: 'NeoForge' },
+    { id: '', label: 'wizard-loader-none-label' },
+    { id: 'neoforge', label: 'wizard-loader-neoforge' },
     { id: 'forge', label: 'Forge' },
-    { id: 'cleanroom', label: 'Cleanroom' },
     { id: 'fabric', label: 'Fabric' },
-    { id: 'legacyfabric', label: 'Legacy Fabric' },
     { id: 'quilt', label: 'Quilt' },
     { id: 'liteloader', label: 'LiteLoader' },
+    { id: 'cleanroom', label: 'Cleanroom' },
+    { id: 'legacyfabric', label: 'Legacy Fabric' },
+    { id: 'horizon', label: 'wizard-loader-horizon' },
   ];
+
+  function loaderLabel(id) {
+    const entry = LOADERS.find((option) => option.id === id);
+    return entry ? t(entry.label) : id;
+  }
 
   // The backend loader catalog covers fabric/quilt/forge/neoforge plus the
   // legacy fabric and cleanroom forks; LiteLoader still renders but cannot be
@@ -212,6 +231,26 @@
     } catch (e) {
       createError = String(e);
       return null;
+    }
+  }
+
+  // Import tab: hand the picked archive to the host, which routes .mrpack /
+  // .twpack / CurseForge-style packs through their dedicated installers.
+  async function importArchive() {
+    const open = window.__TAURI__?.dialog?.open;
+    if (!open) {
+      createError = t('status-file-picker-unavailable');
+      return;
+    }
+    try {
+      const picked = await open({
+        multiple: false,
+        title: t('wizard-import-title'),
+        filters: [{ name: t('wizard-import-filter'), extensions: ['mrpack', 'twpack', 'zip'] }],
+      });
+      if (picked) onimport?.(String(picked));
+    } catch (e) {
+      createError = String(e);
     }
   }
 
@@ -401,92 +440,250 @@
       >
     </div>
 
-    <!-- body: version table (left) + filters/loaders (right) -->
+    <!-- body: platform rail | versions + loader | filters -->
     <div class="flex min-h-0 flex-1">
-      <div class="flex min-w-0 flex-1 flex-col border-r border-(--border)">
-        <div class="min-h-0 flex-1 overflow-y-auto">
-          {#if fetching}
-            <div class="flex h-full items-center justify-center text-[12px] text-(--text-muted)">
-              {t('wizard-loading-versions')}
-            </div>
-          {:else if versionsError}
-            <div class="p-4">
-              <div class="rounded border border-rose-500/30 bg-rose-500/10 p-3 text-[12px] text-rose-400">
-                {versionsError}
-              </div>
-              <button
-                class="mt-2 rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
-                onclick={fetchCatalog}>{t('common-retry')}</button
+      <!-- left: platform rail (Custom active; Import live; pack sources stubbed) -->
+      <aside
+        class="flex w-[150px] shrink-0 flex-col gap-1 border-r border-(--border) bg-(--bg-subtle) p-2"
+        aria-label={t('wizard-platforms-aria')}
+      >
+        {#each PLATFORMS as entry (entry.id)}
+          <button
+            type="button"
+            class="flex items-center justify-between gap-1 rounded px-2.5 py-2 text-left text-[12px] font-medium transition-colors {platform ===
+            entry.id
+              ? 'bg-(--accent) text-(--on-accent)'
+              : entry.enabled
+                ? 'text-(--text-main) hover:bg-(--bg-surface)'
+                : 'cursor-not-allowed text-(--text-muted) opacity-60'}"
+            aria-pressed={platform === entry.id}
+            disabled={!entry.enabled}
+            title={entry.enabled ? t(entry.label) : t('wizard-coming-soon')}
+            onclick={() => {
+              platform = entry.id;
+              if (entry.id === 'import') importArchive();
+            }}
+          >
+            <span class="truncate">{t(entry.label)}</span>
+            {#if !entry.enabled}
+              <span
+                class="shrink-0 rounded bg-(--bg-surface) px-1 py-0.5 text-[8px] uppercase tracking-wide text-(--text-muted)"
+                >{t('wizard-soon')}</span
               >
+            {/if}
+          </button>
+        {/each}
+      </aside>
+
+      {#if platform === 'custom'}
+        <!-- middle: source header, loader detail, versions table, search -->
+        <div class="flex min-w-0 flex-1 flex-col border-r border-(--border)">
+          <div class="flex items-center justify-between gap-2 border-b border-(--border) px-3 py-2">
+            <h4 class="text-[12px] font-semibold">{t('wizard-custom')}</h4>
+            <span class="truncate text-[10px] text-(--text-muted)">
+              {selectedVersion ? t('wizard-selected', { version: selectedVersion }) : t('wizard-pick')}
+            </span>
+          </div>
+
+          <!-- loader detail area / prominent banner when None is selected -->
+          {#if !loader}
+            <div
+              role="status"
+              class="mx-3 mt-3 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-[11.5px] font-medium text-amber-300"
+            >
+              {t('wizard-no-loader')}
             </div>
           {:else}
-            <table class="w-full text-left text-[12px]">
-              <thead class="sticky top-0 z-10 bg-(--bg-surface)">
-                <tr
-                  class="border-b border-(--border) text-[10px] uppercase tracking-wide text-(--text-muted)"
+            <div class="mx-3 mt-3 rounded border border-(--border) bg-(--bg-subtle) p-2.5">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)"
+                  >{t('wizard-mod-loader')}</span
                 >
-                  <th class="px-3 py-2 font-medium">{t('wizard-version')}</th>
-                  <th class="w-[110px] px-3 py-2 font-medium">{t('wizard-released')}</th>
-                  <th class="w-[90px] px-3 py-2 font-medium">{t('wizard-type')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {#each filteredVersions as v (v.id)}
+                <span class="text-[12px] font-medium">{loaderLabel(loader)}</span>
+                {#if needsBuilds}
+                  {#if loaderBuildsState === 'loading'}
+                    <span class="text-[11px] text-(--text-muted)">{t('wizard-loading-builds')}</span>
+                  {:else if loaderBuildsState === 'error'}
+                    <input
+                      class="h-7 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-surface) px-2 text-[11px] outline-none focus:border-(--accent)"
+                      bind:value={loaderVersion}
+                      placeholder={t('wizard-build-placeholder')}
+                      aria-label={t('wizard-loader-version')}
+                    />
+                    <span class="text-[10px] text-(--accent-star)">{t('wizard-build-unavailable')}</span>
+                  {:else}
+                    <select
+                      class="h-7 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-surface) px-2 text-[11px] outline-none focus:border-(--accent)"
+                      bind:value={loaderVersion}
+                      aria-label={t('wizard-loader-version')}
+                    >
+                      <option value="">{t('wizard-latest-stable')}</option>
+                      {#each loaderBuilds as build (build.version)}
+                        <option value={build.version}>
+                          {build.version}{build.stable ? '' : ` ${t('wizard-unstable')}`}
+                        </option>
+                      {/each}
+                    </select>
+                  {/if}
+                {/if}
+              </div>
+
+              {#if unsupportedLoader}
+                <p class="mt-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-400">
+                  {t('wizard-unsupported')}
+                </p>
+              {/if}
+
+              {#if loader === 'horizon'}
+                <p class="mt-2 text-[11px] leading-relaxed text-(--text-muted)">
+                  {t('wizard-horizon-note')}
+                </p>
+              {/if}
+
+              {#if loader === 'cleanroom'}
+                <div
+                  role="alert"
+                  class="mt-2 rounded border border-red-500/40 bg-red-500/10 p-2 text-[11px] leading-relaxed text-red-300"
+                >
+                  <p class="font-semibold text-red-400">{t('wizard-cleanroom-title')}</p>
+                  <p class="mt-1">{t('wizard-cleanroom-body')}</p>
+                  {#if cleanroomRequires1122}
+                    <p class="mt-1.5 font-medium">{t('wizard-cleanroom-version')}</p>
+                  {/if}
+                </div>
+              {/if}
+
+              {#if loader === 'legacyfabric' && !legacyFabricRecommended}
+                <div
+                  role="alert"
+                  class="mt-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-400"
+                >
+                  {t('wizard-legacy-warning', { version: LEGACY_MAX })}
+                </div>
+              {:else if loader === '' && legacyFabricRecommended}
+                <p class="mt-2 text-[11px] text-amber-400">
+                  {t('wizard-legacy-recommended', { version: selectedVersion })}
+                </p>
+              {/if}
+
+              {#if blindMode && loader === 'horizon'}
+                <div
+                  role="alert"
+                  class="mt-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-400"
+                >
+                  {t('wizard-blind-notice')}
+                </div>
+              {/if}
+            </div>
+          {/if}
+
+          <div class="mt-2 min-h-0 flex-1 overflow-y-auto">
+            {#if fetching}
+              <div class="flex h-full items-center justify-center text-[12px] text-(--text-muted)">
+                {t('wizard-loading-versions')}
+              </div>
+            {:else if versionsError}
+              <div class="p-4">
+                <div class="rounded border border-rose-500/30 bg-rose-500/10 p-3 text-[12px] text-rose-400">
+                  {versionsError}
+                </div>
+                <button
+                  class="mt-2 rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
+                  onclick={fetchCatalog}>{t('common-retry')}</button
+                >
+              </div>
+            {:else}
+              <table class="w-full text-left text-[12px]">
+                <thead class="sticky top-0 z-10 bg-(--bg-surface)">
                   <tr
-                    role="button"
-                    tabindex="0"
-                    class="cursor-pointer border-b border-(--border)/50 {selectedVersion === v.id
-                      ? 'bg-(--accent)/10'
-                      : 'hover:bg-(--accent)/5'}"
-                    onclick={() => chooseVersion(v.id)}
-                    onkeydown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        chooseVersion(v.id);
-                      }
-                    }}
+                    class="border-b border-(--border) text-[10px] uppercase tracking-wide text-(--text-muted)"
                   >
-                    <td class="px-3 py-1.5">
-                      <span class="font-medium">{v.id}</span>
-                      {#if v.is_latest_release}
-                        <span
-                          class="ml-1.5 rounded bg-(--accent-star)/15 px-1 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-(--accent-star)"
-                          >{t('wizard-latest')}</span
-                        >
-                      {/if}
-                    </td>
-                    <td class="px-3 py-1.5 text-(--text-muted)">{fmtDate(v.release_time)}</td>
-                    <td class="px-3 py-1.5 text-(--text-muted)">{typeLabel(v.version_type)}</td>
+                    <th class="px-3 py-2 font-medium">{t('wizard-version')}</th>
+                    <th class="w-[110px] px-3 py-2 font-medium">{t('wizard-released')}</th>
+                    <th class="w-[110px] px-3 py-2 font-medium">{t('wizard-type')}</th>
                   </tr>
-                {:else}
-                  <tr>
-                    <td colspan="3" class="px-3 py-6 text-center text-[12px] text-(--text-muted)">
-                      {t('wizard-no-versions')}
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {#each filteredVersions as v (v.id)}
+                    <tr
+                      role="button"
+                      tabindex="0"
+                      class="cursor-pointer border-b border-(--border)/50 {selectedVersion === v.id
+                        ? 'bg-(--accent)/10'
+                        : 'hover:bg-(--accent)/5'}"
+                      onclick={() => chooseVersion(v.id)}
+                      onkeydown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          chooseVersion(v.id);
+                        }
+                      }}
+                    >
+                      <td class="px-3 py-1.5">
+                        <span class="font-medium">{v.id}</span>
+                      </td>
+                      <td class="px-3 py-1.5 text-(--text-muted)">{fmtDate(v.release_time)}</td>
+                      <td class="px-3 py-1.5 text-(--text-muted)">
+                        {#if v.is_latest_release}<span class="text-(--accent-star)" title={t('wizard-latest')}>★</span>{/if}
+                        {typeLabel(v.version_type)}
+                      </td>
+                    </tr>
+                  {:else}
+                    <tr>
+                      <td colspan="3" class="px-3 py-6 text-center text-[12px] text-(--text-muted)">
+                        {t('wizard-no-versions')}
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            {/if}
+          </div>
+
+          <!-- search filter bar under the versions table, Prism-style -->
+          <div class="flex items-center gap-2 border-t border-(--border) p-2">
+            <input
+              class="h-8 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+              placeholder={t('wizard-search')}
+              bind:value={query}
+              disabled={!catalog}
+            />
+            <span class="shrink-0 text-[10px] text-(--text-muted)"
+              >{t('wizard-shown', { count: filteredVersions.length })}</span
+            >
+          </div>
+        </div>
+      {:else}
+        <div class="flex min-w-0 flex-1 flex-col items-center justify-center gap-2 border-r border-(--border) p-6 text-center">
+          <p class="text-[13px] font-medium">
+            {platform === 'import' ? t('wizard-import') : t('wizard-coming-soon')}
+          </p>
+          <p class="max-w-[380px] text-[11.5px] leading-relaxed text-(--text-muted)">
+            {platform === 'import' ? t('wizard-import-note') : t('wizard-coming-soon')}
+          </p>
+          {#if platform === 'import'}
+            <button
+              type="button"
+              class="mt-1 rounded border border-(--accent) bg-(--accent)/15 px-3 py-1.5 text-[12px] font-medium text-(--accent) hover:bg-(--accent)/25"
+              onclick={importArchive}>{t('wizard-import')}</button
+            >
           {/if}
         </div>
-
-        <!-- search bar at the bottom, Prism-style -->
-        <div class="flex items-center gap-2 border-t border-(--border) p-2">
-          <input
-            class="h-8 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
-            placeholder={t('wizard-search')}
-            bind:value={query}
-            disabled={!catalog}
-          />
-          <span class="shrink-0 text-[10px] text-(--text-muted)"
-            >{t('wizard-shown', { count: filteredVersions.length })}</span
-          >
-        </div>
-      </div>
+      {/if}
 
       <aside class="flex w-[240px] shrink-0 flex-col gap-4 overflow-y-auto p-3">
         <section>
-          <h4 class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('wizard-types')}</h4>
+          <div class="flex items-center justify-between gap-2">
+            <h4 class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('wizard-types')}</h4>
+            <button
+              type="button"
+              class="rounded px-1.5 py-0.5 text-[10px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+              title={t('wizard-refresh-versions-title')}
+              onclick={fetchCatalog}
+            >
+              ⟳ {t('wizard-refresh')}
+            </button>
+          </div>
           <div class="mt-1.5 flex flex-col gap-1">
             {#each TYPE_FILTERS as filter (filter.id)}
               <label class="flex cursor-pointer items-center gap-2 text-[12px]">
@@ -503,7 +700,18 @@
         </section>
 
         <section class="border-t border-(--border) pt-3">
-          <h4 class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('wizard-mod-loader')}</h4>
+          <div class="flex items-center justify-between gap-2">
+            <h4 class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('wizard-mod-loader')}</h4>
+            <button
+              type="button"
+              class="rounded px-1.5 py-0.5 text-[10px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
+              disabled={!needsBuilds}
+              title={t('wizard-refresh-loaders-title')}
+              onclick={loadBuilds}
+            >
+              ⟳ {t('wizard-refresh')}
+            </button>
+          </div>
           <div class="mt-1.5 flex flex-col gap-1">
             {#each LOADERS as option (option.id)}
               <label class="flex cursor-pointer items-center gap-2 text-[12px]">
@@ -515,66 +723,13 @@
                   checked={loader === option.id}
                   onchange={() => pickLoader(option.id)}
                 />
-                <span>{option.id ? option.label : t('wizard-loader-none')}</span>
+                <span>{t(option.label)}</span>
+                {#if option.id === 'liteloader'}
+                  <span class="text-[9px] uppercase tracking-wide text-(--accent-star)">{t('wizard-unsupported-short')}</span>
+                {/if}
               </label>
             {/each}
           </div>
-
-          {#if unsupportedLoader}
-            <p class="mt-2 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-400">
-              {t('wizard-unsupported')}
-            </p>
-          {:else if !loader}
-            <p class="mt-2 text-[11px] text-(--text-muted)">{t('wizard-no-loader')}</p>
-          {/if}
-
-          {#if loader === 'horizon'}
-            <p class="mt-2 rounded border border-(--border) bg-(--bg-subtle) p-2 text-[11px] leading-relaxed text-(--text-muted)">
-              {t('wizard-horizon-note')}
-            </p>
-          {/if}
-
-          {#if loader === 'cleanroom'}
-            <div
-              role="alert"
-              class="mt-2 rounded border border-red-500/40 bg-red-500/10 p-2.5 text-[11px] leading-relaxed text-red-300"
-            >
-              <p class="font-semibold text-red-400">{t('wizard-cleanroom-title')}</p>
-              <p class="mt-1">
-                {t('wizard-cleanroom-body')}
-              </p>
-              {#if cleanroomRequires1122}
-                <p class="mt-1.5 font-medium">
-                  {t('wizard-cleanroom-version')}
-                </p>
-              {/if}
-            </div>
-          {/if}
-
-          {#if loader === 'legacyfabric' && !legacyFabricRecommended}
-            <div
-              role="alert"
-              class="mt-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-400"
-            >
-              {t('wizard-legacy-warning', { version: LEGACY_MAX })}
-            </div>
-          {:else if loader === '' && legacyFabricRecommended}
-            <p
-              role="status"
-              class="mt-2 rounded border border-amber-500/20 bg-amber-500/5 p-2 text-[11px] text-amber-400"
-            >
-              {t('wizard-legacy-recommended', { version: selectedVersion })}
-            </p>
-          {/if}
-
-          {#if blindMode && (loader === '' || loader === 'horizon')}
-            <div
-              role="alert"
-              class="mt-2 rounded border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-400"
-            >
-              {t('wizard-blind-notice')}
-            </div>
-          {/if}
 
           {#if (loader === 'fabric' || loader === 'quilt') && assistOptions.length}
             <section class="mt-3 border-t border-(--border) pt-3">
@@ -602,41 +757,6 @@
                 {/each}
               </div>
             </section>
-          {/if}
-
-          {#if needsBuilds}
-            <label
-              class="mt-2 block text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)"
-              for="loader-build">{t('wizard-loader-version')}</label
-            >
-            {#if loaderBuildsState === 'loading'}
-              <div
-                class="mt-1 flex h-8 items-center rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[11px] text-(--text-muted)"
-              >
-                {t('wizard-loading-builds')}
-              </div>
-            {:else if loaderBuildsState === 'error'}
-              <input
-                id="loader-build"
-                class="mt-1 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none focus:border-(--accent)"
-                bind:value={loaderVersion}
-                placeholder={t('wizard-build-placeholder')}
-              />
-              <p class="mt-1 text-[10px] text-(--accent-star)">{t('wizard-build-unavailable')}</p>
-            {:else}
-              <select
-                id="loader-build"
-                class="mt-1 h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none focus:border-(--accent)"
-                bind:value={loaderVersion}
-              >
-                <option value="">{t('wizard-latest-stable')}</option>
-                {#each loaderBuilds as build (build.version)}
-                  <option value={build.version}>
-                    {build.version}{build.stable ? '' : ` ${t('wizard-unstable')}`}
-                  </option>
-                {/each}
-              </select>
-            {/if}
           {/if}
         </section>
       </aside>
