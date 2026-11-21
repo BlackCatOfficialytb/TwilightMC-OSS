@@ -164,6 +164,7 @@
 
   const sections = [
     { id: 'appearance', label: 'settings-appearance', icon: '🎨' },
+    { id: 'language', label: 'settings-language', icon: '🌐' },
     { id: 'java', label: 'settings-java', icon: '☕' },
     { id: 'horizon', label: 'settings-horizon', icon: '⚙' },
     { id: 'storage', label: 'settings-storage', icon: '📁' },
@@ -336,6 +337,7 @@
   }
 
   const REPO = 'https://github.com/BlackCatOfficialytb/TwilightMC-OSS';
+  const CROWDIN = 'https://crowdin.com/';
 </script>
 
 <div class="flex h-full">
@@ -487,20 +489,6 @@
           {/each}
         </div>
 
-        <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('settings-language')}</h3>
-        <p class="mt-1 text-[12px] text-(--text-muted)">
-          {t('settings-language-desc')}
-        </p>
-        <select
-          class="mt-3 h-9 w-full rounded border border-(--border) bg-(--bg-subtle) px-2 text-[13px] outline-none focus:border-(--accent)"
-          value={getLocale()}
-          onchange={(e) => setLocale(e.currentTarget.value)}
-        >
-          {#each SUPPORTED_LOCALES as loc (loc.id)}
-            <option value={loc.id}>{t(loc.label)}</option>
-          {/each}
-        </select>
-
         <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('settings-custom-theme')}</h3>
         <p class="mt-1 text-[12px] text-(--text-muted)">
           {t('settings-custom-theme-desc')}
@@ -607,6 +595,35 @@
         {#if customMsg}
           <p class="mt-2 text-[12px] text-(--text-muted)">{customMsg}</p>
         {/if}
+      {:else if section === 'language'}
+        <h2 class="text-[16px] font-semibold">{t('settings-language')}</h2>
+        <p class="mt-1 text-[12px] text-(--text-muted)">
+          {t('settings-language-desc')}
+        </p>
+        <select
+          class="mt-4 h-9 w-full rounded border border-(--border) bg-(--bg-subtle) px-2 text-[13px] outline-none focus:border-(--accent)"
+          value={getLocale()}
+          onchange={(e) => setLocale(e.currentTarget.value)}
+          aria-label={t('settings-language')}
+        >
+          {#each SUPPORTED_LOCALES as loc (loc.id)}
+            <option value={loc.id}>{t(loc.label)}</option>
+          {/each}
+        </select>
+
+        <div class="mt-6 rounded border border-(--border) bg-(--bg-subtle) p-4">
+          <div class="text-[12px] font-medium">{t('settings-language-translations-title')}</div>
+          <p class="mt-1 text-[11px] text-(--text-muted)">
+            {t('settings-language-fluent-desc')}
+          </p>
+          <button
+            class="mt-2 text-[12px] text-(--accent) hover:underline"
+            onclick={() => onopenurl?.(`${CROWDIN}`)}
+          >
+            ↗ {t('settings-crowdin')}
+          </button>
+        </div>
+
       {:else if section === 'java'}
         <h2 class="text-[16px] font-semibold">{t('settings-java-title')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">
@@ -936,7 +953,7 @@
           >
             <span
               class="absolute top-[2px] left-[2px] h-[18px] w-[18px] rounded-full bg-white shadow transition-transform {blindMode
-                ? 'translate-x-[22px]'
+                ? 'translate-x-[20px]'
                 : ''}"
               aria-hidden="true"
             ></span>
@@ -963,7 +980,7 @@
           >
             <span
               class="absolute top-[2px] left-[2px] h-[18px] w-[18px] rounded-full bg-white shadow transition-transform {deafMode
-                ? 'translate-x-[22px]'
+                ? 'translate-x-[20px]'
                 : ''}"
               aria-hidden="true"
             ></span>
