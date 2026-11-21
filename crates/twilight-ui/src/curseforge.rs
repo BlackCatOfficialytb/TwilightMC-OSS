@@ -127,21 +127,67 @@ fn parse_hit(hit: &serde_json::Value) -> Option<CurseSearchResult> {
     })
 }
 
-/// Searches CurseForge mods (gameId 432, classId 6 = Mods) for one game
-/// version + loader using the personal API key from Settings. Keyless users
-/// stay on the Modrinth flow — the UI shows the manual fallback instead.
+/// Descriptive message for a non-2xx CurseForge response. The v1 API reports
+/// `{"error": "..."}` (sometimes nested as `{"error": {...}}`); surface that
+/// detail plus an actionable hint for the auth failures users hit most.
+pub(crate) fn curseforge_error_message(status: reqwest::StatusCode, body: &str) -> String {
+    let detail = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|raw| {
+            let error = raw.get("error")?;
+            if let Some(message) = error.as_str() {
+                return Some(message.to_owned());
+            }
+            error
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .filter(|message| !message.trim().is_empty());
+    let detail = detail
+        .map(|message| format!(": {message}"))
+        .unwrap_or_default();
+    match status.as_u16() {
+        401 => format!(
+            "CurseForge rejected the API key (HTTP 401). Check the key in Settings → General{detail}"
+        ),
+        403 => format!(
+            "CurseForge denied access (HTTP 403). Make sure this API key was approved for the \
+             CurseForge API and is pasted without extra spaces{detail}"
+        ),
+        404 => format!("CurseForge returned HTTP 404 for this search{detail}"),
+        _ => format!(
+            "CurseForge request failed (HTTP {}){detail}",
+            status.as_u16()
+        ),
+    }
+}
+
+/// Searches CurseForge projects (gameId 432) for one game version + loader
+/// using the personal API key from Settings. `class_id` selects the project
+/// class: 6 = mods, 12 = resource packs, 6552 = shaders. Keyless users stay on
+/// the Modrinth flow — the UI shows the manual fallback instead.
 #[tauri::command]
 pub async fn search_curseforge_mods(
     app: AppHandle,
     query: String,
     game_version: String,
     loader: String,
+    class_id: Option<u32>,
 ) -> Result<Vec<CurseSearchResult>, String> {
     let key = load_settings(&settings_path(&app).await?)
         .await
         .curseforge_api_key
         .unwrap_or_default();
-    search_curseforge_mods_core(CF_API_BASE, key.trim(), &query, &game_version, &loader).await
+    search_curseforge_mods_core(
+        CF_API_BASE,
+        key.trim(),
+        &query,
+        &game_version,
+        &loader,
+        class_id,
+    )
+    .await
 }
 
 /// AppHandle-free core of [`search_curseforge_mods`] for hermetic tests.
@@ -151,20 +197,26 @@ pub(crate) async fn search_curseforge_mods_core(
     query: &str,
     game_version: &str,
     loader: &str,
+    class_id: Option<u32>,
 ) -> Result<Vec<CurseSearchResult>, String> {
     if api_key.is_empty() {
         return Err("no CurseForge API key configured".to_owned());
     }
+    let class_id = class_id.unwrap_or(6);
     let mut params = vec![
         ("gameId", "432".to_owned()),
-        ("classId", "6".to_owned()),
+        ("classId", class_id.to_string()),
         ("searchFilter", query.trim().to_owned()),
         ("pageSize", "40".to_owned()),
         // sortField 2 = Popularity, descending: most-installed first
         ("sortField", "2".to_owned()),
         ("sortOrder", "desc".to_owned()),
     ];
-    if let Some(id) = loader_id(loader) {
+    // packs/shaders aren't mod-loader-specific: a loader pin would filter
+    // every hit out
+    if class_id == 6
+        && let Some(id) = loader_id(loader)
+    {
         params.push(("modLoaderType", id.to_string()));
     }
     if !game_version.trim().is_empty() {
@@ -172,18 +224,20 @@ pub(crate) async fn search_curseforge_mods_core(
     }
     let url = reqwest::Url::parse_with_params(format!("{api_base}/mods/search").as_str(), &params)
         .map_err(|e| e.to_string())?;
-    let raw = reqwest::Client::new()
+    let resp = reqwest::Client::new()
         .get(url)
         .header("x-api-key", api_key)
+        .header(reqwest::header::ACCEPT, "application/json")
         .header(reqwest::header::USER_AGENT, crate::modrinth::client_ua())
         .send()
         .await
-        .map_err(|e| e.to_string())?
-        .error_for_status()
-        .map_err(|e| e.to_string())?
-        .json::<serde_json::Value>()
-        .await
         .map_err(|e| e.to_string())?;
+    let status = resp.status();
+    let body = resp.text().await.map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        return Err(curseforge_error_message(status, &body));
+    }
+    let raw: serde_json::Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
     Ok(parse_search_hits(&raw))
 }
 
@@ -212,6 +266,51 @@ pub async fn install_curseforge_mod(
         .and_then(|u| u.host_str().map(str::to_owned))
         .unwrap_or_default();
     // ponytail: pin the CurseForge CDN hosts; widen if the CDN ever splits
+    if !host.ends_with("forgecdn.net") {
+        return Err("downloads must come from the CurseForge CDN".to_owned());
+    }
+    ParallelDownloader::new(reqwest::Client::new(), 1)
+        .download_all(&[DownloadRequest {
+            url: download_url,
+            dest: dir.join(&name),
+            sha1,
+        }])
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(name)
+}
+
+/// Installs one CurseForge resource pack / shader `.zip` into the instance's
+/// `resourcepacks` or `shaderpacks` dir (SHA-1 verified when supplied).
+/// Same trust boundary as [`install_curseforge_mod`]: CurseForge CDN only.
+#[tauri::command]
+pub async fn install_curseforge_pack(
+    app: AppHandle,
+    instance_id: String,
+    download_url: String,
+    file_name: String,
+    sha1: Option<String>,
+    project_type: String,
+) -> Result<String, String> {
+    let dir_name = match project_type.as_str() {
+        "resourcepack" => "resourcepacks",
+        "shader" => "shaderpacks",
+        other => return Err(format!("unsupported project type {other:?}")),
+    };
+    validate_instance_id(&instance_id)?;
+    let root = instances_root(&app).await?;
+    let dir = root.join(&instance_id).join("minecraft").join(dir_name);
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| e.to_string())?;
+    let name = curse_file_name(&file_name, &download_url);
+    if name.is_empty() || !download_url.starts_with("https://") {
+        return Err("missing file name or download url".to_owned());
+    }
+    let host = reqwest::Url::parse(&download_url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .unwrap_or_default();
     if !host.ends_with("forgecdn.net") {
         return Err("downloads must come from the CurseForge CDN".to_owned());
     }
@@ -317,14 +416,19 @@ mod tests {
     #[tokio::test]
     async fn search_sends_key_and_parses_loopback_response() {
         let (api, rx) = loopback_api(search_json("https://mediafilez.forgecdn.net/files/jei.jar"));
-        let hits = search_curseforge_mods_core(&api, "test-key-123", "jei", "1.21.4", "fabric")
-            .await
-            .unwrap();
+        let hits =
+            search_curseforge_mods_core(&api, "test-key-123", "jei", "1.21.4", "fabric", None)
+                .await
+                .unwrap();
         assert_eq!(hits.len(), 2);
         assert_eq!(hits[0].file_name, "jei-1.21.4-fabric.jar");
         // the personal key travels in the x-api-key header, filters ride along
         let req = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
         assert!(req.contains("x-api-key: test-key-123"));
+        assert!(
+            req.to_ascii_lowercase()
+                .contains("accept: application/json")
+        );
         assert!(req.contains("gameId=432"));
         assert!(req.contains("classId=6"));
         assert!(req.contains("modLoaderType=4"));
@@ -333,9 +437,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pack_search_uses_class_id_and_skips_loader_pin() {
+        let (api, rx) = loopback_api(search_json(
+            "https://mediafilez.forgecdn.net/files/pack.zip",
+        ));
+        search_curseforge_mods_core(&api, "key", "shaders", "1.21.4", "fabric", Some(6552))
+            .await
+            .unwrap();
+        let req = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        assert!(req.contains("classId=6552"));
+        assert!(!req.contains("modLoaderType"));
+    }
+
+    #[test]
+    fn error_messages_explain_auth_failures() {
+        let forbidden = curseforge_error_message(
+            reqwest::StatusCode::FORBIDDEN,
+            r#"{"error":{"message":"API key not approved"}}"#,
+        );
+        assert!(forbidden.contains("HTTP 403"));
+        assert!(forbidden.contains("API key not approved"));
+        let unauthorized = curseforge_error_message(reqwest::StatusCode::UNAUTHORIZED, "{}");
+        assert!(unauthorized.contains("HTTP 401"));
+        let other =
+            curseforge_error_message(reqwest::StatusCode::BAD_GATEWAY, r#"{"error":"upstream"}"#);
+        assert!(other.contains("HTTP 502"));
+        assert!(other.contains("upstream"));
+    }
+
+    #[tokio::test]
     async fn search_without_key_errors_before_any_network_call() {
         let (api, _rx) = loopback_api(search_json("https://mediafilez.forgecdn.net/files/x.jar"));
-        let err = search_curseforge_mods_core(&api, "", "jei", "1.21.4", "fabric")
+        let err = search_curseforge_mods_core(&api, "", "jei", "1.21.4", "fabric", None)
             .await
             .unwrap_err();
         assert!(err.contains("no CurseForge API key"));

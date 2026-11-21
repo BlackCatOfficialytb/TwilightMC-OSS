@@ -205,6 +205,7 @@ fn main() {
             modrinth::install_cleanroom_core_mods,
             curseforge::search_curseforge_mods,
             curseforge::install_curseforge_mod,
+            curseforge::install_curseforge_pack,
             worlds::list_instance_worlds,
             worlds::backup_instance_world,
             worlds::list_world_backups,
