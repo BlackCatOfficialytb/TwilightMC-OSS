@@ -87,6 +87,17 @@ pub(crate) struct Settings {
     /// to launch with a "set it in Settings" message. Never bundled.
     #[serde(default)]
     pub(crate) horizon_path: Option<String>,
+    /// Garbage collector preset name (`Default`, `Auto`, ...). `None` = Default.
+    #[serde(default)]
+    pub(crate) gc_preset: Option<String>,
+    /// Toggleable GC flags persisted when the preset is `Custom` (and applied
+    /// on top of a preset when present).
+    #[serde(default)]
+    pub(crate) custom_gc_flags: Vec<String>,
+    /// Raw extra JVM arguments (space-separated) appended after the resolved
+    /// GC flags.
+    #[serde(default)]
+    pub(crate) extra_jvm_args: Option<String>,
 }
 
 async fn app_dir(app: &AppHandle) -> Result<PathBuf, String> {

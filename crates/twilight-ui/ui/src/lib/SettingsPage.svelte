@@ -30,6 +30,9 @@
     javaCustomPaths = $bindable([]),
     minMem = $bindable(0),
     maxMem = $bindable(0),
+  gcPreset = $bindable('Default'),
+  customGcFlags = $bindable([]),
+  extraJvmArgs = $bindable(''),
     sharedInput = $bindable(''),
     instancesInput = $bindable(''),
     storageBusy = false,
@@ -174,6 +177,24 @@
   ];
   let section = $state('appearance');
   let iconPack = $state(getIconPack());
+
+  const GC_FLAGS = [
+    { flag: '-XX:+UseZGC', badge: 'settings-gc-badge-15plus' },
+    { flag: '-XX:+ZGenerational', badge: 'settings-gc-badge-21to23' },
+    { flag: '-XX:+UseShenandoahGC', badge: 'settings-gc-badge-15plus' },
+    { flag: '-XX:+UseG1GC', badge: 'settings-gc-badge-8to25' },
+    { flag: '-XX:+ParallelRefProcEnabled', badge: 'settings-gc-badge-8to25' },
+    { flag: '-XX:+AlwaysPreTouch', badge: 'settings-gc-badge-8to25' },
+    { flag: '-XX:+UnlockExperimentalVMOptions', badge: 'settings-gc-badge-8to25' },
+    { flag: '-XX:+UseStringDeduplication', badge: 'settings-gc-badge-8u20' },
+    { flag: '-XX:+DisableExplicitGC', badge: 'settings-gc-badge-8to25' },
+    { flag: '-XX:+PerfDisableSharedMem', badge: 'settings-gc-badge-8to25' },
+  ];
+
+  const previewFlags = $derived(
+    [...customGcFlags, ...extraJvmArgs.split(/\s+/).filter(Boolean)].join(' ') ||
+      (gcPreset === 'Default' ? '(none)' : gcPreset),
+  );
 
   // ---- API keys (CurseForge, optional; the zero-key flow works without) ----
   let apiKey = $state('');
@@ -733,6 +754,61 @@
           <span class="w-8 text-[11px] text-(--text-muted)">MiB</span>
         </div>
         <p class="mt-2 text-[12px] text-(--text-muted)">{t('settings-memory-hint')}</p>
+
+        <div class="mt-6 rounded border border-(--border) bg-(--bg-subtle) p-4">
+          <div class="text-[12px] font-medium">{t('settings-gc-preset')}</div>
+          <select
+            class="mt-2 h-9 w-full rounded border border-(--border) bg-(--bg-subtle) px-2 text-[13px] outline-none focus:border-(--accent)"
+            bind:value={gcPreset}
+            aria-label={t('settings-gc-preset')}
+          >
+            <option value="Default">{t('settings-gc-default')}</option>
+            <option value="Auto">{t('settings-gc-auto')}</option>
+            <option value="GenerationalZgc">{t('settings-gc-zgc')}</option>
+            <option value="Shenandoah">{t('settings-gc-shenandoah')}</option>
+            <option value="AikarG1">{t('settings-gc-aikar')}</option>
+            <option value="Custom">{t('settings-gc-custom')}</option>
+          </select>
+
+          {#if gcPreset === 'Custom'}
+            <div class="mt-3 space-y-2">
+              {#each GC_FLAGS as f (f.flag)}
+                <label class="flex items-center justify-between gap-2 text-[12px]">
+                  <span class="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      class="h-3.5 w-3.5 accent-(--accent)"
+                      checked={customGcFlags.includes(f.flag)}
+                      onchange={(e) => {
+                        if (e.currentTarget.checked) {
+                          if (!customGcFlags.includes(f.flag)) customGcFlags = [...customGcFlags, f.flag];
+                        } else {
+                          customGcFlags = customGcFlags.filter((x) => x !== f.flag);
+                        }
+                      }}
+                    />
+                    <span class="font-mono text-[11px]">{f.flag}</span>
+                  </span>
+                  <span class="text-[10px] text-(--text-muted)">{t(f.badge)}</span>
+                </label>
+              {/each}
+            </div>
+          {/if}
+
+          <div class="mt-3">
+            <label class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('settings-gc-extra')}</label>
+            <input
+              class="mt-1 h-8 w-full rounded border border-(--border) bg-(--bg-canvas) px-2.5 font-mono text-[11px] outline-none focus:border-(--accent)"
+              bind:value={extraJvmArgs}
+              placeholder="-Xlog:gc*"
+            />
+          </div>
+
+          <div class="mt-3 rounded border border-(--border) bg-(--bg-canvas) p-2">
+            <div class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('settings-gc-preview')}</div>
+            <pre class="mt-1 whitespace-pre-wrap break-all font-mono text-[11px] text-(--text-main)">{previewFlags}</pre>
+          </div>
+        </div>
 
         <button
           class="mt-6 rounded bg-(--accent) px-4 py-2 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"

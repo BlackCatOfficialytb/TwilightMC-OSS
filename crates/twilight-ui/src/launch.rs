@@ -338,6 +338,41 @@ async fn run(
         jvm_args.push(format!("-Xms{}M", settings.min_memory_mb));
     }
 
+    // Garbage collector preset resolution (Java 8-25 aware; unsupported
+    // presets fall back to Aikar G1GC with a console notice).
+    let java_major = if let Some(p) = settings
+        .java_path
+        .as_deref()
+        .filter(|p| !p.trim().is_empty())
+    {
+        twilight_runtime::probe_java_installation(std::path::Path::new(p))
+            .await
+            .map(|inst| inst.version.major)
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    let preset = twilight_launch::GcPreset::from_str_loose(
+        settings.gc_preset.as_deref().unwrap_or("Default"),
+    );
+    let (gc_flags, gc_notice) = twilight_launch::resolve_gc_flags(
+        preset,
+        java_major,
+        settings.max_memory_mb,
+        &settings.custom_gc_flags,
+        settings.extra_jvm_args.as_deref().unwrap_or(""),
+    );
+    if let Some(notice) = gc_notice {
+        let _ = app.emit(
+            "launch-log",
+            LaunchLine {
+                stream: "stdout",
+                line: notice,
+            },
+        );
+    }
+    jvm_args.extend(gc_flags);
+
     // Deaf Mode: closed captions must be on before the game boots (Horizon
     // and JVM launches share the same options.txt)
     if settings.deaf_mode {

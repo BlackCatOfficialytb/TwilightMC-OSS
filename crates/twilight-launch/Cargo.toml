@@ -8,6 +8,7 @@ description = "JVM/game argument template resolution, classpath building and asy
 [dependencies]
 tokio = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
 sysinfo = "0.40.3"
 futures = { workspace = true }
 # pure-Rust ZIP/DEFLATE reader for the natives fallback (no 7-Zip needed)

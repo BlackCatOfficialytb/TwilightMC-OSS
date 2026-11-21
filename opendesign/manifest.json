@@ -1,0 +1,95 @@
+{
+  "generated": "2026-11-11T07:05:10.244Z",
+  "sections": [
+    {
+      "id": "mockups",
+      "label": "Mockups",
+      "groups": [
+        {
+          "slug": "twilight-shell-rewrite",
+          "files": [
+            {
+              "label": "dawnline.html",
+              "path": "mockups/twilight-shell-rewrite/dawnline.html"
+            },
+            {
+              "label": "harbor.html",
+              "path": "mockups/twilight-shell-rewrite/harbor.html"
+            },
+            {
+              "label": "notes.md",
+              "path": "mockups/twilight-shell-rewrite/notes.md"
+            },
+            {
+              "label": "yardarm.html",
+              "path": "mockups/twilight-shell-rewrite/yardarm.html"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "design-systems",
+      "label": "Design Systems",
+      "groups": [
+        {
+          "slug": "twilight-product",
+          "files": [
+            {
+              "label": "README.md",
+              "path": "design-systems/twilight-product/README.md"
+            },
+            {
+              "label": "SKILL.md",
+              "path": "design-systems/twilight-product/SKILL.md"
+            },
+            {
+              "label": "assets/logos/logo.png",
+              "path": "design-systems/twilight-product/assets/logos/logo.png"
+            },
+            {
+              "label": "brand/style-notes.md",
+              "path": "design-systems/twilight-product/brand/style-notes.md"
+            },
+            {
+              "label": "brand/voice-and-tone.md",
+              "path": "design-systems/twilight-product/brand/voice-and-tone.md"
+            },
+            {
+              "label": "tokens/colors_and_type.css",
+              "path": "design-systems/twilight-product/tokens/colors_and_type.css"
+            },
+            {
+              "label": "ui-kit-twilight-ui/components/Button.jsx",
+              "path": "design-systems/twilight-product/ui-kit-twilight-ui/components/Button.jsx"
+            },
+            {
+              "label": "ui-kit-twilight-ui/components/InstanceCard.jsx",
+              "path": "design-systems/twilight-product/ui-kit-twilight-ui/components/InstanceCard.jsx"
+            },
+            {
+              "label": "ui-kit-twilight-ui/components/Modal.jsx",
+              "path": "design-systems/twilight-product/ui-kit-twilight-ui/components/Modal.jsx"
+            },
+            {
+              "label": "ui-kit-twilight-ui/components/Pill.jsx",
+              "path": "design-systems/twilight-product/ui-kit-twilight-ui/components/Pill.jsx"
+            },
+            {
+              "label": "ui-kit-twilight-ui/components/TabRail.jsx",
+              "path": "design-systems/twilight-product/ui-kit-twilight-ui/components/TabRail.jsx"
+            },
+            {
+              "label": "ui-kit-twilight-ui/components/ToggleSwitch.jsx",
+              "path": "design-systems/twilight-product/ui-kit-twilight-ui/components/ToggleSwitch.jsx"
+            },
+            {
+              "label": "ui-kit-twilight-ui/index.html",
+              "path": "design-systems/twilight-product/ui-kit-twilight-ui/index.html"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

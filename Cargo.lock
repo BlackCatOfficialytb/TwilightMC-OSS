@@ -4180,6 +4180,7 @@ name = "twilight-launch"
 version = "0.5.0"
 dependencies = [
  "futures",
+ "serde",
  "serde_json",
  "sysinfo",
  "thiserror 2.0.21",

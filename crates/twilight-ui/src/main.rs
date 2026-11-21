@@ -252,6 +252,8 @@ fn main() {
             prefs::set_mode_config,
             prefs::get_accessibility_config,
             prefs::set_accessibility_config,
+            prefs::get_gc_prefs,
+            prefs::set_gc_prefs,
             prefs::get_curseforge_api_key,
             prefs::set_curseforge_api_key,
             prefs::get_horizon_prefs,

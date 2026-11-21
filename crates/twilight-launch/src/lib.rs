@@ -7,6 +7,7 @@ mod classpath;
 mod diagnostics;
 mod error;
 mod gate;
+mod gc;
 mod natives;
 mod process;
 
@@ -24,6 +25,7 @@ pub use gate::{
     BAREBONES_CURSEFORGE_URL, BAREBONES_MARKER_FILE, CLEANROOM_GATE_MESSAGE,
     CLEANROOM_REQUIRED_MODS, check_cleanroom_gate,
 };
+pub use gc::{GcPreset, aikar_g1_flags, append_gc_flags, resolve_gc_flags};
 pub use natives::{
     clean_natives_dir, extract_natives, extract_natives_with_7z, extract_natives_with_fallback,
     find_seven_zip, sevenzip_arguments,

@@ -1509,7 +1509,11 @@ mod tests {
             vec![
                 // no build of the child mod matches the pinned game version
                 ("/v2/project/child/version", 200, "[]".to_owned()),
-                ("/v2/project/child", 200, r#"{"title":"Child Mod"}"#.to_owned()),
+                (
+                    "/v2/project/child",
+                    200,
+                    r#"{"title":"Child Mod"}"#.to_owned(),
+                ),
                 (
                     "/v2/project/parent",
                     200,

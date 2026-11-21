@@ -1,0 +1,833 @@
+<!doctype html>
+<html lang="en" class="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TwilightMC shell rewrite — C · Dawnline</title>
+    <link rel="stylesheet" href="../../design-systems/twilight-product/tokens/colors_and_type.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        background: var(--plate-bg, #e3e7ee);
+        font-family: var(--font-sans);
+        font-size: var(--step-body);
+        color: var(--fg-1);
+        -webkit-font-smoothing: antialiased;
+      }
+      .dark { --plate-bg: #06090f; }
+      .light { --plate-bg: #e3e7ee; }
+      .mono { font-family: var(--font-mono); }
+
+      /* ---- dawnline direction overrides ---- */
+      :root, .dark, .light {
+        --step-caption: 11px;
+        --step-meta: 12px;
+        --step-body: 14px;
+        --step-card: 15px;
+        --step-heading: 16px;
+      }
+
+      /* ---- page chrome (not part of the product surface) ---- */
+      .pagehead { max-width: 1180px; margin: 30px auto 6px; padding: 0 20px; }
+      .pagehead h1 { font-size: 17px; font-weight: 600; margin: 0 0 4px; }
+      .pagehead p { margin: 0 0 8px; color: var(--fg-2); font-size: var(--step-meta); line-height: 1.6; }
+      .axes { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; color: var(--fg-2); }
+      .tht { display: inline-flex; gap: 4px; margin-left: 10px; vertical-align: middle; }
+      .tht button {
+        border: 1px solid var(--border-1); background: transparent; color: var(--fg-2);
+        font-family: var(--font-sans); font-size: 12px; padding: 3px 10px; border-radius: 6px; cursor: pointer;
+      }
+      .tht button:hover { background: var(--bg-3); color: var(--fg-1); }
+      html.dark .tht .td, html.light .tht .tl {
+        background: var(--accent-1); color: var(--on-accent); border-color: var(--accent-1);
+      }
+      .plate { max-width: 1180px; margin: 26px auto; padding: 0 20px; }
+      .cap {
+        font-family: var(--font-mono); font-size: 12px; color: var(--fg-2);
+        letter-spacing: 0.04em; margin-bottom: 8px;
+      }
+      .art { border: 1px solid var(--border-1); border-radius: 12px; overflow: hidden; background: var(--bg-1); }
+      .foot { max-width: 1180px; margin: 8px auto 56px; padding: 0 20px; color: var(--fg-2); font-size: var(--step-meta); line-height: 1.7; }
+      .foot b { color: var(--fg-1); font-weight: 600; }
+      .foot .mono { font-size: 11px; letter-spacing: 0.04em; }
+
+      /* ---- shared product atoms (dawnline tuning: larger steps, tint fills) ---- */
+      .btn {
+        display: inline-flex; align-items: center; gap: 7px;
+        border: none; border-radius: 6px; cursor: pointer;
+        font-family: var(--font-sans); font-size: var(--step-body); font-weight: 500;
+        padding: 8px 14px;
+      }
+      .btn.primary { background: var(--accent-1); color: var(--on-accent); }
+      .btn.primary:hover { background: var(--accent-1-hover); }
+      .btn.ghost { background: transparent; color: var(--fg-2); }
+      .btn.ghost:hover { background: var(--bg-3); color: var(--fg-1); }
+      .btn.danger { background: transparent; color: #fb7185; }
+      .btn.danger:hover { background: rgba(244, 63, 94, 0.1); }
+      .btn.sm { padding: 6px 12px; }
+      .btn:disabled { opacity: 0.4; cursor: default; }
+      .pill {
+        display: inline-block; font-size: var(--step-caption); font-weight: 600;
+        letter-spacing: 0.05em; text-transform: uppercase; border-radius: 999px;
+        padding: 3px 9px; line-height: 1.4; white-space: nowrap;
+      }
+      .pill.brand { background: var(--brand-tint); color: var(--accent-1); }
+      .pill.star { background: var(--star-tint); color: var(--accent-2); }
+      .pill.neutral { background: var(--bg-3); color: var(--fg-2); }
+      .tgle { width: 40px; height: 22px; flex: none; border-radius: 999px; padding: 3px; display: inline-flex; align-items: center; border: 1px solid var(--border-1); background: var(--bg-1); }
+      .tgle.on { background: var(--accent-1); justify-content: flex-end; }
+      .tgle i { width: 16px; height: 16px; border-radius: 999px; background: var(--bg-2); }
+      .tgl-dis { opacity: 0.4; }
+      .chip { width: 40px; height: 40px; flex: none; border-radius: 8px; background: var(--brand-tint); color: var(--accent-1); display: flex; align-items: center; justify-content: center; font-size: 17px; }
+
+      /* ---- full shell ---- */
+      .shell { display: flex; height: 680px; }
+      .sb { width: 200px; flex: none; background: var(--bg-2); border-right: 1px solid var(--border-1); display: flex; flex-direction: column; padding: 14px 12px; }
+      .brandrow { display: flex; align-items: center; gap: 9px; padding: 2px 6px 12px; }
+      .brandrow img { width: 26px; height: 26px; border-radius: 6px; }
+      .brandrow b { font-size: var(--step-card); font-weight: 600; }
+      .brandrow .pill { margin-left: auto; }
+      .navcap { font-size: var(--step-caption); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-2); padding: 10px 8px 5px; }
+      .navi { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 6px; color: var(--fg-2); font-size: var(--step-body); cursor: pointer; }
+      .navi .g { width: 16px; text-align: center; }
+      .navi.on { background: var(--brand-tint); color: var(--accent-1); font-weight: 500; }
+      .navi:hover:not(.on) { background: var(--bg-3); color: var(--fg-1); }
+      .navi .soon { margin-left: auto; font-size: var(--step-caption); color: var(--fg-2); opacity: 0.8; }
+      .sbfoot { margin-top: auto; padding: 10px 6px 0; border-top: 1px solid var(--border-1); }
+      .sbfoot .navi { padding-left: 0; }
+      .sbver { font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); padding: 8px 6px 0; }
+      .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+      .top { height: 52px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 16px; background: var(--bg-2); border-bottom: 1px solid var(--border-1); }
+      .top h2 { font-size: var(--step-card); font-weight: 600; margin: 0; }
+      .search { flex: 1; max-width: 360px; height: 34px; display: flex; align-items: center; gap: 7px; background: var(--bg-3); border: 1px solid var(--border-1); border-radius: 6px; padding: 0 12px; color: var(--fg-2); font-size: var(--step-body); }
+      .top .spacer { flex: 1; }
+      .icobtn { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--fg-2); border-radius: 6px; cursor: pointer; font-size: var(--step-card); }
+      .icobtn:hover { background: var(--bg-3); color: var(--fg-1); }
+      .bar { flex: none; display: flex; align-items: center; gap: 10px; padding: 12px 16px; }
+      .count { font-size: var(--step-meta); color: var(--fg-2); }
+      .bar .spacer { flex: 1; }
+      .sortsel { height: 32px; display: flex; align-items: center; gap: 7px; padding: 0 12px; background: var(--bg-3); border: 1px solid var(--border-1); border-radius: 6px; color: var(--fg-2); font-size: var(--step-body); }
+      .grid { flex: 1; overflow: hidden; padding: 2px 16px 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; align-content: start; }
+      /* dawnline grammar: tint fill instead of outline accent */
+      .card { position: relative; background: var(--bg-2); border: 1px solid var(--border-1); border-radius: 10px; padding: 16px; cursor: pointer; }
+      .card:hover, .card.on { background: var(--brand-tint); border-color: var(--border-1); }
+      .cardtop { display: flex; align-items: center; gap: 12px; }
+      .cname { font-size: var(--step-card); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .cardid { min-width: 0; }
+      .pills { display: flex; gap: 6px; margin-top: 4px; }
+      .kebab { margin-left: auto; align-self: flex-start; width: 26px; height: 26px; border: none; background: transparent; color: var(--fg-2); border-radius: 6px; cursor: pointer; font-size: var(--step-body); opacity: 0; }
+      .card:hover .kebab, .card.on .kebab { opacity: 1; }
+      .kebab:hover { background: var(--bg-3); color: var(--fg-1); }
+      .cardfoot { margin-top: 12px; font-size: var(--step-meta); color: var(--fg-2); }
+      .pscrim { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: color-mix(in srgb, var(--bg-1) 80%, transparent); opacity: 0; transition: opacity 150ms ease; }
+      .card:hover .pscrim { opacity: 1; }
+      .stat { flex: none; height: 34px; display: flex; align-items: center; gap: 14px; padding: 0 16px; background: var(--bg-2); border-top: 1px solid var(--border-1); font-size: var(--step-meta); color: var(--fg-2); }
+      .stat .ready { color: var(--accent-1); }
+      .stat .run { color: var(--accent-2); }
+      .stat .path { font-family: var(--font-mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .stat .spacer { flex: 1; }
+      .statbutton { border: none; background: transparent; color: var(--fg-2); font-family: var(--font-sans); font-size: var(--step-meta); cursor: pointer; padding: 3px 8px; border-radius: 6px; }
+      .statbutton:hover { background: var(--bg-3); color: var(--fg-1); }
+
+      /* ---- overlay plates ---- */
+      .ov { position: relative; }
+      .ovscrim { position: absolute; inset: 0; background: var(--scrim); display: flex; align-items: center; justify-content: center; animation: dawn-fade 120ms ease; }
+      @keyframes dawn-fade { from { opacity: 0; } to { opacity: 1; } }
+      .panel { background: var(--bg-2); border: 1px solid var(--border-1); border-radius: 10px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column; animation: dawn-fade 120ms ease; }
+      .phead { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border-1); }
+      .phead h3 { font-size: var(--step-heading); font-weight: 600; margin: 0; }
+      .phead .meta { font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); }
+      .phead .x { margin-left: auto; }
+      .pfoot { display: flex; align-items: center; gap: 8px; padding: 14px 18px; border-top: 1px solid var(--border-1); }
+      .pfoot .spacer { flex: 1; }
+      .flabel { display: block; font-size: var(--step-caption); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-2); margin: 16px 0 7px; }
+      .flabel:first-child { margin-top: 0; }
+      .input { width: 100%; height: 36px; background: var(--bg-3); border: 1px solid var(--border-1); border-radius: 6px; color: var(--fg-1); font-family: var(--font-sans); font-size: var(--step-body); padding: 0 12px; }
+      .input.mono { font-family: var(--font-mono); font-size: 12px; }
+      .input::placeholder { color: var(--fg-2); }
+
+      /* wizard */
+      .wiz { width: 580px; }
+      .wizbody { padding: 18px; }
+      .steptag { font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); margin-left: auto; }
+      .lrow { display: flex; gap: 7px; flex-wrap: wrap; }
+      .lp { border: 1px solid var(--border-1); background: var(--bg-3); color: var(--fg-2); font-family: var(--font-sans); font-size: var(--step-body); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; padding: 7px 14px; border-radius: 999px; cursor: pointer; }
+      .lp:hover { color: var(--fg-1); }
+      .lp.on { background: var(--brand-tint); border-color: var(--accent-1); color: var(--accent-1); }
+      .sel { width: 100%; height: 36px; display: flex; align-items: center; justify-content: space-between; background: var(--bg-3); border: 1px solid var(--border-1); border-radius: 6px; padding: 0 12px; font-size: var(--step-body); color: var(--fg-1); }
+      .sel .g { color: var(--fg-2); }
+      .hint { font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); margin-top: 16px; }
+
+      /* edit instance */
+      .edit { width: 660px; height: 500px; flex-direction: row !important; }
+      .rail { width: 184px; flex: none; background: var(--bg-3); border-right: 1px solid var(--border-1); padding: 10px; display: flex; flex-direction: column; gap: 3px; }
+      .railname { font-size: var(--step-card); font-weight: 600; padding: 4px 8px 0; }
+      .railmeta { font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); padding: 0 8px 8px; border-bottom: 1px solid var(--border-1); margin-bottom: 8px; }
+      .rtab { text-align: left; border: none; cursor: pointer; border-radius: 6px; padding: 8px 10px; font-family: var(--font-sans); font-size: var(--step-body); background: transparent; color: var(--fg-2); }
+      .rtab:hover { color: var(--fg-1); background: var(--bg-2); }
+      .rtab.on { background: var(--brand-tint); color: var(--accent-1); font-weight: 500; }
+      .rtab .n { opacity: 0.7; }
+      .railclose { margin-top: auto; }
+      .pane { flex: 1; min-width: 0; padding: 18px; display: flex; flex-direction: column; }
+      .panehead { display: flex; align-items: center; }
+      .panecap { font-size: var(--step-caption); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-2); }
+      .panehead .btn { margin-left: auto; }
+      .mtable { background: var(--bg-3); border: 1px solid var(--border-1); border-radius: 8px; margin-top: 14px; overflow: hidden; }
+      .mrow { display: flex; align-items: center; gap: 14px; padding: 10px 14px; }
+      .mrow + .mrow { border-top: 1px solid var(--border-1); }
+      .mname { font-size: var(--step-body); }
+      .mname.dim { opacity: 0.5; }
+      .mfile { font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); }
+      .mmain { min-width: 0; flex: 1; }
+      .xbtn { color: #fb7185; background: transparent; border: none; cursor: pointer; padding: 3px 8px; border-radius: 6px; font-size: var(--step-body); }
+      .xbtn:hover { background: rgba(244, 63, 94, 0.1); }
+      .editfoot { margin-top: auto; padding-top: 14px; display: flex; gap: 8px; }
+
+      /* modrinth browser */
+      .rinth { width: 740px; height: 540px; }
+      .rinthead { padding: 14px 18px; border-bottom: 1px solid var(--border-1); }
+      .rsearch { display: flex; gap: 8px; margin-top: 12px; }
+      .rsearch .input { flex: 1; }
+      .rlist { flex: 1; overflow: hidden; padding: 6px 10px; }
+      .rrow { display: flex; align-items: center; gap: 14px; padding: 11px 12px; border-radius: 8px; }
+      .rrow:hover { background: var(--brand-tint); }
+      .rchip { width: 36px; height: 36px; flex: none; border-radius: 8px; background: var(--bg-3); border: 1px solid var(--border-1); color: var(--fg-2); display: flex; align-items: center; justify-content: center; font-size: 15px; }
+      .rmain { min-width: 0; flex: 1; }
+      .rtitle { font-size: var(--step-card); font-weight: 500; }
+      .rdesc { font-size: var(--step-meta); color: var(--fg-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .rmeta { flex: none; width: 150px; text-align: right; }
+      .rdl { font-family: var(--font-mono); font-size: 12px; }
+      .rauthor { font-size: 11px; color: var(--fg-2); }
+      .rinstall { flex: none; width: 104px; display: flex; justify-content: flex-end; }
+      .rinthfoot { padding: 12px 18px; border-top: 1px solid var(--border-1); font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); }
+      .inst-done { color: var(--fg-2); background: transparent; border: none; font-family: var(--font-sans); font-size: var(--step-body); cursor: default; opacity: 0.7; }
+      .inst-wip { color: var(--accent-2); background: transparent; border: none; font-family: var(--font-sans); font-size: var(--step-body); cursor: default; }
+
+      /* console drawer */
+      .cons { height: 350px; display: flex; flex-direction: column; }
+      .constop { flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--bg-2); border-bottom: 1px solid var(--border-1); }
+      .runline { color: var(--accent-2); font-size: var(--step-body); }
+      .constop .spacer { flex: 1; }
+      .log { flex: 1; overflow: hidden; padding: 12px 16px; font-family: var(--font-mono); font-size: 12px; line-height: 1.75; }
+      .lg-i { color: var(--fg-2); }
+      .lg-w { color: var(--accent-2); }
+      .lg-e { color: #fb7185; }
+      .lg-c { color: var(--accent-1); }
+      .lg-d { color: var(--fg-1); }
+      .conin { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--border-1); background: var(--bg-2); }
+      .conin .g { color: var(--accent-1); font-family: var(--font-mono); font-size: 12px; }
+      .conin .input { height: 32px; }
+      .conhint { font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); }
+
+      /* settings */
+      .set { width: 540px; }
+      .setbody { padding: 18px; }
+      .memrow { display: flex; align-items: center; gap: 12px; }
+      .memtrack { position: relative; flex: 1; height: 4px; border-radius: 999px; background: var(--bg-3); }
+      .memfill { position: absolute; inset: 0 auto 0 0; width: 40%; border-radius: 999px; background: var(--accent-1); }
+      .memknob { position: absolute; top: -6px; left: 40%; width: 16px; height: 16px; border-radius: 999px; background: var(--bg-2); border: 1px solid var(--accent-1); transform: translateX(-8px); }
+      .memval { font-family: var(--font-mono); font-size: 12px; width: 96px; text-align: right; }
+      .setrow { display: flex; align-items: center; gap: 12px; padding: 10px 0; }
+      .setrow .lbl { flex: 1; font-size: var(--step-body); }
+      .javrow { display: flex; gap: 8px; align-items: center; }
+      .javrow .input { flex: 1; }
+      .javline { font-family: var(--font-mono); font-size: 11px; color: var(--fg-2); margin-top: 6px; }
+
+      /* dropzone confirm */
+      .dz { width: 400px; }
+      .dzbody { padding: 18px; }
+      .dzfile { display: flex; align-items: center; gap: 10px; background: var(--bg-3); border: 1px dashed var(--border-1); border-radius: 8px; padding: 12px 14px; }
+      .dzfile .g { color: var(--accent-2); }
+      .dzname { font-family: var(--font-mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .dzmeta { font-size: var(--step-meta); color: var(--fg-2); margin-top: 12px; line-height: 1.6; }
+      .warn { display: flex; gap: 8px; margin-top: 14px; padding: 10px 12px; border-radius: 6px; background: var(--star-tint); color: var(--accent-2); font-size: var(--step-meta); line-height: 1.5; }
+
+      /* micro-states strip */
+      .micro { padding: 18px; }
+      .mgroup { margin-top: 16px; }
+      .mgroup:first-child { margin-top: 0; }
+      .mrowline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      .mcap { font-size: var(--step-caption); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-2); margin-bottom: 7px; }
+      .focusring { outline: 1px solid var(--accent-1); outline-offset: 2px; border-radius: 6px; }
+      .ctx { width: 190px; background: var(--bg-2); border: 1px solid var(--border-1); border-radius: 8px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35); padding: 5px; }
+      .ctxi { display: flex; align-items: center; gap: 9px; width: 100%; border: none; background: transparent; text-align: left; font-family: var(--font-sans); font-size: var(--step-body); color: var(--fg-1); padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+      .ctxi:hover { background: var(--bg-3); }
+      .ctxi .g { width: 16px; text-align: center; color: var(--fg-2); }
+      .ctxi.danger { color: #fb7185; }
+      .ctxi.danger .g { color: #fb7185; }
+      .ctxsep { height: 1px; background: var(--border-1); margin: 5px 6px; }
+      .emptycard { border: 1px dashed var(--border-1); border-radius: 10px; padding: 18px; max-width: 320px; color: var(--fg-2); font-size: var(--step-meta); line-height: 1.6; }
+      .emptycard .btn { margin-top: 12px; }
+      .errline { color: #fb7185; font-size: var(--step-body); }
+      .statword { font-size: var(--step-meta); }
+      .microgrid { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+      .progressline { display: flex; align-items: center; gap: 8px; font-size: var(--step-body); color: var(--accent-2); }
+      .progressline .mono { color: var(--fg-2); font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <div class="pagehead">
+      <h1>
+        C · Dawnline
+        <span class="tht">
+          <button class="td" onclick="setTheme('dark')">◑ Dark</button>
+          <button class="tl" onclick="setTheme('light')">☀ Light</button>
+        </span>
+      </h1>
+      <p>
+        Visual variation, light-first: the Dawn theme becomes the default
+        surface, the type scale steps up one notch (14px body), and selection
+        accents ride as cyan tint fills instead of outline borders. Borders go
+        quiet; the accent breathes.
+      </p>
+      <div class="axes">
+        VISUALS: light-first, 14px body, tint-fill accents · LAYOUT: current grammar, airier (+4px paddings) ·
+        INTERACTIONS: unchanged grammar, larger targets · COPY: operational, terse · MOTION: 120ms modal fade-through
+      </div>
+    </div>
+
+    <!-- 1 · full shell -->
+    <div class="plate">
+      <div class="cap">1 · shell — instances home (light default; hover a card to see the tint fill)</div>
+      <div class="art">
+        <div class="shell">
+          <div class="sb">
+            <div class="brandrow">
+              <img src="../../design-systems/twilight-product/assets/logos/logo.png" alt="TwilightMC" />
+              <b>TwilightMC</b>
+              <span class="pill star">pre-release</span>
+            </div>
+            <div class="navcap">Library</div>
+            <div class="navi on"><span class="g">▤</span> Instances</div>
+            <div class="navi"><span class="g">⤓</span> Modpacks <span class="soon">soon</span></div>
+            <div class="navcap">Actions</div>
+            <div class="navi"><span class="g">＋</span> New Instance</div>
+            <div class="navi"><span class="g">⤓</span> Import .mrpack</div>
+            <div class="sbfoot">
+              <div class="navi"><span class="g">⚙</span> Settings</div>
+              <div class="sbver">v0.4.0-alpha · twilightmc</div>
+            </div>
+          </div>
+          <div class="main">
+            <div class="top">
+              <h2>Instances</h2>
+              <div class="search">⌗ Filter instances…</div>
+              <div class="spacer"></div>
+              <button class="icobtn" title="Toggle theme">◑</button>
+              <button class="icobtn" title="Settings">⚙</button>
+            </div>
+            <div class="bar">
+              <span class="count">6 instances</span>
+              <button class="btn primary">＋ New Instance</button>
+              <button class="btn ghost">⤓ Import .mrpack</button>
+              <div class="spacer"></div>
+              <div class="sortsel">Sort: Recent <span class="g">▾</span></div>
+            </div>
+            <div class="grid">
+              <div class="card on">
+                <div class="cardtop">
+                  <div class="chip">⚙</div>
+                  <div class="cardid">
+                    <div class="cname">Create: Astral Forge</div>
+                    <div class="pills"><span class="pill neutral">1.20.1</span><span class="pill star">NeoForge</span></div>
+                  </div>
+                  <button class="kebab" title="Instance actions">⋯</button>
+                </div>
+                <div class="cardfoot">Last played yesterday</div>
+                <div class="pscrim"><button class="btn primary">▶ Play</button></div>
+              </div>
+              <div class="card">
+                <div class="cardtop">
+                  <div class="chip">⌗</div>
+                  <div class="cardid">
+                    <div class="cname">Twilight Foundry</div>
+                    <div class="pills"><span class="pill neutral">1.21.4</span><span class="pill brand">Fabric</span></div>
+                  </div>
+                  <button class="kebab" title="Instance actions">⋯</button>
+                </div>
+                <div class="cardfoot">Last played 2h ago</div>
+                <div class="pscrim"><button class="btn primary">▶ Play</button></div>
+              </div>
+              <div class="card">
+                <div class="cardtop">
+                  <div class="chip">⦚</div>
+                  <div class="cardid">
+                    <div class="cname">sodium-nightly</div>
+                    <div class="pills"><span class="pill neutral">1.21.4</span><span class="pill brand">Fabric</span></div>
+                  </div>
+                  <button class="kebab" title="Instance actions">⋯</button>
+                </div>
+                <div class="cardfoot">Last played 2h ago</div>
+                <div class="pscrim"><button class="btn primary">▶ Play</button></div>
+              </div>
+              <div class="card">
+                <div class="cardtop">
+                  <div class="chip">▾</div>
+                  <div class="cardid">
+                    <div class="cname">Dawn of Rebirth</div>
+                    <div class="pills"><span class="pill neutral">1.20.1</span><span class="pill star">Forge</span></div>
+                  </div>
+                  <button class="kebab" title="Instance actions">⋯</button>
+                </div>
+                <div class="cardfoot">Last played 3d ago</div>
+                <div class="pscrim"><button class="btn primary">▶ Play</button></div>
+              </div>
+              <div class="card">
+                <div class="cardtop">
+                  <div class="chip">▤</div>
+                  <div class="cardid">
+                    <div class="cname">Vanilla 1.21.4</div>
+                    <div class="pills"><span class="pill neutral">1.21.4</span><span class="pill neutral">Vanilla</span></div>
+                  </div>
+                  <button class="kebab" title="Instance actions">⋯</button>
+                </div>
+                <div class="cardfoot">Last played last week</div>
+                <div class="pscrim"><button class="btn primary">▶ Play</button></div>
+              </div>
+              <div class="card">
+                <div class="cardtop">
+                  <div class="chip">⌗</div>
+                  <div class="cardid">
+                    <div class="cname">quilt-lab</div>
+                    <div class="pills"><span class="pill neutral">1.21.1</span><span class="pill brand">Quilt</span></div>
+                  </div>
+                  <button class="kebab" title="Instance actions">⋯</button>
+                </div>
+                <div class="cardfoot">Last played 1mo ago</div>
+                <div class="pscrim"><button class="btn primary">▶ Play</button></div>
+              </div>
+            </div>
+            <div class="stat">
+              <span class="ready">Ready</span>
+              <span class="path">E:\TwilightMC-OSS\instances</span>
+              <div class="spacer"></div>
+              <button class="statbutton">⦚ Console</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2 · wizard, step 2 -->
+    <div class="plate">
+      <div class="cap">2 · wizard — step 2 of 2</div>
+      <div class="art ov" style="height: 500px">
+        <div class="ovscrim">
+          <div class="panel wiz">
+            <div class="phead">
+              <h3>New instance</h3>
+              <span class="steptag">step 2 of 2</span>
+              <button class="icobtn x" title="Close">✕</button>
+            </div>
+            <div class="wizbody">
+              <label class="flabel" for="w-name">Instance name</label>
+              <input class="input" id="w-name" value="Twilight Foundry" />
+              <label class="flabel" for="w-ver">Minecraft version</label>
+              <div class="sel" id="w-ver">1.21.4 <span class="mono" style="color: var(--fg-2)">latest release</span> <span class="g">▾</span></div>
+              <label class="flabel">Mod loader</label>
+              <div class="lrow">
+                <button class="lp">Vanilla</button>
+                <button class="lp on">Fabric</button>
+                <button class="lp">Quilt</button>
+                <button class="lp">Forge</button>
+                <button class="lp">NeoForge</button>
+              </div>
+              <label class="flabel" for="w-lv">Loader version</label>
+              <div class="sel" id="w-lv">0.16.9 <span class="g">▾</span></div>
+              <div class="hint">loader versions refresh from the pinned meta endpoint</div>
+            </div>
+            <div class="pfoot">
+              <button class="btn ghost">◀ Back</button>
+              <div class="spacer"></div>
+              <button class="btn primary">＋ Create Instance</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3 · edit instance, mods tab -->
+    <div class="plate">
+      <div class="cap">3 · edit instance — mods tab</div>
+      <div class="art ov" style="height: 520px">
+        <div class="ovscrim">
+          <div class="panel edit">
+            <div class="rail">
+              <div class="railname">Create: Astral Forge</div>
+              <div class="railmeta">1.20.1 · neoforge</div>
+              <button class="rtab">Version components</button>
+              <button class="rtab on">Mods <span class="n">(12)</span></button>
+              <button class="rtab">Screenshots</button>
+              <button class="rtab">Logs</button>
+              <button class="rtab railclose">Close</button>
+            </div>
+            <div class="pane">
+              <div class="panehead">
+                <span class="panecap">Mods (12)</span>
+                <button class="btn ghost sm">♻ Refresh</button>
+              </div>
+              <input class="input" style="margin-top: 12px" placeholder="Filter installed mods…" />
+              <div class="mtable">
+                <div class="mrow">
+                  <div class="mmain">
+                    <div class="mname">Fabric API</div>
+                    <div class="mfile">fabric-api.jar · 2.1 MB</div>
+                  </div>
+                  <div class="tgle on" title="Disable"><i></i></div>
+                  <button class="xbtn" title="Delete Fabric API">✕</button>
+                </div>
+                <div class="mrow">
+                  <div class="mmain">
+                    <div class="mname">Iris Shaders</div>
+                    <div class="mfile">iris.jar · 1.4 MB</div>
+                  </div>
+                  <div class="tgle on" title="Disable"><i></i></div>
+                  <button class="xbtn" title="Delete Iris Shaders">✕</button>
+                </div>
+                <div class="mrow">
+                  <div class="mmain">
+                    <div class="mname dim">Lithium</div>
+                    <div class="mfile">lithium.jar.disabled · 412.0 KB</div>
+                  </div>
+                  <div class="tgle" title="Enable"><i></i></div>
+                  <button class="xbtn" title="Delete Lithium">✕</button>
+                </div>
+                <div class="mrow">
+                  <div class="mmain">
+                    <div class="mname">Sodium</div>
+                    <div class="mfile">sodium.jar · 1.2 MB</div>
+                  </div>
+                  <div class="tgle on" title="Disable"><i></i></div>
+                  <button class="xbtn" title="Delete Sodium">✕</button>
+                </div>
+                <div class="mrow">
+                  <div class="mmain">
+                    <div class="mname">Sodium Extra</div>
+                    <div class="mfile">sodium-extra.jar · 236.0 KB</div>
+                  </div>
+                  <div class="tgle on" title="Disable"><i></i></div>
+                  <button class="xbtn" title="Delete Sodium Extra">✕</button>
+                </div>
+              </div>
+              <div class="editfoot">
+                <button class="btn primary">＋ Add Mod</button>
+                <button class="btn ghost">⤓ Get More Mods</button>
+                <button class="btn ghost">📂 Open Mods Folder</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4 · modrinth browser overlay -->
+    <div class="plate">
+      <div class="cap">4 · modrinth browser — stacks over the edit-instance sheet (fade-through 120ms)</div>
+      <div class="art ov" style="height: 560px">
+        <div class="ovscrim">
+          <div class="panel rinth">
+            <div class="rinthead">
+              <div class="phead" style="border-bottom: none; padding: 0">
+                <h3>Get More Mods</h3>
+                <span class="meta">pinned: 1.20.1 · neoforge</span>
+                <button class="icobtn x" title="Close">✕</button>
+              </div>
+              <div class="rsearch">
+                <div class="input" style="display: flex; align-items: center">⌗ sodium</div>
+                <div class="sortsel">Sort: Most installed <span class="g">▾</span></div>
+              </div>
+            </div>
+            <div class="rlist">
+              <div class="rrow">
+                <div class="rchip">⌗</div>
+                <div class="rmain">
+                  <div class="rtitle">Sodium</div>
+                  <div class="rdesc">Modern rendering engine and client-side optimization.</div>
+                </div>
+                <div class="rmeta"><div class="rdl">4.2M</div><div class="rauthor">jellysquid3</div></div>
+                <div class="rinstall"><button class="btn primary sm">⤓ Install</button></div>
+              </div>
+              <div class="rrow">
+                <div class="rchip">⌗</div>
+                <div class="rmain">
+                  <div class="rtitle">Sodium Extra</div>
+                  <div class="rdesc">Extra options and toggles for Sodium.</div>
+                </div>
+                <div class="rmeta"><div class="rdl">1.1M</div><div class="rauthor">FlashyReese</div></div>
+                <div class="rinstall"><button class="btn primary sm">⤓ Install</button></div>
+              </div>
+              <div class="rrow">
+                <div class="rchip">⌗</div>
+                <div class="rmain">
+                  <div class="rtitle">Iris Shaders</div>
+                  <div class="rdesc">Shader pipeline for Sodium with OptiFine pack support.</div>
+                </div>
+                <div class="rmeta"><div class="rdl">3.8M</div><div class="rauthor">coderbot</div></div>
+                <div class="rinstall"><button class="inst-done">✓ Installed</button></div>
+              </div>
+              <div class="rrow">
+                <div class="rchip">⌗</div>
+                <div class="rmain">
+                  <div class="rtitle">Lithium</div>
+                  <div class="rdesc">Game logic and math optimizations, server-safe.</div>
+                </div>
+                <div class="rmeta"><div class="rdl">2.9M</div><div class="rauthor">jellysquid3</div></div>
+                <div class="rinstall"><button class="btn primary sm">⤓ Install</button></div>
+              </div>
+              <div class="rrow">
+                <div class="rchip">⌗</div>
+                <div class="rmain">
+                  <div class="rtitle">Ferrite Core</div>
+                  <div class="rdesc">Cuts memory usage by deduplicating cached data.</div>
+                </div>
+                <div class="rmeta"><div class="rdl">2.2M</div><div class="rauthor">malte0811</div></div>
+                <div class="rinstall"><button class="inst-wip">Installing…</button></div>
+              </div>
+              <div class="rrow">
+                <div class="rchip">⌗</div>
+                <div class="rmain">
+                  <div class="rtitle">LazyDFU</div>
+                  <div class="rdesc">Defers datafixer initialization until needed.</div>
+                </div>
+                <div class="rmeta"><div class="rdl">1.6M</div><div class="rauthor">foundationgames</div></div>
+                <div class="rinstall"><button class="btn primary sm">⤓ Install</button></div>
+              </div>
+              <div class="rrow">
+                <div class="rchip">⌗</div>
+                <div class="rmain">
+                  <div class="rtitle">Indium</div>
+                  <div class="rdesc">Sodium compatibility for the Fabric Rendering API.</div>
+                </div>
+                <div class="rmeta"><div class="rdl">900K</div><div class="rauthor">burgernt</div></div>
+                <div class="rinstall"><button class="btn primary sm">⤓ Install</button></div>
+              </div>
+            </div>
+            <div class="rinthfoot">results pinned to the instance's game version and loader</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5 · console drawer -->
+    <div class="plate">
+      <div class="cap">5 · console drawer — open, running state</div>
+      <div class="art">
+        <div class="cons">
+          <div class="constop">
+            <span class="runline">● Running Create: Astral Forge… 41s</span>
+            <div class="spacer"></div>
+            <button class="statbutton">⌄ Collapse</button>
+            <button class="btn danger sm">■ Stop instance</button>
+          </div>
+          <div class="log">
+            <div class="lg-d">[12:04:11] <span class="lg-i">[main/INFO]:</span> Loading Minecraft 1.20.1 with NeoForge 47.2.0</div>
+            <div class="lg-d">[12:04:12] <span class="lg-i">[main/INFO]:</span> Loading 47 mods: fabric-api, sodium, iris, lithium…</div>
+            <div class="lg-c">⦚ twi: memory</div>
+            <div class="lg-d">[12:04:14] <span class="lg-i">[Render thread/INFO]:</span> OpenAL initialized on device OpenAL Soft</div>
+            <div class="lg-w">[12:04:16] [Worker/WARN]: Mixing client.MinecraftServerMixin from sodium-extra</div>
+            <div class="lg-d">[12:04:19] <span class="lg-i">[Render thread/INFO]:</span> Backend library: LWJGL 3.3.3</div>
+          </div>
+          <div class="conin">
+            <span class="g">⦚</span>
+            <input class="input" placeholder="Type a command…" />
+            <span class="conhint">enter sends to stdin</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6 · settings -->
+    <div class="plate">
+      <div class="cap">6 · settings</div>
+      <div class="art ov" style="height: 540px">
+        <div class="ovscrim">
+          <div class="panel set">
+            <div class="phead">
+              <h3>Settings</h3>
+              <button class="icobtn x" title="Close">✕</button>
+            </div>
+            <div class="setbody">
+              <label class="flabel">Appearance</label>
+              <div class="lrow">
+                <button class="lp on">☀ Light</button>
+                <button class="lp">◑ Dark</button>
+                <button class="lp">Follow system</button>
+              </div>
+              <label class="flabel">Memory</label>
+              <div class="memrow">
+                <div class="memtrack"><div class="memfill"></div><div class="memknob"></div></div>
+                <span class="memval">4096 MiB</span>
+              </div>
+              <label class="flabel">Java runtime</label>
+              <div class="javrow">
+                <input class="input mono" value="C:\Program Files\Java\jdk-21\bin\javaw.exe" />
+                <button class="btn ghost">▸ Detect</button>
+              </div>
+              <div class="javline">javaw 21.0.3 detected</div>
+              <label class="flabel">Launcher</label>
+              <div class="setrow">
+                <span class="lbl">Keep launcher open while playing</span>
+                <div class="tgle" title="Enable"><i></i></div>
+              </div>
+              <div class="setrow">
+                <span class="lbl">Check for updates on start</span>
+                <div class="tgle on" title="Disable"><i></i></div>
+              </div>
+            </div>
+            <div class="pfoot">
+              <button class="btn ghost">Cancel</button>
+              <div class="spacer"></div>
+              <button class="btn primary">Save</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7 · .mrpack dropzone confirm -->
+    <div class="plate">
+      <div class="cap">7 · .mrpack install — dropzone confirm (Task 3 surface)</div>
+      <div class="art ov" style="height: 460px">
+        <div class="ovscrim">
+          <div class="panel dz">
+            <div class="phead">
+              <h3>Install modpack</h3>
+              <button class="icobtn x" title="Close">✕</button>
+            </div>
+            <div class="dzbody">
+              <div class="dzfile">
+                <span class="g">⤓</span>
+                <span class="dzname">Prominence-2-RP-3.4.1.mrpack</span>
+              </div>
+              <div class="dzmeta">
+                Minecraft 1.20.1 · Forge 47.2.0<br />
+                214 mods · 1.8 GB download
+              </div>
+              <label class="flabel" for="dz-target">Install into</label>
+              <div class="sel" id="dz-target">New instance — prominence-2-rp <span class="g">▾</span></div>
+              <div class="warn"><span>⚠</span><span>Overrides replace matching files in the target instance.</span></div>
+            </div>
+            <div class="pfoot">
+              <button class="btn ghost">Cancel</button>
+              <div class="spacer"></div>
+              <button class="btn primary">⤓ Install modpack</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 8 · micro-states strip -->
+    <div class="plate">
+      <div class="cap">8 · micro-states — buttons, pills, toggles, install states, context menu, empty grid</div>
+      <div class="art">
+        <div class="micro">
+          <div class="microgrid">
+            <div>
+              <div class="mgroup">
+                <div class="mcap">Buttons</div>
+                <div class="mrowline">
+                  <button class="btn primary focusring">＋ New Instance</button>
+                  <button class="btn ghost">⤓ Get More Mods</button>
+                  <button class="btn danger">✕ Delete Permanently</button>
+                  <button class="btn primary" disabled>＋ Add Mod</button>
+                </div>
+              </div>
+              <div class="mgroup">
+                <div class="mcap">Pills</div>
+                <div class="mrowline">
+                  <span class="pill neutral">1.21.4</span>
+                  <span class="pill brand">Fabric</span>
+                  <span class="pill star">NeoForge</span>
+                  <span class="pill star">pre-release</span>
+                </div>
+              </div>
+              <div class="mgroup">
+                <div class="mcap">Toggles</div>
+                <div class="mrowline">
+                  <div class="tgle on"><i></i></div>
+                  <div class="tgle"><i></i></div>
+                  <div class="tgle on tgl-dis"><i></i></div>
+                </div>
+              </div>
+              <div class="mgroup">
+                <div class="mcap">Install states</div>
+                <div class="mrowline">
+                  <button class="btn primary sm">⤓ Install</button>
+                  <span class="inst-wip">Installing…</span>
+                  <span class="inst-done">✓ Installed</span>
+                </div>
+              </div>
+              <div class="mgroup">
+                <div class="mcap">Status words</div>
+                <div class="mrowline statword">
+                  <span class="lg-c">Ready</span>
+                  <span class="lg-w">Running Create: Astral Forge… 41s</span>
+                  <span class="lg-i">Instance deleted.</span>
+                </div>
+              </div>
+              <div class="mgroup">
+                <div class="mcap">Progress (text only)</div>
+                <div class="progressline">⤓ Installing Prominence-2-RP <span class="mono">staging overrides (132/214)</span></div>
+              </div>
+              <div class="mgroup">
+                <div class="mcap">Errors (verbatim from backend)</div>
+                <div class="errline">mod sodium.jar already exists</div>
+              </div>
+            </div>
+            <div>
+              <div class="mgroup">
+                <div class="mcap">Context menu</div>
+                <div class="ctx">
+                  <button class="ctxi"><span class="g">▶</span> Launch</button>
+                  <button class="ctxi"><span class="g">⚙</span> Edit instance</button>
+                  <button class="ctxi"><span class="g">📂</span> Open folder</button>
+                  <div class="ctxsep"></div>
+                  <button class="ctxi"><span class="g">♻</span> Move to Trash</button>
+                  <button class="ctxi danger"><span class="g">✕</span> Delete Permanently</button>
+                </div>
+              </div>
+              <div class="mgroup">
+                <div class="mcap">Empty grid</div>
+                <div class="emptycard">
+                  No instances yet — Create one from a version list, or drop a .mrpack into the wizard.
+                  <div><button class="btn primary sm">＋ New Instance</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <b>Type &amp; density.</b> Body 14px, card titles 15px, headings 16px —
+      one step up across the scale; paddings +4px, grid gaps 16px; targets
+      stay ≥32px tall. In dark mode the same scale applies (toggle to audit).
+      <br />
+      <b>Accent grammar.</b> Selected and hovered surfaces take the 15% cyan
+      tint fill; borders stay neutral everywhere. Solid cyan remains reserved
+      for primary buttons with dark ink. No outline accents anywhere.
+      <br />
+      <b>Motion.</b> Modals fade-through 120ms (scrim + panel opacity together,
+      no scale, no slide); hover scrims 150ms; drawer collapses by height.
+      <br />
+      <b>Risks.</b> Cyan-600 on white passes AA for text-weight usage but the
+      tint-on-tint rows (hovered row containing brand pills) need a contrast
+      audit at 14px; amber warning fills get slightly more visual weight in
+      light mode — acceptable, but watch the pre-release pill dominance.
+    </div>
+
+    <script>
+      function setTheme(t) {
+        document.documentElement.className = t;
+      }
+    </script>
+  </body>
+</html>

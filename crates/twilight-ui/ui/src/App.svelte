@@ -157,6 +157,9 @@
   let javaCustomPaths = $state([]);
   let minMem = $state(0);
   let maxMem = $state(0);
+  let gcPreset = $state('Default');
+  let customGcFlags = $state([]);
+  let extraJvmArgs = $state('');
   let javaMsg = $state('');
 
   async function api(cmd, args) {
@@ -553,6 +556,14 @@
       minMem = javaPrefs.min_memory_mb;
       maxMem = javaPrefs.max_memory_mb;
       javaMsg = '';
+      try {
+        const gc = await api('get_gc_prefs');
+        gcPreset = gc.gc_preset ?? 'Default';
+        customGcFlags = gc.custom_gc_flags ?? [];
+        extraJvmArgs = gc.extra_jvm_args ?? '';
+      } catch {
+        // plain web build
+      }
       // lazy, once: the first Settings visit may kick off the disk scan, but
       // the page renders instantly and later visits reuse the cached list
       if (!javaScanned && runtimes.length === 0) void scanJava();
@@ -568,6 +579,11 @@
         javaPath: javaPath.trim() || null,
         minMemoryMb: Number(minMem) || 0,
         maxMemoryMb: Number(maxMem) || 0,
+      });
+      await api('set_gc_prefs', {
+        gcPreset,
+        customGcFlags,
+        extraJvmArgs,
       });
       javaMsg = 'Java settings saved.';
     } catch (e) {
@@ -922,6 +938,9 @@
           bind:javaCustomPaths
           bind:minMem
           bind:maxMem
+          bind:gcPreset
+          bind:customGcFlags
+          bind:extraJvmArgs
           {storageBusy}
           {storageMsg}
           {javaMsg}

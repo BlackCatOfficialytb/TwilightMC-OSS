@@ -1,0 +1,97 @@
+/* ==========================================================================
+   TwilightMC — Cosmic Cyan product tokens
+   Extracted from crates/twilight-ui/ui/src/app.css (source of truth) plus
+   the observed component patterns in App.svelte / InstanceCard.svelte /
+   EditInstanceModal.svelte.
+   Dual themes switch via a `dark` / `light` class on <html>.
+   ========================================================================== */
+
+/* ---- raw variables -------------------------------------------------------
+   Colors are kept in sRGB hex exactly as shipped by the codebase. */
+
+:root,
+.dark {
+  /* backgrounds: canvas < surface < subtle (elevation by value, no shadows) */
+  --bg-1: #0b0f19;   /* canvas: app background, drawer wells        */
+  --bg-2: #111827;   /* surface: cards, modals, sidebar              */
+  --bg-3: #182234;   /* subtle: inputs, hover fills, table bodies    */
+  --border-1: #2d3a4f;
+  --fg-1: #f8fafc;   /* primary text  */
+  --fg-2: #94a3b8;   /* muted text    */
+  --accent-1: #06b6d4;        /* cyan-500          */
+  --accent-1-hover: #22d3ee;  /* cyan-400          */
+  --accent-2: #f59e0b;        /* amber-500: warnings, star badges  */
+  /* cyan-500 is too luminous for white text; dark ink wins on cyan in
+     both modes */
+  --on-accent: #0f172a;
+}
+
+.light {
+  --bg-1: #f1f5f9;   /* Dawn canvas */
+  --bg-2: #ffffff;
+  --bg-3: #f8fafc;
+  --border-1: #e2e8f0;
+  --fg-1: #0f172a;
+  --fg-2: #64748b;
+  --accent-1: #0891b2;        /* cyan-600: darker for light ground */
+  --accent-1-hover: #0e7490;
+  --accent-2: #d97706;        /* amber-600 */
+  --on-accent: #0f172a;
+}
+
+/* ---- type ----------------------------------------------------------------
+   The codebase ships no brand font: system stack everywhere, with the
+   viewport-sized Tailwind steps used through utility classes. The one
+   deliberate addition for the rewrite is a mono voice for identifiers. */
+
+:root {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas,
+    monospace;
+
+  /* observed size steps in the shipped UI */
+  --step-caption: 10px;   /* text-[10px], always uppercase + tracked */
+  --step-meta: 11px;      /* text-[11px]: muted annotations, pill labels */
+  --step-body: 12px;      /* text-[12px]: buttons, table cells, body */
+  --step-card: 13px;      /* text-[13px]: card titles, inputs, nav     */
+  --step-heading: 14px;   /* text-[14px] semibold: modal headings      */
+
+  --weight-caption: 600;    /* uppercase captions are semibold */
+  --weight-card: 500;       /* card/nav titles are medium      */
+  --weight-heading: 600;
+  --weight-body: 400;
+
+  --track-caption: 0.05em;  /* wide tracking on uppercase captions */
+}
+
+/* ---- semantic aliases (mockups/kit target these) ------------------------- */
+
+:root {
+  --surface-primary: var(--bg-2);
+  --surface-well: var(--bg-3);
+  --surface-canvas: var(--bg-1);
+  --border-subtle: var(--border-1);
+  --text-primary: var(--fg-1);
+  --text-secondary: var(--fg-2);
+  --brand: var(--accent-1);
+  --brand-hover: var(--accent-1-hover);
+  --star: var(--accent-2);
+
+  --h1: var(--step-heading) / 1.4 var(--font-sans);
+  --h2: var(--step-card) / 1.45 var(--font-sans);
+  --body: var(--step-body) / 1.5 var(--font-sans);
+  --caption: var(--step-caption) / 1.4 var(--font-sans);
+}
+
+/* ---- derived treatments (documented in brand/style-notes.md) ------------- */
+
+:root {
+  /* tint fills: the accent is almost always a 15% wash on its own ground,
+     with solid cyan reserved for primary buttons */
+  --brand-tint: color-mix(in srgb, var(--accent-1) 15%, transparent);
+  --star-tint: color-mix(in srgb, var(--accent-2) 15%, transparent);
+  /* overlays: solid black scrims, no blur */
+  --scrim: rgb(0 0 0 / 0.6);
+  --focus-ring: 0 0 0 1px var(--accent-1);
+}

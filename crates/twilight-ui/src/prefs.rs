@@ -230,3 +230,38 @@ pub async fn set_accessibility_config(
     settings.deaf_mode = deaf_mode;
     save_settings(&settings_path(&app).await?, &settings).await
 }
+
+/// Persisted garbage-collector preferences shown in Settings.
+#[derive(Debug, Clone, Serialize)]
+pub struct GcPrefs {
+    pub gc_preset: String,
+    pub custom_gc_flags: Vec<String>,
+    pub extra_jvm_args: String,
+}
+
+#[tauri::command]
+pub async fn get_gc_prefs(app: AppHandle) -> Result<GcPrefs, String> {
+    let settings = load_settings(&settings_path(&app).await?).await;
+    Ok(GcPrefs {
+        gc_preset: settings
+            .gc_preset
+            .clone()
+            .unwrap_or_else(|| "Default".to_owned()),
+        custom_gc_flags: settings.custom_gc_flags.clone(),
+        extra_jvm_args: settings.extra_jvm_args.clone().unwrap_or_default(),
+    })
+}
+
+#[tauri::command]
+pub async fn set_gc_prefs(
+    app: AppHandle,
+    gc_preset: String,
+    custom_gc_flags: Vec<String>,
+    extra_jvm_args: String,
+) -> Result<(), String> {
+    let mut settings = load_settings(&settings_path(&app).await?).await;
+    settings.gc_preset = Some(gc_preset.trim().to_owned()).filter(|s| !s.is_empty());
+    settings.custom_gc_flags = custom_gc_flags;
+    settings.extra_jvm_args = Some(extra_jvm_args.trim().to_owned()).filter(|s| !s.is_empty());
+    save_settings(&settings_path(&app).await?, &settings).await
+}

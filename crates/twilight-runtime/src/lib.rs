@@ -3,6 +3,7 @@
 
 mod discovery;
 mod error;
+mod gc;
 mod matcher;
 mod version;
 
@@ -11,6 +12,7 @@ pub use discovery::{
     scan_roots,
 };
 pub use error::RuntimeError;
+pub use gc::{FlagCompat, flag_compat, java_badge};
 pub use matcher::{is_compatible, select_best_java};
 pub use version::{
     JavaInstallation, JavaVersion, java_executable_relative, parse_java_version,
