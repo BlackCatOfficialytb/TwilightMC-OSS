@@ -8,7 +8,7 @@
   // `set_instance_icon`, then hands back the resulting path.
   import { onMount } from 'svelte';
   import { pushOverlay, popOverlay } from './overlays.js';
-  import { ICON_PICKER_TWEMOJI, PRISM_INSTANCE_ICONS } from './twemoji.js';
+  import { ICON_PICKER_TWEMOJI, PRISM_INSTANCE_ICONS, LEGACY_INSTANCE_ICONS } from './twemoji.js';
   import { t } from './i18n.svelte.ts';
 
   let {
@@ -21,6 +21,7 @@
 
   const TABS = [
     { id: 'prism', label: 'icons-tab-prism' },
+    { id: 'legacy', label: 'icons-tab-legacy' },
     { id: 'twemoji', label: 'icons-tab-twemoji' },
     { id: 'custom', label: 'icons-tab-custom' },
   ];
@@ -33,6 +34,7 @@
   const asset = (path) => `${BASE}${path}`.replace(/\/{2,}/g, '/');
 
   const iconSrc = (name) => asset(`instance-icons/prism/${name}.svg`);
+  const legacySrc = (name) => asset(`instance-icons/legacy/${name}.png`);
   const emojiSrc = (code) => asset(`twemoji/${code}.svg`);
 
   // friendly labels for the file names upstream ships
@@ -128,6 +130,31 @@
                 src={iconSrc(name)}
                 alt=""
                 class="h-12 w-12 object-contain"
+                draggable="false"
+                loading="lazy"
+              />
+              <span class="w-full truncate text-center text-[10px] text-(--text-muted)">
+                {prismLabel(name)}
+              </span>
+            </button>
+          {/each}
+        </div>
+      {:else if tab === 'legacy'}
+        <div class="grid grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-2">
+          {#each LEGACY_INSTANCE_ICONS as name (name)}
+            <button
+              type="button"
+              class="group flex flex-col items-center gap-1 rounded border p-2 transition-colors {currentKey ===
+              `freesm:${name}`
+                ? 'border-(--accent) bg-(--accent)/10'
+                : 'border-(--border) hover:border-(--accent)'}"
+              onclick={() => pick(`freesm:${name}`)}
+              title={prismLabel(name)}
+            >
+              <img
+                src={legacySrc(name)}
+                alt=""
+                class="h-12 w-12 object-contain image-rendering-pixelated"
                 draggable="false"
                 loading="lazy"
               />

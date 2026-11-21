@@ -816,6 +816,7 @@ icons-close = Close
 icons-close-aria = Close icon picker
 icons-sources-aria = Icon sources
 icons-tab-prism = Prism / Freesm
+icons-tab-legacy = Classic (Freesm 32×32)
 icons-tab-twemoji = Twemoji
 icons-tab-custom = Custom image…
 icons-choose-aria = Choose an instance icon

@@ -112,64 +112,32 @@ export const ICON_PICKER_TWEMOJI = [
   '1f9e9',
 ];
 
-// Classic Prism/MultiMC instance icons vendored under `public/instance-icons/`
-// (see CREDITS.md). Keys match the SVG basenames upstream.
+// Flat Prism/MultiMC instance icons vendored under
+// `public/instance-icons/prism/` (see CREDITS.md). Keys match the SVG
+// basenames upstream.
 export const PRISM_INSTANCE_ICONS = [
-  // blocks
   'grass',
   'dirt',
   'stone',
-  'cobblestone',
-  'sand',
-  'glass',
-  'bedrock',
-  'planks',
-  'brick',
-  'bookshelf',
-  'workbench',
-  'furnace',
-  'chest',
-  'enderchest',
-  'portal',
-  'commandblock',
-  'tnt',
-  'flame',
-  // ores & materials
   'diamond',
   'gold',
   'iron',
-  'coal',
-  'redstone',
-  'lapis',
-  'emerald',
-  'netherstar',
-  'enderpearl',
-  // items
-  'apple',
-  'sword',
-  'pickaxe',
-  'meat',
-  // mobs & characters
+  'brick',
+  'planks',
   'creeper',
   'squarecreeper',
   'enderman',
   'skeleton',
-  'zombie',
-  'spider',
-  'slime',
-  'cow',
-  'pig',
-  'sheep',
-  'squid',
+  'steve',
+  'herobrine',
   'chicken',
   'fox',
-  'fox_legacy',
   'bee',
-  'bee_legacy',
-  'steve',
-  'alex',
-  'herobrine',
-  // loader / platform brands
+  'meat',
+  'enderpearl',
+  'netherstar',
+  'flame',
+  'tnt',
   'gear',
   'magitech',
   'fabricmc',
@@ -178,6 +146,36 @@ export const PRISM_INSTANCE_ICONS = [
   'modrinth',
   'ftb_logo',
   'prismlauncher',
+];
+
+// Classic pixel-art instance icons from FreesmLauncher's
+// `launcher/resources/multimc/32x32/instances/<icon>_legacy.png` (GPL-3.0).
+// Vendored verbatim under `public/instance-icons/legacy/` so the picker works
+// fully offline. Keys are the PNG basenames.
+export const LEGACY_INSTANCE_ICONS = [
+  'grass_legacy',
+  'dirt_legacy',
+  'stone_legacy',
+  'brick_legacy',
+  'planks_legacy',
+  'diamond_legacy',
+  'gold_legacy',
+  'iron_legacy',
+  'tnt_legacy',
+  'creeper_legacy',
+  'squarecreeper_legacy',
+  'skeleton_legacy',
+  'chicken_legacy',
+  'steve_legacy',
+  'herobrine_legacy',
+  'enderpearl_legacy',
+  'netherstar_legacy',
+  'meat_legacy',
+  'gear_legacy',
+  'magitech_legacy',
+  'ftb_logo_legacy',
+  'ftb_glow',
+  'infinity_legacy',
 ];
 
 // Absolute base so the shared panel and the console drawer resolve equally.
@@ -195,7 +193,8 @@ export function emojiAsset(emoji) {
  *
  * Keys are namespaced so the same string travels through `instance.cfg`
  * (Prism interop) and our own metadata:
- *   `prism:grass`      → bundled Prism/MultiMC instance icon
+ *   `prism:grass`      → bundled flat Prism/MultiMC instance icon
+ *   `freesm:grass_legacy` → bundled classic Freesm pixel-art PNG
  *   `twemoji:1f980`    → bundled Twemoji glyph
  *   anything else      → a bare Prism iconKey (a user's `icons/` drop-in),
  *                        resolved by the backend to an absolute path.
@@ -214,6 +213,11 @@ export function iconKeyAsset(iconKey) {
     const name = key.slice('prism:'.length);
     if (!PRISM_INSTANCE_ICONS.includes(name)) return null;
     return `${BASE}instance-icons/prism/${name}.svg`.replace(/\/{2,}/g, '/');
+  }
+  if (key.startsWith('freesm:')) {
+    const name = key.slice('freesm:'.length);
+    if (!LEGACY_INSTANCE_ICONS.includes(name)) return null;
+    return `${BASE}instance-icons/legacy/${name}.png`.replace(/\/{2,}/g, '/');
   }
   return null;
 }

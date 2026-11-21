@@ -795,6 +795,7 @@ icons-close = Đóng
 icons-close-aria = Đóng bộ chọn biểu tượng
 icons-sources-aria = Nguồn biểu tượng
 icons-tab-prism = Prism / Freesm
+icons-tab-legacy = Cổ điển (Freesm 32×32)
 icons-tab-twemoji = Twemoji
 icons-tab-custom = Ảnh tùy chỉnh…
 icons-choose-aria = Chọn biểu tượng bản cài
