@@ -2011,7 +2011,10 @@ pub async fn create_server_backup(app: AppHandle, id: String) -> Result<ServerBa
 /// Destination for one archive entry inside `dir`, or `None` when the entry
 /// escapes the server folder (zip-slip guard).
 fn dest_for_entry(dir: &Path, name: &str) -> Option<PathBuf> {
-    if name.is_empty() || name.ends_with('/') {
+    // Backslashes, drive letters and NTFS alternate data streams are unsafe
+    // on every host: on Linux `Path` would accept `C:/abs.dat` as two plain
+    // components even though Windows reads it as an absolute path.
+    if name.is_empty() || name.ends_with('/') || name.contains(['\\', '\0', ':']) {
         return None;
     }
     let mut dest = dir.to_path_buf();
@@ -2227,6 +2230,8 @@ mod server_manager_tests {
         assert!(dest_for_entry(&root, "../steal.dat").is_none());
         assert!(dest_for_entry(&root, "/abs.dat").is_none());
         assert!(dest_for_entry(&root, "C:/abs.dat").is_none());
+        assert!(dest_for_entry(&root, "..\\steal.dat").is_none());
+        assert!(dest_for_entry(&root, "stream.dat:evil").is_none());
         assert!(dest_for_entry(&root, "dir/").is_none());
         assert!(dest_for_entry(&root, "").is_none());
     }
