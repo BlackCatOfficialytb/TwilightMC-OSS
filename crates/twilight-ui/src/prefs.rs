@@ -235,7 +235,7 @@ pub async fn get_cas_stats(app: AppHandle) -> Result<CasStats, String> {
 pub async fn run_cas_deduplicate(app: AppHandle) -> Result<twilight_cas::DedupeReport, String> {
     let instances_dir = crate::instances::instances_root(&app).await?;
     let cas_root = crate::storage::shared_root(&app).await?.join("cas");
-    twilight_cas::deduplicate_instances(&instances_dir, &cas_root)
+    crate::cas::deduplicate_instances(&instances_dir, &cas_root)
         .await
         .map_err(|e| e.to_string())
 }
@@ -244,7 +244,7 @@ pub async fn run_cas_deduplicate(app: AppHandle) -> Result<twilight_cas::DedupeR
 pub async fn run_cas_gc(app: AppHandle) -> Result<twilight_cas::GcReport, String> {
     let instances_dir = crate::instances::instances_root(&app).await?;
     let cas_root = crate::storage::shared_root(&app).await?.join("cas");
-    twilight_cas::cas_garbage_collect(&cas_root, &instances_dir)
+    crate::cas::cas_garbage_collect(&cas_root, &instances_dir)
         .await
         .map_err(|e| e.to_string())
 }

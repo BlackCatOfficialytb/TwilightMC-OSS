@@ -3,7 +3,7 @@ name = "twilight-cas"
 description = "uv-style global content-addressable store with hardlinks, symlinks, NTFS junctions and GC"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "Apache-2.0"
 
 [dependencies]
 tokio = { workspace = true }

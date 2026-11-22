@@ -2,7 +2,7 @@
 name = "twilight-modloader"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "Apache-2.0"
 description = "Fabric (meta.fabricmc.net v2) and Quilt (meta.quiltmc.org v3) loader metadata resolution into composite Knot launch data for TwilightMC"
 
 [dependencies]

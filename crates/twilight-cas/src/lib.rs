@@ -1,9 +1,10 @@
-//! uv-style global content-addressable store (CAS) engine for TwilightMC.
+//! uv-style global content-addressable store (CAS) engine.
 //!
 //! Blobs live under `<cas_root>/sha1/<xx>/<full_sha1_hash>` and are linked
-//! into instance directories (`mods/`, `resourcepacks/`, `shaderpacks/`)
-//! through a strategy cascade: hardlink → NTFS junction (Windows) → symlink
-//! → plain copy, so deduplication never breaks a game launch.
+//! into target directories through a strategy cascade: hardlink → NTFS
+//! junction (Windows) → symlink → plain copy, so deduplication never breaks
+//! downstream consumers (e.g. game launches). Fully generic: no game,
+//! launcher or Minecraft terms anywhere in the public API.
 
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -12,6 +13,7 @@ use sha1::{Digest, Sha1};
 use thiserror::Error;
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, SeekFrom};
+
 #[derive(Debug, Error)]
 pub enum CasError {
     #[error("io error: {0}")]
@@ -37,7 +39,7 @@ pub enum LinkKind {
     Copy,
 }
 
-/// Outcome of [`deduplicate_instances`]: scanned files, replaced files and
+/// Outcome of [`deduplicate_dirs`]: scanned files, replaced files and
 /// approximate bytes the duplicates consumed before linking.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub struct DedupeReport {
@@ -47,7 +49,7 @@ pub struct DedupeReport {
     pub bytes_reclaimed: u64,
 }
 
-/// Outcome of [`cas_garbage_collect`].
+/// Outcome of [`cas_garbage_collect_dirs`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 pub struct GcReport {
     pub reclaimed_bytes: u64,
@@ -59,6 +61,11 @@ pub struct GcReport {
 pub struct CasStats {
     pub blob_count: usize,
     pub total_size_bytes: u64,
+}
+
+pub fn blob_path(cas_root: &Path, hash: &str) -> PathBuf {
+    let (prefix, rest) = hash.split_at(2);
+    cas_root.join("sha1").join(prefix).join(rest)
 }
 
 /// Scans `<cas_root>/sha1` and returns the blob count + total size.
@@ -86,11 +93,6 @@ pub fn cas_stats(cas_root: &Path) -> Result<CasStats, std::io::Error> {
         }
     }
     Ok(stats)
-}
-
-pub fn blob_path(cas_root: &Path, hash: &str) -> PathBuf {
-    let (prefix, rest) = hash.split_at(2);
-    cas_root.join("sha1").join(prefix).join(rest)
 }
 
 /// Streams `src` into the CAS, hashing while reading; atomic rename into
@@ -172,9 +174,9 @@ fn try_exists(path: &Path) -> std::io::Result<bool> {
 }
 
 /// Links (or copies) `cas_blob` to `dest`. `dest` must not exist yet. The
-/// cascade is hardlink → NTFS junction (Windows directories) → symlink →
-/// copy, so the worst case is always a real copy. Returns the winning
-/// strategy so callers and diagnostics can report the true cost.
+/// cascade is hardlink → NTFS junction (Windows) → symlink → copy, so the
+/// worst case is always a real copy. Returns the winning strategy so
+/// callers and diagnostics can report the true cost.
 pub async fn link_or_copy(cas_blob: &Path, dest: &Path) -> Result<LinkKind, CasError> {
     if try_exists(dest)? {
         return Err(CasError::DestinationExists(dest.to_path_buf()));
@@ -185,7 +187,7 @@ pub async fn link_or_copy(cas_blob: &Path, dest: &Path) -> Result<LinkKind, CasE
         return Ok(LinkKind::Hardlink);
     }
 
-    // 2. Windows NTFS directory junctions for directories (no admin rights).
+    // 2. Windows NTFS directory junctions (no admin rights needed).
     #[cfg(windows)]
     {
         let cmdline = format!(
@@ -204,7 +206,7 @@ pub async fn link_or_copy(cas_blob: &Path, dest: &Path) -> Result<LinkKind, CasE
         }
     }
 
-    // 3. symlink — Unix dirs/files, Windows files in dev mode.
+    // 3. symlink — Unix dirs/files, Windows files with dev mode.
     #[cfg(unix)]
     if std::os::unix::fs::symlink(cas_blob, dest).is_ok() {
         return Ok(LinkKind::Symlink);
@@ -214,7 +216,7 @@ pub async fn link_or_copy(cas_blob: &Path, dest: &Path) -> Result<LinkKind, CasE
         return Ok(LinkKind::Symlink);
     }
 
-    // 4. copy fallback: never breaks a game launch.
+    // 4. copy fallback: never breaks consumers.
     if let Some(parent) = dest.parent() {
         tokio::fs::create_dir_all(parent).await?;
     }
@@ -222,8 +224,12 @@ pub async fn link_or_copy(cas_blob: &Path, dest: &Path) -> Result<LinkKind, CasE
     Ok(LinkKind::Copy)
 }
 
-/// Collects every file under `dir` (depth-first; sorted for determinism).
-async fn collect_files(dir: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
+/// Collects every file under `dir` (depth-first; sorted for determinism),
+/// optionally restricted to `extensions` (lowercased, e.g. `["jar", "zip"]`).
+async fn collect_files(
+    dir: &Path,
+    extensions: Option<&[&str]>,
+) -> Result<Vec<PathBuf>, std::io::Error> {
     let mut files = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(current) = stack.pop() {
@@ -237,7 +243,18 @@ async fn collect_files(dir: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
             if path.is_dir() {
                 stack.push(path);
             } else {
-                files.push(path);
+                if extensions.is_none()
+                    || path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .is_some_and(|ext| {
+                            extensions.is_some_and(|list| {
+                                list.iter().any(|want| ext.eq_ignore_ascii_case(want))
+                            })
+                        })
+                {
+                    files.push(path);
+                }
             }
         }
     }
@@ -245,41 +262,21 @@ async fn collect_files(dir: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
     Ok(files)
 }
 
-/// All scan-relevant directories of an instance: `mods/` plus
-/// `resourcepacks/`/`shaderpacks/` next to it.
-fn scan_dirs(instances_dir: &Path) -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(instances_dir) {
-        for entry in entries.flatten() {
-            let root = entry.path();
-            if root.is_dir() {
-                for sub in ["mods", "resourcepacks", "shaderpacks"] {
-                    let candidate = root.join(sub);
-                    if candidate.is_dir() {
-                        dirs.push(candidate);
-                    }
-                }
-            }
-        }
-    }
-    dirs.sort();
-    dirs
-}
-
-/// Scans active instances for jars, ingests their blobs, and replaces
-/// duplicate copies with links (temp-link + rename; a failure never loses
-/// the file).
-pub async fn deduplicate_instances(
-    instances_dir: &Path,
+/// Deduplicates files across `dirs`: ingests every candidate into the CAS,
+/// then replaces the duplicate copies with links (temp-link + rename; a
+/// failure never loses a file). A `None` extension list matches all files.
+pub async fn deduplicate_dirs(
+    dirs: &[PathBuf],
     cas_root: &Path,
+    extensions: Option<&[&str]>,
 ) -> Result<DedupeReport, CasError> {
     let mut report = DedupeReport::default();
     let mut hashes: BTreeMap<String, Vec<PathBuf>> = BTreeMap::new();
 
-    for dir in scan_dirs(instances_dir) {
-        for file in collect_files(&dir).await? {
+    for dir in dirs {
+        for file in collect_files(dir, extensions).await? {
             let Some(meta) = file.metadata().ok().filter(|m| m.is_file()) else {
-                continue;
+                continue; // vanished between scan and relink
             };
             if meta.len() == 0 {
                 continue;
@@ -294,7 +291,7 @@ pub async fn deduplicate_instances(
         if dups.len() < 2 {
             continue;
         }
-        // Grouping is by hash, so the first entry and the rest share one blob.
+        // Grouping is by hash: the first entry and the rest share one blob.
         let Some(hash) = hashes
             .iter()
             .find_map(|(h, list)| (list.as_slice() == dups.as_slice()).then_some(h.clone()))
@@ -309,11 +306,8 @@ pub async fn deduplicate_instances(
             if try_exists(dest)? {
                 tokio::fs::remove_file(dest).await?;
             }
-            match link_or_copy(&blob, dest).await {
-                Ok(_) => {}
-                Err(_) => {
-                    tokio::fs::copy(&blob, dest).await?;
-                }
+            if link_or_copy(&blob, dest).await.is_err() {
+                tokio::fs::copy(&blob, dest).await?;
             }
             report.deduplicated_files += 1;
             report.linked_count += 1;
@@ -324,17 +318,16 @@ pub async fn deduplicate_instances(
     Ok(report)
 }
 
-/// Collects referenced blob hashes from instance `mods/`, `resourcepacks/`
-/// and `shaderpacks/` folders by hashing every file inside.
-async fn referenced_hashes(instances_dir: &Path) -> Result<HashSet<String>, CasError> {
+/// Hashes every file in `active_dirs` (the referenced set for GC).
+async fn referenced_hashes(active_dirs: &[PathBuf]) -> Result<HashSet<String>, CasError> {
     let mut out = HashSet::new();
-    for dir in scan_dirs(instances_dir) {
-        for file in collect_files(&dir).await? {
+    for dir in active_dirs {
+        for file in collect_files(dir, None).await? {
             if let Ok(meta) = file.metadata()
                 && meta.is_file()
                 && meta.len() > 0
             {
-                let mut reader = File::open(file).await?;
+                let mut reader = File::open(&file).await?;
                 out.insert(sha1_stream(&mut reader).await?);
             }
         }
@@ -342,16 +335,16 @@ async fn referenced_hashes(instances_dir: &Path) -> Result<HashSet<String>, CasE
     Ok(out)
 }
 
-/// Removes CAS blobs that no active instance references. The referenced set
-/// is recomputed by hashing instance files, so deletion is safe for linked
-/// instances too.
-pub async fn cas_garbage_collect(
+/// Removes CAS blobs that no active directory references. The referenced
+/// set is recomputed by hashing files, so deletion is safe for linked
+/// consumers too.
+pub async fn cas_garbage_collect_dirs(
     cas_root: &Path,
-    instances_dir: &Path,
+    active_dirs: &[PathBuf],
 ) -> Result<GcReport, CasError> {
-    let referenced = referenced_hashes(instances_dir).await?;
+    let referenced = referenced_hashes(active_dirs).await?;
     let mut report = GcReport::default();
-    for entry in collect_files(&cas_root.join("sha1")).await? {
+    for entry in collect_files(&cas_root.join("sha1"), None).await? {
         // Rebuild the hex hash from the path tail (strip dir components).
         let name = entry
             .file_name()
@@ -449,21 +442,23 @@ mod tests {
     async fn deduplicate_replaces_duplicate_copies_with_links() {
         let base = fixture_root("dedup");
         let cas = base.join("cas");
-        let instances = base.join("instances");
-        write_file(&instances.join("a/mods"), "dup.jar", b"identical mod bytes");
-        write_file(&instances.join("b/mods"), "dup.jar", b"identical mod bytes");
+        let a = base.join("a");
+        let b = base.join("b");
+        write_file(&a, "dup.bin", b"identical mod bytes");
+        write_file(&b, "dup.bin", b"identical mod bytes");
 
-        let report = deduplicate_instances(&instances, &cas).await.unwrap();
+        let report = deduplicate_dirs(&[a.clone(), b.clone()], &cas, Some(&["bin"]))
+            .await
+            .unwrap();
         assert!(report.scanned_files >= 2);
         assert!(report.deduplicated_files >= 1);
         assert!(report.bytes_reclaimed >= b"identical mod bytes".len() as u64);
-        // Both instances still read identical bytes, through whatever link strategy won.
         assert_eq!(
-            std::fs::read(instances.join("a/mods/dup.jar")).unwrap(),
+            std::fs::read(a.join("dup.bin")).unwrap(),
             b"identical mod bytes"
         );
         assert_eq!(
-            std::fs::read(instances.join("b/mods/dup.jar")).unwrap(),
+            std::fs::read(b.join("dup.bin")).unwrap(),
             b"identical mod bytes"
         );
         std::fs::remove_dir_all(&base).ok();
@@ -473,11 +468,9 @@ mod tests {
     async fn gc_removes_only_orphaned_blobs() {
         let base = fixture_root("gc");
         let cas = base.join("cas");
-        let instances = base.join("instances");
-        write_file(&instances.join("a/mods"), "kept.jar", b"kept");
-        let referenced = ingest_file(&cas, instances.join("a/mods/kept.jar"))
-            .await
-            .unwrap();
+        let active = base.join("active");
+        write_file(&active, "kept.bin", b"kept");
+        let referenced = ingest_file(&cas, active.join("kept.bin")).await.unwrap();
         let orphan = blob_path(&cas, "ff0000000000000000000000000000000000000aa");
         write_file(
             orphan.parent().unwrap(),
@@ -485,7 +478,9 @@ mod tests {
             b"orphan",
         );
 
-        let report = cas_garbage_collect(&cas, &instances).await.unwrap();
+        let report = cas_garbage_collect_dirs(&cas, std::slice::from_ref(&active))
+            .await
+            .unwrap();
         assert!(!orphan.exists(), "orphan blob must be removed");
         assert!(
             blob_path(&cas, &referenced.hash).exists(),

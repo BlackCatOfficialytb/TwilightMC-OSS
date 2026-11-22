@@ -2,7 +2,7 @@
 name = "twilight-modrinth"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "Apache-2.0"
 description = "Modrinth .mrpack engine for TwilightMC: index schema, client-env staging, overrides extraction and a pure-Rust ZIP/DEFLATE reader"
 
 [dependencies]
