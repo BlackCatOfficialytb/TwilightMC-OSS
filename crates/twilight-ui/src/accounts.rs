@@ -741,7 +741,7 @@ fn base64_standard(data: &[u8]) -> String {
 }
 
 /// Wraps raw PNG bytes in a `data:image/png;base64` URI.
-fn png_data_uri(bytes: &[u8]) -> String {
+pub(crate) fn png_data_uri(bytes: &[u8]) -> String {
     format!("data:image/png;base64,{}", base64_standard(bytes))
 }
 

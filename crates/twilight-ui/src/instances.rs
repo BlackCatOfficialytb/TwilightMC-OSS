@@ -617,11 +617,43 @@ pub struct FileEntry {
     pub size: u64,
     /// Unix seconds of last modification.
     pub modified: u64,
+    /// Sub-directory the file came from (`logs`, `crash-reports`,
+    /// `screenshots`). Lets the UI route reads to the right place.
+    #[serde(default)]
+    pub source: String,
 }
 
-/// Lists the image/log files of one instance sub-directory newest-first. A
-/// missing directory is an empty list, not an error (fresh instances have
-/// neither yet).
+/// Resolves an instance's real game directory. Prism layouts use `minecraft/`,
+/// legacy MultiMC layouts use `.minecraft/`, and bare layouts put folders
+/// directly under the instance root. Returns the first existing candidate, or
+/// the instance root itself when none exist yet (fresh instances).
+pub(crate) fn instance_game_dir(root: &Path, instance_id: &str) -> PathBuf {
+    let instance = root.join(instance_id);
+    for candidate in ["minecraft", ".minecraft"] {
+        let dir = instance.join(candidate);
+        if dir.is_dir() {
+            return dir;
+        }
+    }
+    instance
+}
+
+/// Resolves one game sub-folder (logs, crash-reports, screenshots) through the
+/// canonical game dir, with a clean fallback to the bare instance layout.
+pub(crate) fn instance_subdir(root: &Path, instance_id: &str, sub: &str) -> PathBuf {
+    let dir = instance_game_dir(root, instance_id).join(sub);
+    if dir.is_dir() {
+        return dir;
+    }
+    let bare = root.join(instance_id).join(sub);
+    if bare.is_dir() {
+        return bare;
+    }
+    dir
+}
+
+/// Lists image/log files of one directory newest-first. A missing directory is
+/// an empty list, not an error (fresh instances have neither yet).
 pub(crate) async fn list_dir_files(
     dir: &Path,
     extensions: &[&str],
@@ -649,6 +681,7 @@ pub(crate) async fn list_dir_files(
             name: entry.file_name().to_string_lossy().to_string(),
             size: meta.len(),
             modified,
+            source: String::new(),
         });
     }
     files.sort_by(|a, b| {
@@ -659,19 +692,68 @@ pub(crate) async fn list_dir_files(
     Ok(files)
 }
 
-/// Screenshot browser data: every PNG in the instance's `minecraft/screenshots`.
+/// Rejects traversal / absolute paths for file-name-only IPC arguments.
+fn validate_leaf_name(name: &str) -> Result<(), String> {
+    if name.is_empty()
+        || name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+        || name.contains(':')
+        || Path::new(name).is_absolute()
+    {
+        return Err("invalid file name".into());
+    }
+    Ok(())
+}
+
+async fn list_screenshots_for(root: &Path, instance_id: &str) -> Result<Vec<FileEntry>, String> {
+    let dir = instance_subdir(root, instance_id, "screenshots");
+    let mut files = list_dir_files(&dir, &["png"]).await?;
+    for file in &mut files {
+        file.source = "screenshots".to_owned();
+    }
+    Ok(files)
+}
+
+/// Screenshot browser data: every PNG in the instance's screenshots folder
+/// (canonical `minecraft/`, legacy `.minecraft/` or bare layout).
 #[tauri::command]
 pub async fn list_screenshots(
     app: AppHandle,
     instance_id: String,
 ) -> Result<Vec<FileEntry>, String> {
     validate_instance_id(&instance_id)?;
-    let dir = instances_root(&app)
-        .await?
-        .join(&instance_id)
-        .join("minecraft")
-        .join("screenshots");
-    list_dir_files(&dir, &["png"]).await
+    list_screenshots_for(&instances_root(&app).await?, &instance_id).await
+}
+
+/// Reads one screenshot and wraps the PNG bytes in a data URI. Tauri v2's
+/// `convertFileSrc` depends on the asset-protocol scope; this IPC proxy always
+/// works, including for instances on drives outside the configured scope.
+#[tauri::command]
+pub async fn read_instance_screenshot(
+    app: AppHandle,
+    instance_id: String,
+    file_name: String,
+) -> Result<String, String> {
+    validate_instance_id(&instance_id)?;
+    read_screenshot_data_uri(&instances_root(&app).await?, &instance_id, &file_name).await
+}
+
+async fn read_screenshot_data_uri(
+    root: &Path,
+    instance_id: &str,
+    file_name: &str,
+) -> Result<String, String> {
+    validate_leaf_name(file_name)?;
+    if !file_name.to_ascii_lowercase().ends_with(".png") {
+        return Err("only PNG screenshots are supported".into());
+    }
+    let file = instance_subdir(root, instance_id, "screenshots").join(file_name);
+    if !file.is_file() {
+        return Err(format!("screenshot {file_name} is not present"));
+    }
+    let bytes = tokio::fs::read(&file).await.map_err(|e| e.to_string())?;
+    Ok(crate::accounts::png_data_uri(&bytes))
 }
 
 /// Removes a screenshot from the instance's screenshots folder for good (the
@@ -683,21 +765,19 @@ pub async fn delete_screenshot(
     file_name: String,
 ) -> Result<(), String> {
     validate_instance_id(&instance_id)?;
-    if file_name.is_empty()
-        || !file_name.to_ascii_lowercase().ends_with(".png")
-        || file_name.contains('/')
-        || file_name.contains('\\')
-        || file_name.contains("..")
-        || file_name.contains(':')
-    {
+    delete_screenshot_file(&instances_root(&app).await?, &instance_id, &file_name).await
+}
+
+async fn delete_screenshot_file(
+    root: &Path,
+    instance_id: &str,
+    file_name: &str,
+) -> Result<(), String> {
+    validate_leaf_name(file_name)?;
+    if !file_name.to_ascii_lowercase().ends_with(".png") {
         return Err("invalid screenshot name".into());
     }
-    let file = instances_root(&app)
-        .await?
-        .join(&instance_id)
-        .join("minecraft")
-        .join("screenshots")
-        .join(&file_name);
+    let file = instance_subdir(root, instance_id, "screenshots").join(file_name);
     if !file.is_file() {
         return Err(format!("screenshot {file_name} is not present"));
     }
@@ -706,16 +786,123 @@ pub async fn delete_screenshot(
         .map_err(|e| e.to_string())
 }
 
-/// Log browser data: every `.log` / `.txt` in the instance's `minecraft/logs`.
+/// Log browser data: `.log`, `.txt` and rotated `.log.gz` files from both
+/// `<game_dir>/logs/` and `<game_dir>/crash-reports/`, newest-first.
 #[tauri::command]
 pub async fn list_logs(app: AppHandle, instance_id: String) -> Result<Vec<FileEntry>, String> {
     validate_instance_id(&instance_id)?;
-    let dir = instances_root(&app)
-        .await?
-        .join(&instance_id)
-        .join("minecraft")
-        .join("logs");
-    list_dir_files(&dir, &["log", "txt"]).await
+    let root = instances_root(&app).await?;
+    let mut files = gather_log_dir(&root, &instance_id, "logs").await?;
+    files.extend(gather_log_dir(&root, &instance_id, "crash-reports").await?);
+    files.sort_by(|a, b| {
+        b.modified
+            .cmp(&a.modified)
+            .then_with(|| a.name.cmp(&b.name))
+    });
+    Ok(files)
+}
+
+async fn gather_log_dir(
+    root: &Path,
+    instance_id: &str,
+    source: &str,
+) -> Result<Vec<FileEntry>, String> {
+    let dir = instance_subdir(root, instance_id, source);
+    let mut files = list_dir_files(&dir, &["log", "txt", "gz"]).await?;
+    // only ".log.gz" rotations belong here, not arbitrary gzip archives
+    files.retain(|f| {
+        let lower = f.name.to_ascii_lowercase();
+        !lower.ends_with(".gz") || lower.ends_with(".log.gz")
+    });
+    for file in &mut files {
+        file.source = source.to_owned();
+    }
+    Ok(files)
+}
+
+/// Reads one log/crash file. Rotated `.log.gz` files are decompressed with the
+/// crate's pure-Rust DEFLATE engine; plain logs are decoded lossily as UTF-8.
+#[tauri::command]
+pub async fn read_instance_log(
+    app: AppHandle,
+    instance_id: String,
+    file_name: String,
+    source: String,
+) -> Result<String, String> {
+    validate_instance_id(&instance_id)?;
+    validate_leaf_name(&file_name)?;
+    let source = match source.trim() {
+        "crash-reports" => "crash-reports",
+        _ => "logs",
+    };
+    let file = instance_subdir(&instances_root(&app).await?, &instance_id, source).join(&file_name);
+    if !file.is_file() {
+        return Err(format!("log {file_name} is not present"));
+    }
+    let bytes = tokio::fs::read(&file).await.map_err(|e| e.to_string())?;
+    decode_log_bytes(&file_name, &bytes)
+}
+
+/// Decodes one log file's bytes: rotated `.log.gz` files go through the pure-
+/// Rust DEFLATE engine, plain files are lossy UTF-8.
+fn decode_log_bytes(file_name: &str, bytes: &[u8]) -> Result<String, String> {
+    if file_name.to_ascii_lowercase().ends_with(".gz") {
+        let decoded = twilight_modrinth::gzip_inflate(bytes).map_err(|e| e.to_string())?;
+        Ok(String::from_utf8_lossy(&decoded).into_owned())
+    } else {
+        Ok(String::from_utf8_lossy(bytes).into_owned())
+    }
+}
+
+/// Returns the canonical absolute path of an instance game folder (or one file
+/// inside it) for Copy Path actions. No existence check — the user may copy a
+/// path before the folder exists.
+#[tauri::command]
+pub async fn instance_game_path(
+    app: AppHandle,
+    instance_id: String,
+    sub: String,
+    file_name: Option<String>,
+) -> Result<String, String> {
+    validate_instance_id(&instance_id)?;
+    let root = instances_root(&app).await?;
+    let mut target = if sub.trim().is_empty() {
+        instance_game_dir(&root, &instance_id)
+    } else {
+        instance_subdir(&root, &instance_id, sub.trim())
+    };
+    if let Some(name) = file_name.filter(|n| !n.trim().is_empty()) {
+        validate_leaf_name(&name)?;
+        target = target.join(name);
+    }
+    Ok(target.to_string_lossy().into_owned())
+}
+
+/// Reveals an instance game folder (or one file inside it) in the platform
+/// file browser, resolving the canonical game dir on the backend. `sub` is
+/// one of `logs`, `crash-reports`, `screenshots` or empty for the game dir.
+#[tauri::command]
+pub async fn open_instance_game_folder(
+    app: AppHandle,
+    instance_id: String,
+    sub: String,
+    file_name: Option<String>,
+) -> Result<(), String> {
+    validate_instance_id(&instance_id)?;
+    let root = instances_root(&app).await?;
+    let mut target = if sub.trim().is_empty() {
+        instance_game_dir(&root, &instance_id)
+    } else {
+        instance_subdir(&root, &instance_id, sub.trim())
+    };
+    if let Some(name) = file_name.filter(|n| !n.trim().is_empty()) {
+        validate_leaf_name(&name)?;
+        target = target.join(name);
+    }
+    if !target.exists() {
+        return Err(format!("path not found: {}", target.display()));
+    }
+    crate::spawn_open(&target.to_string_lossy())
 }
 
 #[cfg(test)]
@@ -1064,5 +1251,117 @@ mod tests {
         assert_eq!(display_loader(Some("Horizon-Rust")), "Horizon");
         assert_eq!(display_loader(Some("forge")), "Forge");
         assert_eq!(display_loader(Some("neoforge")), "NeoForge");
+    }
+
+    #[test]
+    fn game_dir_resolution_covers_all_three_layouts() {
+        let root = temp_root();
+        std::fs::create_dir_all(root.join("modern").join("minecraft").join("logs")).unwrap();
+        std::fs::create_dir_all(root.join("legacy").join(".minecraft").join("logs")).unwrap();
+        std::fs::create_dir_all(root.join("bare").join("logs")).unwrap();
+        assert_eq!(
+            instance_game_dir(&root, "modern"),
+            root.join("modern").join("minecraft")
+        );
+        assert_eq!(
+            instance_game_dir(&root, "legacy"),
+            root.join("legacy").join(".minecraft")
+        );
+        assert_eq!(instance_game_dir(&root, "bare"), root.join("bare"));
+        assert_eq!(
+            instance_subdir(&root, "modern", "logs"),
+            root.join("modern").join("minecraft").join("logs")
+        );
+        assert_eq!(
+            instance_subdir(&root, "bare", "logs"),
+            root.join("bare").join("logs")
+        );
+    }
+
+    /// gzip around a DEFLATE stored block (BTYPE=00) for a hermetic fixture.
+    fn gzip_fixture(payload: &[u8]) -> Vec<u8> {
+        let mut out = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 3];
+        out.push(0x01);
+        let len = payload.len() as u16;
+        out.extend_from_slice(&len.to_le_bytes());
+        out.extend_from_slice(&(!len).to_le_bytes());
+        out.extend_from_slice(payload);
+        out.extend_from_slice(&[0; 8]);
+        out
+    }
+
+    #[tokio::test]
+    async fn logs_scan_minecraft_and_crash_reports_and_decode_gzip() {
+        let root = temp_root();
+        let logs = root.join("inst").join("minecraft").join("logs");
+        let crashes = root.join("inst").join("minecraft").join("crash-reports");
+        std::fs::create_dir_all(&logs).unwrap();
+        std::fs::create_dir_all(&crashes).unwrap();
+        std::fs::write(logs.join("latest.log"), b"latest\n").unwrap();
+        std::fs::write(crashes.join("crash-2026.txt"), b"crash\n").unwrap();
+        let rotated = gzip_fixture(b"rotated log line\n");
+        std::fs::write(logs.join("2026-01-01.log.gz"), &rotated).unwrap();
+
+        let a = gather_log_dir(&root, "inst", "logs").await.unwrap();
+        let b = gather_log_dir(&root, "inst", "crash-reports")
+            .await
+            .unwrap();
+        assert_eq!(a.len(), 2); // .log + .log.gz, not the arbitrary gzip
+        assert!(a.iter().all(|f| f.source == "logs"));
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0].source, "crash-reports");
+
+        let text = decode_log_bytes("2026-01-01.log.gz", &rotated).unwrap();
+        assert_eq!(text, "rotated log line\n");
+        assert_eq!(decode_log_bytes("latest.log", b"plain").unwrap(), "plain");
+    }
+
+    #[tokio::test]
+    async fn screenshot_listing_uses_canonical_dir_and_rejects_traversal() {
+        let root = temp_root();
+        let shots = root.join("inst").join("minecraft").join("screenshots");
+        std::fs::create_dir_all(&shots).unwrap();
+        std::fs::write(shots.join("shot.png"), b"png").unwrap();
+        let listed = list_screenshots_for(&root, "inst").await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "shot.png");
+        assert_eq!(listed[0].source, "screenshots");
+        assert!(validate_leaf_name("../shot.png").is_err());
+        assert!(validate_leaf_name("sub/shot.png").is_err());
+    }
+
+    #[tokio::test]
+    async fn screenshot_read_proxies_png_and_delete_resolves_canonical_dir() {
+        let root = temp_root();
+        let shots = root.join("inst").join("minecraft").join("screenshots");
+        std::fs::create_dir_all(&shots).unwrap();
+        let png = b"\x89PNG\r\n\x1a\nfixture";
+        std::fs::write(shots.join("shot.png"), png).unwrap();
+
+        let uri = read_screenshot_data_uri(&root, "inst", "shot.png")
+            .await
+            .unwrap();
+        assert!(uri.starts_with("data:image/png;base64,"));
+        assert!(
+            read_screenshot_data_uri(&root, "inst", "../shot.png")
+                .await
+                .is_err()
+        );
+        assert!(
+            read_screenshot_data_uri(&root, "inst", "shot.jpg")
+                .await
+                .is_err()
+        );
+
+        delete_screenshot_file(&root, "inst", "shot.png")
+            .await
+            .unwrap();
+        assert!(!shots.join("shot.png").exists());
+        // a second delete reports the missing file instead of succeeding silently
+        assert!(
+            delete_screenshot_file(&root, "inst", "shot.png")
+                .await
+                .is_err()
+        );
     }
 }

@@ -136,6 +136,7 @@
 
   // ---- edit instance (full-page view on the `edit` route) ----
   let editFor = $state(null);
+  let editSection = $state('mods');
 
   // View routing: the sidebar nav selects a surface; an open editor takes
   // over the whole main column ('instances' | 'settings' | 'edit').
@@ -524,6 +525,15 @@
 
   function openEdit(inst) {
     editFor = inst;
+    editSection = 'mods';
+  }
+
+  // The grid card's Logs action opens the selected instance's real Logs tab
+  // (the console drawer below is reserved for live launch output).
+  function viewInstanceLogs(inst) {
+    if (!inst) return;
+    editFor = inst;
+    editSection = 'logs';
   }
   // ---- right context panel (Yardarm grammar: selection drives it) ----
 
@@ -919,6 +929,7 @@
           {storage}
           {blindMode}
           {deafMode}
+          bind:section={editSection}
           onback={() => (editFor = null)}
           onopenconsole={() => (drawerOpen = true)}
           onlaunch={launchInstance}
@@ -1026,7 +1037,7 @@
           onedit={openEdit}
           onrename={renameInstance}
           onopenfolder={openInstanceFolder}
-          onviewlogs={() => (drawerOpen = true)}
+          onviewlogs={(inst) => viewInstanceLogs(inst ?? selectedInst)}
           ondelete={requestDelete}
           onclosemenu={() => (menuFor = null)}
           onadd={openWizard}

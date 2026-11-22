@@ -156,7 +156,10 @@
       </button>
       <button
         class="block w-full px-3 py-1.5 text-left text-[12px] hover:bg-(--bg-subtle)"
-        onclick={onviewlogs}
+        onclick={() => {
+          onclosemenu();
+          onviewlogs();
+        }}
       >
         ▤ {t('instance-view-logs')}
       </button>

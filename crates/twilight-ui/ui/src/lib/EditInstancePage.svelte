@@ -16,7 +16,16 @@
   import ModrinthBrowserModal from './ModrinthBrowserModal.svelte';
   import { t } from './i18n.svelte.ts';
 
-  let { instance, storage = null, blindMode = false, deafMode = false, onback, onopenconsole, onlaunch } = $props();
+  let {
+    instance,
+    storage = null,
+    blindMode = false,
+    deafMode = false,
+    section = $bindable('mods'),
+    onback,
+    onopenconsole,
+    onlaunch,
+  } = $props();
 
   const sections = [
     { id: 'components', label: 'edit-components', icon: '🧱' },
@@ -28,8 +37,6 @@
     { id: 'logs', label: 'edit-logs', icon: '📜' },
     { id: 'settings', label: 'edit-settings', icon: '⚙' },
   ];
-  let section = $state('mods');
-
   // ---- mods state ----
   let mods = $state([]);
   let modsBusy = $state(false);
@@ -161,22 +168,70 @@
   let filesBusy = $state(false);
   let filesMsg = $state('');
 
-  // forward-slash joined game paths (open_path + asset URLs both want them)
-  function gamePath(...parts) {
-    const root = storage ? storage.instances_dir.replace(/\\/g, '/') : '';
-    return [root, instance.id, 'minecraft', ...parts].filter(Boolean).join('/');
+  // Bundled/custom icon image URL (the icon may be an absolute file path).
+  function assetSrc(path) {
+    const convert = window.__TAURI__?.core?.convertFileSrc;
+    return convert ? convert(path) : path;
+  }
+
+  // Canonical game paths are resolved by the backend (minecraft/, .minecraft/
+  // or the bare instance root); the UI never guesses a game-dir layout.
+  async function gamePath(sub, name) {
+    try {
+      return await window.__TAURI__.core.invoke('instance_game_path', {
+        instanceId: instance.id,
+        sub,
+        fileName: name ?? null,
+      });
+    } catch {
+      const root = storage ? storage.instances_dir.replace(/\\/g, '/') : '';
+      return [root, instance.id, 'minecraft', sub, name].filter(Boolean).join('/');
+    }
+  }
+
+  async function openGameFolder(sub, name) {
+    try {
+      await window.__TAURI__.core.invoke('open_instance_game_folder', {
+        instanceId: instance.id,
+        sub,
+        fileName: name ?? null,
+      });
+    } catch (e) {
+      filesMsg = String(e);
+      toast(String(e), 'error');
+    }
+  }
+
+  // Screenshot bytes arrive as data URIs through IPC: reliable in Tauri v2
+  // regardless of asset-protocol scope or drive letter.
+  let screenshotUris = $state({});
+  let gameDirDisplay = $state('');
+
+  async function loadGameDirDisplay() {
+    gameDirDisplay = await gamePath('');
+  }
+
+  async function loadScreenshotUris(rows) {
+    const pairs = await Promise.all(
+      rows.map(async (row) => {
+        try {
+          const uri = await window.__TAURI__.core.invoke('read_instance_screenshot', {
+            instanceId: instance.id,
+            fileName: row.name,
+          });
+          return [row.name, uri];
+        } catch {
+          return [row.name, ''];
+        }
+      }),
+    );
+    screenshotUris = Object.fromEntries(pairs);
   }
 
   // the backups folder sits next to minecraft, not inside it
   function backupsPath() {
     const root = storage ? storage.instances_dir.replace(/\\/g, '/') : '';
     return [root, instance.id, 'backups'].filter(Boolean).join('/');
-  }
-
-  // tauri asset-protocol URL for a full filesystem path (thumbnails)
-  function assetSrc(path) {
-    const convert = window.__TAURI__?.core?.convertFileSrc;
-    return convert ? convert(path) : path;
   }
 
   function fmtSize(bytes) {
@@ -319,11 +374,16 @@
     filesBusy = true;
     try {
       const rows = await window.__TAURI__.core.invoke(which, { instanceId: instance.id });
-      if (which === 'list_screenshots') screenshots = rows;
-      else logs = rows;
+      if (which === 'list_screenshots') {
+        screenshots = rows;
+        await loadScreenshotUris(rows);
+      } else {
+        logs = rows;
+      }
       filesMsg = '';
     } catch (e) {
       filesMsg = String(e);
+      toast(String(e), 'error');
     } finally {
       filesBusy = false;
     }
@@ -498,7 +558,9 @@
 
   async function copyLightboxImage() {
     try {
-      const resp = await fetch(assetSrc(gamePath('screenshots', lightbox.name)));
+      const uri = screenshotUris[lightbox.name];
+      if (!uri) throw new Error(t('screenshots-copy-image-error'));
+      const resp = await fetch(uri);
       const blob = await resp.blob();
       await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
       toast(t('screenshots-copied-image'), 'success');
@@ -507,8 +569,11 @@
     }
   }
 
-  async function deleteLightbox() {
-    const shot = lightbox;
+  async function copyScreenshotPath() {
+    await copyText(await gamePath('screenshots', lightbox.name), 'screenshots-copied-path');
+  }
+
+  async function deleteScreenshot(shot) {
     const ok = await confirmAlert({
       title: t('screenshots-delete-confirm-title'),
       message: t('screenshots-delete-confirm', { name: shot.name }),
@@ -520,27 +585,70 @@
         instanceId: instance.id,
         fileName: shot.name,
       });
-      lightbox = null;
+      if (lightbox?.name === shot.name) lightbox = null;
       await listFiles('list_screenshots');
+      toast(t('screenshots-deleted'), 'success');
     } catch (e) {
       toast(String(e), 'error');
     }
   }
 
-  function openFolder(path) {
-    window.__TAURI__.core.invoke('open_path', { path }).catch((e) => (filesMsg = String(e)));
+  async function deleteLightbox() {
+    if (lightbox) await deleteScreenshot(lightbox);
   }
 
-  // lazy per-tab loads: worlds and packs fetch whenever their tab opens
+  async function openFolder(target) {
+    const path = typeof target === 'string' ? target : await target;
+    try {
+      await window.__TAURI__.core.invoke('open_path', { path });
+    } catch (e) {
+      filesMsg = String(e);
+      toast(String(e), 'error');
+    }
+  }
+
+  // ---- log viewer ----
+  let selectedLog = $state(null); // FileEntry
+  let logText = $state('');
+  let logTextBusy = $state(false);
+  let logTextMsg = $state('');
+
+  async function selectLog(entry) {
+    selectedLog = entry;
+    logTextBusy = true;
+    logTextMsg = '';
+    try {
+      logText = await window.__TAURI__.core.invoke('read_instance_log', {
+        instanceId: instance.id,
+        fileName: entry.name,
+        source: entry.source || 'logs',
+      });
+    } catch (e) {
+      logText = '';
+      logTextMsg = String(e);
+      toast(String(e), 'error');
+    } finally {
+      logTextBusy = false;
+    }
+  }
+
+  async function copySelectedLog() {
+    if (!selectedLog) return;
+    if (!logText) await selectLog(selectedLog);
+    await copyText(logText, 'logs-copied-log');
+  }
+
+  // lazy per-tab loads: worlds, packs, screenshots and logs fetch on open
   $effect(() => {
     if (section === 'worlds') listWorlds();
     else if (section === 'resourcepacks' || section === 'shaderpacks') listPacks();
+    else if (section === 'screenshots') listFiles('list_screenshots');
+    else if (section === 'logs') listFiles('list_logs');
   });
 
   onMount(() => {
     listMods();
-    listFiles('list_screenshots');
-    listFiles('list_logs');
+    loadGameDirDisplay();
   });
 </script>
 
@@ -709,7 +817,7 @@
             class="rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
             disabled={!storage}
             title={storage ? t('edit-open-mods-title') : t('common-unknown')}
-            onclick={() => openFolder(gamePath('mods'))}
+            onclick={() => openGameFolder('mods')}
           >
             <Twemoji emoji="📂" /> {t('edit-open-mods')}
           </button>
@@ -887,20 +995,31 @@
             class="rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
             disabled={!storage}
             title={storage ? (section === 'shaderpacks' ? t('packs-open-shaders-title') : t('packs-open-packs-title')) : t('common-unknown')}
-            onclick={() => openFolder(gamePath(section === 'shaderpacks' ? 'shaderpacks' : 'resourcepacks'))}
+            onclick={() => openGameFolder(section === 'shaderpacks' ? 'shaderpacks' : 'resourcepacks')}
           >
             <Twemoji emoji="📂" /> {t(section === 'shaderpacks' ? 'packs-open-shaders' : 'packs-open-packs')}
           </button>
         </div>
       {:else if section === 'screenshots'}
-        <h2 class="text-[16px] font-semibold">{t('edit-screenshots-title')}</h2>
-        <p class="mt-1 text-[12px] text-(--text-muted)">
-          {t('edit-screenshots-desc')}
-        </p>
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h2 class="text-[16px] font-semibold">{t('edit-screenshots-title')}</h2>
+            <p class="mt-1 text-[12px] text-(--text-muted)">
+              {t('edit-screenshots-desc')}
+            </p>
+          </div>
+          <button
+            class="shrink-0 rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
+            disabled={filesBusy}
+            title={t('common-refresh')}
+            onclick={() => listFiles('list_screenshots')}
+          >
+            ↻ {t('common-refresh')}
+          </button>
+        </div>
 
         <div class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
           {#each screenshots as shot (shot.name)}
-            <!-- card is a div: a real button would nest nothing here, keep it simple -->
             <div
               class="group relative overflow-hidden rounded border border-(--border) bg-(--bg-subtle) hover:border-(--accent)"
               role="button"
@@ -914,14 +1033,46 @@
                 }
               }}
             >
-              <img
-                src={assetSrc(gamePath('screenshots', shot.name))}
-                alt={shot.name}
-                loading="lazy"
-                class="aspect-video w-full object-cover"
-              />
+              {#if screenshotUris[shot.name]}
+                <img
+                  src={screenshotUris[shot.name]}
+                  alt={shot.name}
+                  loading="lazy"
+                  class="aspect-video w-full object-contain"
+                />
+              {:else}
+                <div class="flex aspect-video w-full items-center justify-center px-2 text-center text-[11px] text-(--text-muted)">
+                  {t('screenshots-preview-unavailable')}
+                </div>
+              {/if}
               <div class="truncate px-2 py-1.5 text-[11px] text-(--text-muted)" title={shot.name}>
                 {shot.name}
+              </div>
+              <div class="flex items-center gap-1 border-t border-(--border) px-1.5 py-1">
+                <button
+                  class="rounded px-1.5 py-0.5 text-[10px] text-(--text-muted) hover:bg-(--bg-canvas) hover:text-(--text-main)"
+                  title={t('screenshots-copy-path')}
+                  onclick={async (e) => {
+                    e.stopPropagation();
+                    await copyText(await gamePath('screenshots', shot.name), 'screenshots-copied-path');
+                  }}>{t('screenshots-copy-path')}</button
+                >
+                <button
+                  class="rounded px-1.5 py-0.5 text-[10px] text-(--text-muted) hover:bg-(--bg-canvas) hover:text-(--text-main)"
+                  title={t('screenshots-open-folder')}
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    openGameFolder('screenshots', shot.name);
+                  }}>{t('common-open')}</button
+                >
+                <button
+                  class="ml-auto rounded px-1.5 py-0.5 text-[10px] text-rose-400 hover:bg-rose-500/10"
+                  title={t('common-delete')}
+                  onclick={async (e) => {
+                    e.stopPropagation();
+                    await deleteScreenshot(shot);
+                  }}>{t('common-delete')}</button
+                >
               </div>
             </div>
           {:else}
@@ -940,47 +1091,92 @@
         <button
           class="mt-3 rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
           title={t('edit-open-screenshots-title')}
-          onclick={() => openFolder(gamePath('screenshots'))}
+          onclick={() => openGameFolder('screenshots')}
         >
           <Twemoji emoji="📂" /> {t('edit-open-screenshots')}
         </button>
       {:else if section === 'logs'}
-        <h2 class="text-[16px] font-semibold">{t('edit-logs-title')}</h2>
-        <p class="mt-1 text-[12px] text-(--text-muted)">
-          {t('edit-logs-desc')}
-        </p>
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h2 class="text-[16px] font-semibold">{t('edit-logs-title')}</h2>
+            <p class="mt-1 text-[12px] text-(--text-muted)">
+              {t('edit-logs-desc')}
+            </p>
+          </div>
+          <button
+            class="shrink-0 rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main) disabled:opacity-40"
+            disabled={filesBusy}
+            title={t('common-refresh')}
+            onclick={() => listFiles('list_logs')}
+          >
+            ↻ {t('common-refresh')}
+          </button>
+        </div>
 
-        <table class="mt-6 w-full overflow-hidden rounded border border-(--border) bg-(--bg-subtle) text-[12px]">
-          <tbody>
-            {#each logs as log (log.name)}
-              <tr class="flex items-center gap-3 border-b border-(--border) px-3 py-2 last:border-b-0">
-                <td class="min-w-0 flex-1">
-                  <div class="truncate" title={log.name}>{log.name}</div>
-                  <div class="text-[10px] text-(--text-muted)">{fmtSize(log.size)} · {fmtTime(log.modified)}</div>
-                </td>
-                <td class="shrink-0">
-                  <button
-                    class="rounded px-2 py-1 text-[11px] text-(--text-muted) hover:bg-(--bg-canvas) hover:text-(--text-main)"
-                    title={t('edit-open-log-title')}
-                    onclick={() => openFolder(gamePath('logs', log.name))}
-                  >
-                    {t('common-open')}
-                  </button>
-                </td>
-              </tr>
+        <div class="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+          <table class="w-full overflow-hidden rounded border border-(--border) bg-(--bg-subtle) text-[12px]">
+            <tbody>
+              {#each logs as log (log.source + '/' + log.name)}
+                <tr
+                  class="flex cursor-pointer items-center gap-3 border-b border-(--border) px-3 py-2 last:border-b-0 {selectedLog?.name ===
+                  log.name && selectedLog?.source === log.source
+                    ? 'bg-(--accent)/10'
+                    : 'hover:bg-(--bg-canvas)'}"
+                  onclick={() => selectLog(log)}
+                >
+                  <td class="min-w-0 flex-1">
+                    <div class="truncate" title={log.name}>{log.name}</div>
+                    <div class="text-[10px] text-(--text-muted)">
+                      {log.source || 'logs'} · {fmtSize(log.size)} · {fmtTime(log.modified)}
+                    </div>
+                  </td>
+                  <td class="shrink-0">
+                    <button
+                      class="rounded px-2 py-1 text-[11px] text-(--text-muted) hover:bg-(--bg-canvas) hover:text-(--text-main)"
+                      title={t('edit-open-log-title')}
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        openGameFolder(log.source || 'logs', log.name);
+                      }}
+                    >
+                      {t('common-open')}
+                    </button>
+                  </td>
+                </tr>
+              {:else}
+                <tr>
+                  <td class="px-3 py-3 text-(--text-muted)">
+                    {#if filesBusy}
+                      {t('edit-logs-loading')}
+                    {:else}
+                      {t('edit-logs-empty')}
+                    {/if}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+
+          <div class="min-w-0 rounded border border-(--border) bg-(--bg-subtle) p-3">
+            {#if selectedLog}
+              <div class="flex items-center justify-between gap-2">
+                <span class="truncate text-[12px] font-medium" title={selectedLog.name}>{selectedLog.name}</span>
+                <button
+                  class="shrink-0 rounded px-2 py-1 text-[11px] text-(--text-muted) hover:bg-(--bg-canvas) hover:text-(--text-main)"
+                  disabled={logTextBusy}
+                  onclick={copySelectedLog}>{t('logs-copy-log')}</button
+                >
+              </div>
+              {#if logTextMsg}
+                <p role="alert" class="mt-1 text-[11px] text-rose-400">{logTextMsg}</p>
+              {/if}
+              <pre
+                class="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded bg-(--bg-canvas) p-2 font-mono text-[11px] leading-5">{#if logTextBusy}{t('edit-logs-loading')}{:else}{logText || t('logs-empty-content')}{/if}</pre>
             {:else}
-              <tr>
-                <td class="px-3 py-3 text-(--text-muted)">
-                  {#if filesBusy}
-                    {t('edit-logs-loading')}
-                  {:else}
-                    {t('edit-logs-empty')}
-                  {/if}
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+              <p class="text-[12px] text-(--text-muted)">{t('logs-select-hint')}</p>
+            {/if}
+          </div>
+        </div>
         {#if filesMsg}
           <p class="mt-2 text-[12px] text-rose-400">{filesMsg}</p>
         {/if}
@@ -994,9 +1190,16 @@
           <button
             class="rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
             title={t('edit-open-logs-title')}
-            onclick={() => openFolder(gamePath('logs'))}
+            onclick={() => openGameFolder('logs')}
           >
             <Twemoji emoji="📂" /> {t('edit-open-logs')}
+          </button>
+          <button
+            class="rounded px-2.5 py-1.5 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+            title={t('edit-open-crash-reports-title')}
+            onclick={() => openGameFolder('crash-reports')}
+          >
+            <Twemoji emoji="📂" /> {t('edit-open-crash-reports')}
           </button>
         </div>
       {:else}
@@ -1029,9 +1232,9 @@
           {#if nameNotice}
             <p class="mt-2 text-[11px] text-(--fg-2)">{nameNotice}</p>
           {/if}
-          <div class="mt-2 space-y-1 font-mono text-[11px] text-(--text-muted)" title={gamePath()}>
-            <div class="break-all">{t('edit-game-folder', { path: gamePath() })}</div>
-            <div class="break-all">{t('edit-mods-folder', { path: gamePath('mods') })}</div>
+          <div class="mt-2 space-y-1 font-mono text-[11px] text-(--text-muted)" title={gameDirDisplay}>
+            <div class="break-all">{t('edit-game-folder', { path: gameDirDisplay })}</div>
+            <div class="break-all">{t('edit-mods-folder', { path: `${gameDirDisplay}/mods` })}</div>
           </div>
         </div>
 
@@ -1156,12 +1359,18 @@
       }}
       onkeydown={(e) => e.key === 'Escape' && closeLightbox()}
     >
-      <img
-        src={assetSrc(gamePath('screenshots', lightbox.name))}
-        alt={lightbox.name}
-        class="max-h-full max-w-full rounded border border-(--border-1) object-contain shadow-2xl"
-        draggable="false"
-      />
+      {#if screenshotUris[lightbox.name]}
+        <img
+          src={screenshotUris[lightbox.name]}
+          alt={lightbox.name}
+          class="max-h-full max-w-full rounded border border-(--border-1) object-contain shadow-2xl"
+          draggable="false"
+        />
+      {:else}
+        <p class="rounded border border-(--border-1) bg-(--bg-subtle) px-4 py-3 text-[12px] text-(--text-muted)">
+          {t('screenshots-preview-unavailable')}
+        </p>
+      {/if}
       <div class="mt-3 max-w-full truncate text-[12px] text-(--fg-2)" title={lightbox.name}>
         {lightbox.name}
       </div>
@@ -1174,13 +1383,13 @@
         </button>
         <button
           class="rounded border border-(--border-1) px-3 py-1.5 text-[12px] text-(--fg-2) hover:text-(--fg-1)"
-          onclick={() => copyText(gamePath('screenshots', lightbox.name), 'screenshots-copied-path')}
+          onclick={copyScreenshotPath}
         >
           {t('screenshots-copy-path')}
         </button>
         <button
           class="rounded border border-(--border-1) px-3 py-1.5 text-[12px] text-(--fg-2) hover:text-(--fg-1)"
-          onclick={() => openFolder(gamePath('screenshots', lightbox.name))}
+          onclick={() => openGameFolder('screenshots', lightbox.name)}
         >
           {t('screenshots-open-folder')}
         </button>

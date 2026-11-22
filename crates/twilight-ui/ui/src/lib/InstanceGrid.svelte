@@ -37,7 +37,7 @@
       onedit={() => onedit?.(inst)}
       onrename={() => onrename?.(inst)}
       onopenfolder={() => onopenfolder?.(inst.id)}
-      onviewlogs={onviewlogs}
+      onviewlogs={() => onviewlogs?.(inst)}
       ondelete={() => ondelete?.(inst.id)}
       onclosemenu={onclosemenu}
     />

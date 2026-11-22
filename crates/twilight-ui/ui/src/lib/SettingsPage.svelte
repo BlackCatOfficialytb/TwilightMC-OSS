@@ -796,8 +796,12 @@
           {/if}
 
           <div class="mt-3">
-            <label class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('settings-gc-extra')}</label>
+            <label
+              for="gc-extra-jvm"
+              class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('settings-gc-extra')}</label
+            >
             <input
+              id="gc-extra-jvm"
               class="mt-1 h-8 w-full rounded border border-(--border) bg-(--bg-canvas) px-2.5 font-mono text-[11px] outline-none focus:border-(--accent)"
               bind:value={extraJvmArgs}
               placeholder="-Xlog:gc*"
