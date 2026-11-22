@@ -145,7 +145,9 @@
 8. [ ] **1.0 UI overhaul backlog / GPUI `bolide-gpui`** — evaluate the GPUI-based `bolide-gpui` shell as the 1.0 client (native renderer, no WebView2/WebKitGTK dependency), with the current Tauri UI kept as the fallback until the rewrite reaches feature parity.
 9. [ ] **Separate-repo `TwilightCoreMod` + cosmetics sync** — `TwilightCoreMod` lives in its own repository and is consumed here as an external artifact; add the cosmetics sync channel (cape/elytra catalogue + account cosmetics manifest) so server and client see the same cosmetics set.
 
-## Mission 5: Deep Horizon Launcher & Engine Integration (`upstream/horizon` reference)
+- [x] **`twilight-cas` publishing preparation / release readiness (Apache-2.0)** — complete `crates.io` metadata (version 0.1.0, repo/homepage/readme/keywords/categories), vendored `LICENSE` inside the crate, passing `cargo publish --dry-run --allow-dirty`, fully generic API (`deduplicate_dirs`, `cas_garbage_collect_dirs`) with game-launcher-agnostic docs, plus a reusable `twilight-ui/src/cas.rs` wrapper for instance scanning.
+
+## Mission 5: Deep Horizon Launcher & Engine Integration — *ACTIVE upcoming milestone* (`upstream/horizon` reference)
 
 Preamble: `upstream/horizon` is a read-only reference submodule; integration lives in `crates/twilight-horizon` (reference) plus the `twilight-ui` engine-selection surface — never compiling or linking Horizon's C++ from the client.
 
