@@ -449,7 +449,8 @@ pub async fn import_curseforge_pack(
         .await
         .curseforge_api_key
         .unwrap_or_default();
-    import_curseforge_pack_core(&game_dir, api_key.trim(), &bytes).await
+    let cas_root = crate::mods::cas_root_if_enabled(&app).await?;
+    import_curseforge_pack_core(&game_dir, api_key.trim(), &bytes, cas_root.as_deref()).await
 }
 
 /// Returns the single top-level wrapper folder an archive nests its files in
@@ -472,6 +473,7 @@ pub(crate) async fn import_curseforge_pack_core(
     game_dir: &Path,
     api_key: &str,
     bytes: &[u8],
+    cas_root: Option<&Path>,
 ) -> Result<CurseImportReport, String> {
     let entries = extract_archive(bytes).map_err(|e| e.to_string())?;
     let prefix = archive_prefix(&entries, "manifest.json");
@@ -507,6 +509,9 @@ pub(crate) async fn import_curseforge_pack_core(
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         std::fs::write(&dest, data).map_err(|e| e.to_string())?;
+        if let Some(cas_root) = cas_root {
+            crate::mods::cas_dedupe_dest(cas_root, &dest).await?;
+        }
         overrides_extracted += 1;
     }
 
@@ -760,7 +765,7 @@ mod tests {
             ("overrides/", b""),
         ]);
         let game_dir = scratch("import");
-        let report = import_curseforge_pack_core(&game_dir, "", &zip)
+        let report = import_curseforge_pack_core(&game_dir, "", &zip, None)
             .await
             .unwrap();
         assert_eq!(report.name, "BareBones Template (Cleanroom)");
@@ -790,7 +795,7 @@ mod tests {
             ("overrides/../../worse.txt", b"more escaped"),
         ]);
         let game_dir = scratch("slip");
-        let report = import_curseforge_pack_core(&game_dir, "", &zip)
+        let report = import_curseforge_pack_core(&game_dir, "", &zip, None)
             .await
             .unwrap();
         assert_eq!(report.overrides_extracted, 1, "only the safe entry");
@@ -809,7 +814,7 @@ mod tests {
             ("overrides/config/x.cfg", b"x"),
         ]);
         let game_dir = scratch("other");
-        let report = import_curseforge_pack_core(&game_dir, "", &zip)
+        let report = import_curseforge_pack_core(&game_dir, "", &zip, None)
             .await
             .unwrap();
         assert!(!report.barebones_marker);
@@ -826,7 +831,7 @@ mod tests {
     async fn archives_without_a_manifest_are_rejected() {
         let zip = stored_zip(&[("readme.txt", b"no manifest")]);
         let game_dir = scratch("nomanifest");
-        let err = import_curseforge_pack_core(&game_dir, "", &zip)
+        let err = import_curseforge_pack_core(&game_dir, "", &zip, None)
             .await
             .unwrap_err();
         assert!(err.contains("manifest.json is missing"));

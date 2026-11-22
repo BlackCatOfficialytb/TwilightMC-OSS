@@ -265,6 +265,10 @@ fn main() {
             prefs::set_curseforge_api_key,
             prefs::get_horizon_prefs,
             prefs::set_horizon_prefs,
+            prefs::get_cas_stats,
+            prefs::set_cas_links,
+            prefs::run_cas_deduplicate,
+            prefs::run_cas_gc,
             storage::get_storage,
             storage::set_folder_dir,
             storage::clean_staging

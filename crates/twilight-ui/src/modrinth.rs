@@ -403,6 +403,7 @@ async fn install_project_with_deps(
     client: &reqwest::Client,
     api_base: &str,
     mods_dir: &Path,
+    cas_root: Option<&Path>,
     project_id: &str,
     game_version: &str,
     loader: &str,
@@ -455,6 +456,7 @@ async fn install_project_with_deps(
                 client,
                 api_base,
                 mods_dir,
+                cas_root,
                 &dep,
                 game_version,
                 loader,
@@ -476,9 +478,16 @@ async fn install_project_with_deps(
     };
     let dest = mods_dir.join(&filename);
     ParallelDownloader::new(client.clone(), 4)
-        .download_all(&[DownloadRequest { url, dest, sha1 }])
+        .download_all(&[DownloadRequest {
+            url,
+            dest: dest.clone(),
+            sha1,
+        }])
         .await
         .map_err(|e| e.to_string())?;
+    if let Some(cas_root) = cas_root {
+        crate::mods::cas_dedupe_dest(cas_root, &dest).await?;
+    }
     installed.push(filename);
     Ok(installed)
 }
@@ -498,11 +507,13 @@ pub async fn install_mod_with_deps(
     validate_project_id(&project_id)?;
     let root = instances_root(&app).await?;
     let dir = mods_dir(&root, &instance_id).await?;
+    let cas_root = crate::mods::cas_root_if_enabled(&app).await?;
     let mut visited = HashSet::new();
     install_project_with_deps(
         &reqwest::Client::new(),
         API_BASE,
         &dir,
+        cas_root.as_deref(),
         &project_id,
         &game_version,
         &loader,
@@ -1026,10 +1037,16 @@ pub async fn install_modrinth_batch(
             sha1: file.sha1,
         });
     }
+    let cas_root = crate::mods::cas_root_if_enabled(&app).await?;
     let downloaded = ParallelDownloader::new(reqwest::Client::new(), 6)
         .download_all(&reqs)
         .await
         .map_err(|e| e.to_string())?;
+    if let Some(cas_root) = cas_root.as_deref() {
+        for file in &downloaded {
+            crate::mods::cas_dedupe_dest(cas_root, &file.dest).await?;
+        }
+    }
     Ok(downloaded
         .into_iter()
         .map(|f| {
@@ -1058,6 +1075,7 @@ pub async fn install_cleanroom_core_mods(
     let root = instances_root(&app).await?;
     let dir = mods_dir(&root, &instance_id).await?;
     let client = reqwest::Client::new();
+    let cas_root = crate::mods::cas_root_if_enabled(&app).await?;
     let mut installed = Vec::new();
     for slug in CLEANROOM_CORE_MODS {
         installed.extend(
@@ -1065,6 +1083,7 @@ pub async fn install_cleanroom_core_mods(
                 &client,
                 API_BASE,
                 &dir,
+                cas_root.as_deref(),
                 slug,
                 "1.12.2",
                 "forge",
@@ -1430,6 +1449,7 @@ mod tests {
             &client,
             &api,
             &dir,
+            None,
             "minecraft-access",
             "1.21.4",
             "fabric",
@@ -1487,6 +1507,7 @@ mod tests {
             &client,
             &api,
             &dir,
+            None,
             "minecraft-access",
             "1.21.4",
             "quilt",
@@ -1531,6 +1552,7 @@ mod tests {
             &client,
             &api,
             &dir,
+            None,
             "child",
             "1.21.4",
             "fabric",

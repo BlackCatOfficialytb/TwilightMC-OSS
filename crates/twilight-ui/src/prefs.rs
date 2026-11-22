@@ -200,6 +200,55 @@ pub async fn set_horizon_prefs(app: AppHandle, horizon_path: Option<String>) -> 
     save_settings(&settings_path(&app).await?, &settings).await
 }
 
+/// Persisted zero-copy linking preference (Settings → Folders).
+#[tauri::command]
+pub async fn set_cas_links(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let mut settings = load_settings(&settings_path(&app).await?).await;
+    settings.use_cas_links = enabled;
+    save_settings(&settings_path(&app).await?, &settings).await
+}
+
+// ---- global CAS (uv-style hardlinks / symlinks / NTFS junctions) ----
+
+/// Live CAS stats: how many blobs are stored and how many bytes they use.
+#[derive(Debug, Clone, Serialize)]
+pub struct CasStats {
+    pub blob_count: usize,
+    pub total_size_bytes: u64,
+    pub use_cas_links: bool,
+}
+
+#[tauri::command]
+pub async fn get_cas_stats(app: AppHandle) -> Result<CasStats, String> {
+    let settings = load_settings(&settings_path(&app).await?).await;
+    let shared = crate::storage::shared_root(&app).await?;
+    let cas_root = shared.join("cas");
+    let stats = twilight_cas::cas_stats(&cas_root).map_err(|e| e.to_string())?;
+    Ok(CasStats {
+        blob_count: stats.blob_count,
+        total_size_bytes: stats.total_size_bytes,
+        use_cas_links: settings.use_cas_links,
+    })
+}
+
+#[tauri::command]
+pub async fn run_cas_deduplicate(app: AppHandle) -> Result<twilight_cas::DedupeReport, String> {
+    let instances_dir = crate::instances::instances_root(&app).await?;
+    let cas_root = crate::storage::shared_root(&app).await?.join("cas");
+    twilight_cas::deduplicate_instances(&instances_dir, &cas_root)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn run_cas_gc(app: AppHandle) -> Result<twilight_cas::GcReport, String> {
+    let instances_dir = crate::instances::instances_root(&app).await?;
+    let cas_root = crate::storage::shared_root(&app).await?.join("cas");
+    twilight_cas::cas_garbage_collect(&cas_root, &instances_dir)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// Persisted accessibility flags shown in the Settings page.
 #[derive(Debug, Clone, Serialize)]
 pub struct AccessibilityConfig {

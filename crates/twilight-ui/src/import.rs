@@ -529,6 +529,7 @@ pub async fn import_instance_archive(
                 &dir.join("minecraft"),
                 key.trim(),
                 &bytes,
+                None,
             )
             .await
             {
@@ -736,6 +737,7 @@ mod tests {
             &root.join(&id).join("minecraft"),
             "",
             &zip,
+            None,
         ))
         .unwrap();
         assert_eq!(report.missing_mods.len(), 1);

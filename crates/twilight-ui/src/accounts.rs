@@ -10,7 +10,7 @@ use twilight_auth::{
     ElybyDevicePoll, ElybyToken, MicrosoftAuth, generate_offline_uuid,
 };
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub(crate) struct Settings {
     #[serde(default)]
     pub(crate) active_account: Option<String>,
@@ -98,6 +98,49 @@ pub(crate) struct Settings {
     /// GC flags.
     #[serde(default)]
     pub(crate) extra_jvm_args: Option<String>,
+    /// Zero-copy linking: installed mods are hardlinks into the global CAS
+    /// (with symlink/junction/copy fallback) instead of duplicated jars.
+    /// Defaults to **true** for both existing and new settings files.
+    #[serde(default = "default_true")]
+    pub(crate) use_cas_links: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            active_account: None,
+            shared_dir: None,
+            instances_dir: None,
+            java_path: None,
+            custom_java_paths: Vec::new(),
+            selected_java_path: None,
+            min_memory_mb: 0,
+            max_memory_mb: 0,
+            theme: None,
+            msa_client_id: None,
+            elyby_client_id: None,
+            mode: None,
+            versions_dir: None,
+            mods_dir: None,
+            icons_dir: None,
+            java_dir: None,
+            skins_dir: None,
+            blind_mode: false,
+            deaf_mode: false,
+            downloads_dir: None,
+            servers_dir: None,
+            curseforge_api_key: None,
+            horizon_path: None,
+            gc_preset: None,
+            custom_gc_flags: Vec::new(),
+            extra_jvm_args: None,
+            use_cas_links: true,
+        }
+    }
 }
 
 async fn app_dir(app: &AppHandle) -> Result<PathBuf, String> {

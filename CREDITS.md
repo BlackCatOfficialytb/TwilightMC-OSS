@@ -21,6 +21,12 @@ govern those snapshots themselves.
   Freesm mirrors), instance-root resolution conventions and icon artwork
   conventions.
 
+### Horizon Launcher
+
+- **https://github.com/horizon-rust/horizon** · see upstream license · a
+  Rust-native open-source Minecraft launcher (used as a read-only reference
+  by `twilight-horizon` for asset layout and engine integration).
+
 ### Freesm Launcher
 
 - **https://github.com/FreesmTeam/FreesmLauncher** · GPL-3.0 · a Prism fork

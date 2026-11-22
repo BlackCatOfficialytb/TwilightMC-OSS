@@ -9,7 +9,55 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::AppHandle;
 
+use crate::accounts::{load_settings, settings_path};
 use crate::instances::{FileEntry, instances_root, list_dir_files, validate_instance_id};
+use crate::storage::shared_root;
+
+/// The shared CAS root when the user enabled zero-copy linking
+/// (`use_cas_links`), else `None`.
+pub(crate) async fn cas_root_if_enabled(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    let settings = load_settings(&settings_path(app).await?).await;
+    if !settings.use_cas_links {
+        return Ok(None);
+    }
+    Ok(Some(shared_root(app).await?.join("cas")))
+}
+
+/// Deduplicates an existing file: ingests it into the CAS and atomically
+/// replaces `dest` with a hardlink/symlink (best-effort copy fallback).
+/// Safe when the blob is already present — the result is the same either way.
+pub(crate) async fn cas_dedupe_dest(cas_root: &Path, dest: &Path) -> Result<(), String> {
+    let Some(meta) = tokio::fs::metadata(dest).await.ok().filter(|m| m.is_file()) else {
+        return Ok(()); // nothing to dedupe
+    };
+    if meta.len() == 0 {
+        return Ok(());
+    }
+    let ingest = twilight_cas::ingest_file(cas_root, dest)
+        .await
+        .map_err(|e| e.to_string())?;
+    let blob = twilight_cas::blob_path(cas_root, &ingest.hash);
+    if !tokio::fs::try_exists(&blob)
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        return Ok(());
+    }
+    if tokio::fs::try_exists(dest)
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        tokio::fs::remove_file(dest)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    if twilight_cas::link_or_copy(&blob, dest).await.is_err() {
+        tokio::fs::copy(&blob, dest)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 
 /// One installed mod file. `filename` is the exact on-disk name (with its
 /// state suffix) that the toggle/delete IPC round-trips unchanged; the table
@@ -194,9 +242,23 @@ pub async fn import_mod(
     if dest.exists() {
         return Err(format!("mod {file_name} already exists"));
     }
-    tokio::fs::copy(&src, &dest)
-        .await
-        .map_err(|e| e.to_string())?;
+    if let Some(cas_root) = cas_root_if_enabled(&app).await? {
+        // ingest into CAS first, then install the jar as a hardlink — the
+        // source copy never duplicates into the mods dir.
+        let ingest = twilight_cas::ingest_file(&cas_root, &src)
+            .await
+            .map_err(|e| e.to_string())?;
+        let blob = twilight_cas::blob_path(&cas_root, &ingest.hash);
+        if twilight_cas::link_or_copy(&blob, &dest).await.is_err() {
+            tokio::fs::copy(&src, &dest)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    } else {
+        tokio::fs::copy(&src, &dest)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 

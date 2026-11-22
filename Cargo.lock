@@ -4131,6 +4131,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "twilight-cas"
+version = "0.5.0"
+dependencies = [
+ "serde",
+ "sha1",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "twilight-cli"
 version = "0.5.0"
 dependencies = [
@@ -4269,6 +4279,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tokio",
  "twilight-auth",
+ "twilight-cas",
  "twilight-cli",
  "twilight-downloader",
  "twilight-horizon",

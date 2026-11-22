@@ -345,6 +345,68 @@
     };
   });
 
+  // ---- global CAS storage (uv-style) ----
+  let casStats = $state(null);
+  let casBusy = $state(false);
+  let casMsg = $state('');
+
+  function formatBytes(bytes) {
+    const value = Number(bytes) || 0;
+    if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+    if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${value} B`;
+  }
+
+  async function refreshCasStats() {
+    casBusy = true;
+    casMsg = '';
+    try {
+      casStats = await window.__TAURI__.core.invoke('get_cas_stats');
+    } catch (e) {
+      casMsg = String(e);
+    } finally {
+      casBusy = false;
+    }
+  }
+
+  async function runCasDeduplicate() {
+    casBusy = true;
+    casMsg = '';
+    try {
+      const report = await window.__TAURI__.core.invoke('run_cas_deduplicate');
+      casMsg = t('cas-done-deduplicate', {
+        files: report.deduplicated_files,
+        size: formatBytes(report.bytes_reclaimed),
+      });
+      await refreshCasStats();
+    } catch (e) {
+      casMsg = String(e);
+    } finally {
+      casBusy = false;
+    }
+  }
+
+  async function runCasGc() {
+    casBusy = true;
+    casMsg = '';
+    try {
+      const report = await window.__TAURI__.core.invoke('run_cas_gc');
+      casMsg = t('cas-done-gc', {
+        count: report.removed_blobs,
+        size: formatBytes(report.reclaimed_bytes),
+      });
+      await refreshCasStats();
+    } catch (e) {
+      casMsg = String(e);
+    } finally {
+      casBusy = false;
+    }
+  }
+
+  $effect(() => {
+    if (section === 'storage' && casStats === null) void refreshCasStats();
+  });
+
   // The path that actually runs for a row; downloads shows the effective
   // staging root rather than the raw override.
   function resolvedPath(key) {
@@ -965,6 +1027,66 @@
               {/if}
             </div>
           {/each}
+
+          <div class="mt-6 rounded border border-(--border) bg-(--bg-subtle) p-4">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-[12px] font-medium">{t('cas-title')}</div>
+                <p class="mt-0.5 text-[11px] text-(--text-muted)">{t('cas-desc')}</p>
+              </div>
+              <label class="mt-0.5 flex shrink-0 items-center gap-2" for="cas-links-toggle">
+                <input
+                  id="cas-links-toggle"
+                  type="checkbox"
+                  class="h-4 w-4 accent-(--accent)"
+                  checked={casStats?.use_cas_links ?? true}
+                  disabled={casBusy}
+                  onchange={async (e) => {
+                    const enabled = e.currentTarget.checked;
+                    try {
+                      await window.__TAURI__.core.invoke('set_cas_links', { enabled });
+                      if (casStats) casStats = { ...casStats, use_cas_links: enabled };
+                    } catch (err) {
+                      casMsg = String(err);
+                    }
+                  }}
+                />
+                <span class="text-[12px] text-(--text-main)">{t('cas-enable')}</span>
+              </label>
+            </div>
+            {#if casStats}
+              <div class="mt-3 flex flex-wrap gap-4 text-[11px] text-(--text-muted)">
+                <span>{t('cas-stats-blobs', { count: casStats.blob_count })}</span>
+                <span>{t('cas-stats-size', { size: formatBytes(casStats.total_size_bytes) })}</span>
+              </div>
+            {/if}
+            <div class="mt-3 flex flex-wrap gap-2">
+              <button
+                class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main) disabled:opacity-40"
+                disabled={casBusy}
+                onclick={refreshCasStats}
+              >
+                {t('cas-refresh')}
+              </button>
+              <button
+                class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main) disabled:opacity-40"
+                disabled={casBusy}
+                onclick={runCasDeduplicate}
+              >
+                {t('cas-optimize')}
+              </button>
+              <button
+                class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main) disabled:opacity-40"
+                disabled={casBusy}
+                onclick={runCasGc}
+              >
+                {t('cas-gc')}
+              </button>
+            </div>
+            {#if casMsg}
+              <p role="status" class="mt-3 text-[11px] text-(--accent)">{casMsg}</p>
+            {/if}
+          </div>
         {/if}
       {:else if section === 'apikeys'}
         <h2 class="text-[16px] font-semibold">{t('settings-api-title')}</h2>

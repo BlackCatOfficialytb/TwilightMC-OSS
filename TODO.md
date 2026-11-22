@@ -144,3 +144,13 @@
 7. [ ] **Code signing preparation** — apply to open-source signing foundations as they are evaluated during Beta/Stable (Windows Authenticode for the 7-zip/MSI-less `.exe` pair, plus the macOS `codesign`/notarization path) and complete a full dependency-license review of the shipped binaries (AGPL/Apache/BSD notices, `CREDITS.md` completeness) before the first Stable; a trusted, affordable certificate is planned once community funding allows.
 8. [ ] **1.0 UI overhaul backlog / GPUI `bolide-gpui`** — evaluate the GPUI-based `bolide-gpui` shell as the 1.0 client (native renderer, no WebView2/WebKitGTK dependency), with the current Tauri UI kept as the fallback until the rewrite reaches feature parity.
 9. [ ] **Separate-repo `TwilightCoreMod` + cosmetics sync** — `TwilightCoreMod` lives in its own repository and is consumed here as an external artifact; add the cosmetics sync channel (cape/elytra catalogue + account cosmetics manifest) so server and client see the same cosmetics set.
+
+## Mission 5: Deep Horizon Launcher & Engine Integration (`upstream/horizon` reference)
+
+Preamble: `upstream/horizon` is a read-only reference submodule; integration lives in `crates/twilight-horizon` (reference) plus the `twilight-ui` engine-selection surface — never compiling or linking Horizon's C++ from the client.
+
+- [ ] **Reference consumption:** `twilight-horizon` reads `upstream/horizon` via `std::process::Command` (best-effort, no direct compile) for launcher CLI, asset/CLI conventions and `map_to_resources` export so we can stay compatible.
+- [ ] **Engine selection:** `Settings → Horizon Engine` already exists; ensure `--assets` / `--game-dir` flags map to upstream Horizon launcher CLI, and Horrhi logs stream into the console drawer (Partial integration exists).
+- [ ] **Zero-copy global CAS doc:** Extract `uv`-style global CAS, symlink, hardlink and NTFS junction concepts from `upstream/horizon` into `crates/twilight-cas` notes.
+- [ ] **Horizon Java compat:** Detect `compatibleJavaMajors` from `mmc-pack.json`/`manifest.json` when a user creates/imports a Horri instance (Java 8+, use newest).
+- [ ] **Read-only manifest hardening:** Enforce no `unwrap()/expect()` and read-only paths in `upstream/horizon` usage; add a CI audit that Horizon submodule is never modified (CI fails if `git diff -- upstream/horizon`).

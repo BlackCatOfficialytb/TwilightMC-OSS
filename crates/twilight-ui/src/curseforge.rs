@@ -277,6 +277,10 @@ pub async fn install_curseforge_mod(
         }])
         .await
         .map_err(|e| e.to_string())?;
+    let dest = dir.join(&name);
+    if let Some(cas_root) = crate::mods::cas_root_if_enabled(&app).await? {
+        crate::mods::cas_dedupe_dest(&cas_root, &dest).await?;
+    }
     Ok(name)
 }
 
