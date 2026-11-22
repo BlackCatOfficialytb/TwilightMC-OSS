@@ -169,12 +169,6 @@
 
   // ---- theme / chrome ----
 
-  // The topbar quick-toggle is binary: it snaps to the Twilight pair,
-  // leaving palette presets to the Settings grid.
-  function toggleTheme() {
-    theme = isDarkTheme(theme) ? 'twilight-light' : 'twilight-dark';
-  }
-
   async function scanJava() {
     if (scanning) return;
     scanning = true;
@@ -1009,18 +1003,6 @@
             placeholder={t('filter-instances')}
             bind:value={instanceQuery}
           />
-          <span class="flex-1"></span>
-          <button
-            class="flex rounded px-2 py-1 text-sm text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
-            title={isDarkTheme(theme) ? t('theme-to-light') : t('theme-to-dark')}
-            onclick={toggleTheme}
-          >
-            {#if isDarkTheme(theme)}
-              <LauncherIcon name="sun" size={15} />
-            {:else}
-              <LauncherIcon name="moon" size={15} />
-            {/if}
-          </button>
         </div>
 
         <!-- instance grid -->
