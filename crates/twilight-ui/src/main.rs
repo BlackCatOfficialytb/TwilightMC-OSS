@@ -4,6 +4,7 @@
 mod accounts;
 mod curseforge;
 mod export;
+mod import;
 mod instance;
 mod instances;
 mod java;
@@ -245,6 +246,8 @@ fn main() {
             modpack::install_mrpack,
             modpack::install_modpack,
             modpack::import_curseforge_pack,
+            import::inspect_instance_import,
+            import::import_instance_archive,
             prefs::get_java_prefs,
             prefs::set_java_prefs,
             prefs::add_custom_java,

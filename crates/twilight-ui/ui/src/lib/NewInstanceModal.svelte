@@ -9,11 +9,17 @@
   import InstanceIconPicker from './InstanceIconPicker.svelte';
   import { t } from './i18n.svelte.ts';
 
-  let { groups = [], blindMode = false, deafMode = false, onimport, onclose, oncreated } = $props();
+  let {
+    groups = [],
+    blindMode = false,
+    deafMode = false,
+    importPath = '',
+    onclose,
+    oncreated,
+  } = $props();
 
-  // Freesm/Prism platform rail: Custom is the live builder; Import hands the
-  // picked archive to the host (mrpack/twpack/CurseForge zip); the pack
-  // sources are announced but not wired yet.
+  // Freesm/Prism platform rail: Custom is the live builder; Import inspects a
+  // local/remote archive and routes it through the matching backend pipeline.
   const PLATFORMS = [
     { id: 'custom', label: 'wizard-custom', enabled: true },
     { id: 'import', label: 'wizard-import', enabled: true },
@@ -107,6 +113,13 @@
   let creating = $state(false);
   let createError = $state('');
 
+  // ---- universal archive import ----
+  let importSource = $state('');
+  let importInfo = $state(null);
+  let importOutcome = $state(null);
+  let importBusy = $state(false);
+  let importError = $state('');
+
   // ---- accessibility checklist (Blind/Deaf Mode assistive mods) ----
   const BLIND_ASSIST = [
     {
@@ -175,6 +188,9 @@
       !creating &&
       !(needsBuilds && loaderBuildsState === 'loading')
   );
+  const canImport = $derived(
+    platform === 'import' && !!importInfo && !!name.trim() && !importBusy && !importOutcome
+  );
 
   function typeLabel(type) {
     return (
@@ -234,12 +250,32 @@
     }
   }
 
-  // Import tab: hand the picked archive to the host, which routes .mrpack /
-  // .twpack / CurseForge-style packs through their dedicated installers.
-  async function importArchive() {
+  // ---- universal archive import -------------------------------------------
+  async function inspectImport(source) {
+    if (!source?.trim()) {
+      importError = t('wizard-import-source-required');
+      return;
+    }
+    importSource = source.trim();
+    importBusy = true;
+    importInfo = null;
+    importOutcome = null;
+    importError = '';
+    platform = 'import';
+    try {
+      importInfo = await invoke('inspect_instance_import', { pathOrUrl: importSource });
+      name = importInfo.name;
+    } catch (e) {
+      importError = String(e);
+    } finally {
+      importBusy = false;
+    }
+  }
+
+  async function pickImportFile() {
     const open = window.__TAURI__?.dialog?.open;
     if (!open) {
-      createError = t('status-file-picker-unavailable');
+      importError = t('status-file-picker-unavailable');
       return;
     }
     try {
@@ -248,9 +284,44 @@
         title: t('wizard-import-title'),
         filters: [{ name: t('wizard-import-filter'), extensions: ['mrpack', 'twpack', 'zip'] }],
       });
-      if (picked) onimport?.(String(picked));
+      if (picked) await inspectImport(String(picked));
     } catch (e) {
-      createError = String(e);
+      importError = String(e);
+    }
+  }
+
+  function openModPage(url) {
+    invoke('open_external_url', { url }).catch((e) => (importError = String(e)));
+  }
+
+  function finishImport(outcome) {
+    const parts = [...(outcome.warnings ?? [])];
+    if (outcome.missing_mods?.length) {
+      parts.push(
+        t('wizard-import-missing-status', { count: outcome.missing_mods.length })
+      );
+    }
+    oncreated?.({ id: outcome.id, name: name.trim() }, parts.join(' ') || '');
+  }
+
+  async function installImport() {
+    if (!canImport) return;
+    importBusy = true;
+    importError = '';
+    try {
+      const outcome = await invoke('import_instance_archive', {
+        pathOrUrl: importSource,
+        instanceName: name.trim(),
+        group: group.trim() || null,
+      });
+      importOutcome = outcome;
+      // Some mods need manual downloading — keep the dialog open with their
+      // browser links so the user is never left guessing.
+      if (!outcome.missing_mods?.length && !outcome.warnings?.length) finishImport(outcome);
+    } catch (e) {
+      importError = String(e);
+    } finally {
+      importBusy = false;
     }
   }
 
@@ -376,6 +447,7 @@
   onMount(() => {
     const closer = pushOverlay(() => onclose?.());
     fetchCatalog();
+    if (importPath) inspectImport(importPath);
     return () => popOverlay(closer);
   });
 </script>
@@ -461,7 +533,6 @@
             title={entry.enabled ? t(entry.label) : t('wizard-coming-soon')}
             onclick={() => {
               platform = entry.id;
-              if (entry.id === 'import') importArchive();
             }}
           >
             <span class="truncate">{t(entry.label)}</span>
@@ -653,23 +724,160 @@
             >
           </div>
         </div>
-      {:else}
-        <div class="flex min-w-0 flex-1 flex-col items-center justify-center gap-2 border-r border-(--border) p-6 text-center">
-          <p class="text-[13px] font-medium">
-            {platform === 'import' ? t('wizard-import') : t('wizard-coming-soon')}
-          </p>
-          <p class="max-w-[380px] text-[11.5px] leading-relaxed text-(--text-muted)">
-            {platform === 'import' ? t('wizard-import-note') : t('wizard-coming-soon')}
-          </p>
-          {#if platform === 'import'}
-            <button
-              type="button"
-              class="mt-1 rounded border border-(--accent) bg-(--accent)/15 px-3 py-1.5 text-[12px] font-medium text-(--accent) hover:bg-(--accent)/25"
-              onclick={importArchive}>{t('wizard-import')}</button
-            >
-          {/if}
-        </div>
-      {/if}
+        {:else if platform === 'import'}
+          <div class="flex min-w-0 flex-1 flex-col overflow-y-auto border-r border-(--border) p-4">
+            <div class="flex items-start justify-between gap-3">
+              <div>
+                <h4 class="text-[13px] font-semibold">{t('wizard-import')}</h4>
+                <p class="mt-1 text-[11px] text-(--text-muted)">{t('wizard-import-note')}</p>
+              </div>
+              <span class="shrink-0 text-[10px] text-(--text-muted)">.zip · .mrpack · .twpack</span>
+            </div>
+
+            <label class="mt-4 text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)" for="wizard-import-source">
+              {t('wizard-import-url')}
+            </label>
+            <div class="mt-1 flex gap-2">
+              <input
+                id="wizard-import-source"
+                class="h-8 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+                placeholder={t('wizard-import-url')}
+                bind:value={importSource}
+                onkeydown={(e) => e.key === 'Enter' && inspectImport(importSource)}
+              />
+              <button
+                type="button"
+                class="shrink-0 rounded border border-(--border) px-2.5 text-[11px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main) disabled:opacity-40"
+                disabled={importBusy}
+                onclick={() => inspectImport(importSource)}
+              >
+                {importBusy ? t('wizard-import-inspecting') : t('wizard-import-inspect')}
+              </button>
+            </div>
+            <div class="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                class="rounded bg-(--accent)/15 px-2.5 py-1.5 text-[11px] font-medium text-(--accent) hover:bg-(--accent)/25"
+                onclick={pickImportFile}>{t('wizard-import-browse')}</button
+              >
+              <span class="text-[10px] text-(--text-muted)">{t('wizard-import-filter')}</span>
+            </div>
+
+            {#if importError}
+              <p role="alert" class="mt-3 rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1.5 text-[11px] text-rose-400">{importError}</p>
+            {/if}
+
+            {#if importInfo}
+              <div class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-3">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="rounded bg-(--accent)/15 px-2 py-0.5 text-[10px] font-medium text-(--accent)">
+                    {t(`wizard-import-format-${importInfo.format}`)}
+                  </span>
+                  <span class="truncate text-[13px] font-semibold" title={importInfo.name}>{importInfo.name}</span>
+                  {#if importInfo.pack_version}
+                    <span class="text-[10px] text-(--text-muted)">{importInfo.pack_version}</span>
+                  {/if}
+                </div>
+                <div class="mt-2 flex flex-wrap gap-1.5">
+                  <span class="rounded bg-(--bg-canvas) px-2 py-0.5 text-[10px] text-(--text-muted)">
+                    MC {importInfo.game_version || '?'}
+                  </span>
+                  <span class="rounded bg-(--bg-canvas) px-2 py-0.5 text-[10px] text-(--text-muted)">
+                    {t(`wizard-import-loader-${importInfo.loader || 'none'}`)}{importInfo.loader_version ? ` ${importInfo.loader_version}` : ''}
+                  </span>
+                  <span class="rounded bg-(--bg-canvas) px-2 py-0.5 text-[10px] text-(--text-muted)">
+                    {t('wizard-import-entries', { count: importInfo.file_count })}
+                  </span>
+                  {#if importInfo.override_count}
+                    <span class="rounded bg-(--bg-canvas) px-2 py-0.5 text-[10px] text-(--text-muted)">
+                      {t('wizard-import-overrides', { count: importInfo.override_count })}
+                    </span>
+                  {/if}
+                </div>
+
+                {#if importInfo.missing_mods?.length}
+                  <div class="mt-3 rounded border border-amber-500/40 bg-amber-500/10 p-2">
+                    <p class="text-[11px] font-semibold text-amber-300">{t('wizard-import-missing-title')}</p>
+                    <p class="mt-1 text-[10px] leading-relaxed text-(--text-muted)">{t('wizard-import-missing-hint')}</p>
+                    <ul class="mt-1.5 flex flex-wrap gap-1.5">
+                      {#each importInfo.missing_mods as mod (`${mod.project_id}-${mod.file_id}`)}
+                        <li>
+                          <button
+                            type="button"
+                            class="rounded border border-(--border) px-1.5 py-0.5 text-[10px] text-(--accent) hover:bg-(--bg-canvas)"
+                            onclick={() => openModPage(mod.url)}
+                          >
+                            {t('wizard-import-open-mod', { id: mod.project_id })}{mod.required ? ` · ${t('wizard-import-required')}` : ''}
+                          </button>
+                        </li>
+                      {/each}
+                    </ul>
+                  </div>
+                {/if}
+              </div>
+            {:else if !importBusy}
+              <p class="mt-4 text-[11px] text-(--text-muted)">{t('wizard-import-preview-hint')}</p>
+            {/if}
+
+            {#if importOutcome}
+              <div role="status" class="mt-4 rounded border border-emerald-500/40 bg-emerald-500/10 p-3">
+                <p class="text-[12px] font-semibold text-emerald-300">
+                  {t('wizard-import-success', { name: name.trim() })}
+                </p>
+                {#if importOutcome.missing_mods?.length}
+                  <p class="mt-1 text-[11px] text-amber-300">
+                    {t('wizard-import-missing-status', { count: importOutcome.missing_mods.length })}
+                  </p>
+                  <ul class="mt-1.5 flex flex-wrap gap-1.5">
+                    {#each importOutcome.missing_mods as mod (`${mod.project_id}-${mod.file_id}`)}
+                      <li>
+                        <button
+                          type="button"
+                          class="rounded border border-(--border) px-1.5 py-0.5 text-[10px] text-(--accent) hover:bg-(--bg-canvas)"
+                          onclick={() => openModPage(mod.url)}
+                        >{t('wizard-import-open-mod', { id: mod.project_id })}</button
+                        >
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+                {#each importOutcome.warnings as warning}
+                  <p class="mt-1 text-[11px] text-amber-300">{warning}</p>
+                {/each}
+                <button
+                  type="button"
+                  class="mt-3 rounded bg-(--accent) px-3 py-1.5 text-[11px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
+                  onclick={() => finishImport(importOutcome)}>{t('wizard-import-finish')}</button
+                >
+              </div>
+            {/if}
+
+            <div class="mt-4 grid gap-2">
+              <label class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)" for="wizard-import-name">{t('install-instance-name')}</label>
+              <input
+                id="wizard-import-name"
+                class="h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2.5 text-[12px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+                placeholder={t('install-instance-name')}
+                bind:value={name}
+              />
+              <label class="text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)" for="wizard-import-group">{t('wizard-group')}</label>
+              <select
+                id="wizard-import-group"
+                class="h-8 w-full rounded border border-(--border) bg-(--bg-subtle) px-2 text-[12px] outline-none focus:border-(--accent)"
+                bind:value={group}
+              >
+                <option value="">{t('wizard-no-group')}</option>
+                {#each groups as g (g)}
+                  <option value={g}>{g}</option>
+                {/each}
+              </select>
+            </div>
+          </div>
+        {:else}
+          <div class="flex min-w-0 flex-1 flex-col items-center justify-center gap-2 border-r border-(--border) p-6 text-center">
+            <p class="text-[13px] font-medium">{t('wizard-coming-soon')}</p>
+          </div>
+        {/if}
 
       <aside class="flex w-[240px] shrink-0 flex-col gap-4 overflow-y-auto p-3">
         <section>
@@ -769,25 +977,38 @@
         title={t('wizard-help-title')}
         onclick={openHelp}>{t('wizard-help')}</button
       >
-      {#if createError}
-        <span class="min-w-0 flex-1 truncate text-[11px] text-red-400" title={createError}>{createError}</span>
+      {#if platform === 'import' ? importError : createError}
+        <span class="min-w-0 flex-1 truncate text-[11px] text-red-400" title={platform === 'import' ? importError : createError}>
+          {platform === 'import' ? importError : createError}
+        </span>
       {:else}
         <span class="min-w-0 flex-1 truncate text-[11px] text-(--text-muted)">
-          {selectedVersion ? t('wizard-selected', { version: selectedVersion }) : t('wizard-pick')}
+          {platform === 'import' ? t('wizard-import-note') : selectedVersion ? t('wizard-selected', { version: selectedVersion }) : t('wizard-pick')}
         </span>
       {/if}
       <button
         class="rounded px-3 py-1.5 text-[12px] text-(--text-muted) hover:text-(--text-main)"
         onclick={() => onclose?.()}>{t('common-cancel')}</button
       >
-      <button
-        class="rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
-        disabled={!canCreate}
-        title={unsupportedLoader ? t('wizard-unsupported') : t('wizard-create-title')}
-        onclick={create}
-      >
-        {creating ? t('wizard-creating') : t('common-ok')}
-      </button>
+      {#if platform === 'import'}
+        <button
+          class="rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
+          disabled={!canImport}
+          title={t('wizard-import-title')}
+          onclick={installImport}
+        >
+          {importBusy ? t('wizard-import-installing') : t('wizard-import-install')}
+        </button>
+      {:else}
+        <button
+          class="rounded bg-(--accent) px-4 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-40"
+          disabled={!canCreate}
+          title={unsupportedLoader ? t('wizard-unsupported') : t('wizard-create-title')}
+          onclick={create}
+        >
+          {creating ? t('wizard-creating') : t('common-ok')}
+        </button>
+      {/if}
     </div>
   </div>
 </div>

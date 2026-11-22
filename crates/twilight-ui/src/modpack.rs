@@ -43,7 +43,7 @@ pub struct ModpackInfo {
 
 /// Reads the archive bytes: `http(s)://` URLs go through reqwest, anything
 /// else is a local file path.
-async fn fetch_archive(path_or_url: &str) -> Result<(u64, Vec<u8>), String> {
+pub(crate) async fn fetch_archive(path_or_url: &str) -> Result<(u64, Vec<u8>), String> {
     if path_or_url.starts_with("http://") || path_or_url.starts_with("https://") {
         let bytes = reqwest::get(path_or_url)
             .await
@@ -149,9 +149,8 @@ fn meta_from_index(
     }
 }
 
-/// Reads the pack facts for the install modal.
-#[tauri::command]
-pub async fn inspect_modpack(path_or_url: String) -> Result<ModpackInfo, String> {
+/// Reads the pack facts for the install modal and the universal importer.
+pub(crate) async fn inspect_modpack_core(path_or_url: &str) -> Result<ModpackInfo, String> {
     let path_or_url = path_or_url.trim().to_owned();
     if path_or_url.is_empty() {
         return Err("modpack path or URL is required".into());
@@ -185,10 +184,15 @@ pub async fn inspect_modpack(path_or_url: String) -> Result<ModpackInfo, String>
     })
 }
 
+#[tauri::command]
+pub async fn inspect_modpack(path_or_url: String) -> Result<ModpackInfo, String> {
+    inspect_modpack_core(&path_or_url).await
+}
+
 /// Core install shared by the drop modal and the wizard's Modpack tab:
 /// stages the pack into the resolved instances library under a user-chosen
 /// (or pack-derived) id and writes the grid metadata, then returns the id.
-async fn install_pack(
+pub(crate) async fn install_pack(
     app: &AppHandle,
     path_or_url: &str,
     instance_name: &str,
@@ -247,25 +251,67 @@ pub async fn install_modpack(app: AppHandle, path_or_url: String) -> Result<Stri
 
 /// The CurseForge `manifest.json` schema (subset; unknown fields ignored).
 #[derive(Debug, Deserialize)]
-struct CurseManifest {
+pub(crate) struct CurseManifest {
     #[serde(default)]
-    name: String,
+    pub(crate) name: String,
     #[serde(default)]
-    version: String,
+    pub(crate) version: String,
     #[serde(default)]
-    files: Vec<CurseFileRef>,
+    pub(crate) files: Vec<CurseFileRef>,
     /// Folder the pack mirrors the game dir from (`overrides` by default).
     #[serde(default)]
-    overrides: String,
+    pub(crate) overrides: String,
+    #[serde(default)]
+    pub(crate) minecraft: CurseMinecraft,
+}
+
+/// The `minecraft` block: target game version and the loaders the pack needs.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct CurseMinecraft {
+    #[serde(default)]
+    pub(crate) version: String,
+    #[serde(rename = "modLoaders", default)]
+    pub(crate) mod_loaders: Vec<CurseModLoader>,
+}
+
+/// One `minecraft.modLoaders[]` entry, e.g. `{ "id": "fabric-0.16.9" }`.
+#[derive(Debug, Deserialize)]
+pub(crate) struct CurseModLoader {
+    #[serde(default)]
+    pub(crate) id: String,
+    #[serde(default)]
+    pub(crate) primary: bool,
 }
 
 /// One `files[]` entry: CurseForge project + file ids (no URLs in manifests).
 #[derive(Debug, Deserialize)]
-struct CurseFileRef {
+pub(crate) struct CurseFileRef {
     #[serde(rename = "projectID", default)]
-    project_id: u64,
+    pub(crate) project_id: u64,
     #[serde(rename = "fileID", default)]
-    file_id: u64,
+    pub(crate) file_id: u64,
+    #[serde(default)]
+    pub(crate) required: bool,
+}
+
+/// Parses a CurseForge manifest from raw archive bytes for the inspect preview.
+pub(crate) fn parse_curse_manifest(bytes: &[u8]) -> Result<CurseManifest, String> {
+    serde_json::from_slice(bytes).map_err(|e| format!("malformed CurseForge manifest.json: {e}"))
+}
+
+/// Browser fallback for a manifest file that could not be downloaded (no API
+/// key or 3rd-party distribution blocked): the project page on CurseForge.
+pub(crate) fn curse_fallback_url(project_id: u64, _file_id: u64) -> String {
+    format!("https://www.curseforge.com/projects/{project_id}")
+}
+
+/// One manifest mod the importer could not fetch, with its browser fallback.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CurseMissingMod {
+    pub project_id: u64,
+    pub file_id: u64,
+    pub required: bool,
+    pub url: String,
 }
 
 /// What a CurseForge import did, shown in the gate dialog after it runs.
@@ -279,6 +325,8 @@ pub struct CurseImportReport {
     pub mods_downloaded: Vec<String>,
     /// Manifest files not downloaded (no key, or the API fetch failed).
     pub mods_skipped: usize,
+    /// Manifest files with a direct browser fallback link, never silent.
+    pub missing_mods: Vec<CurseMissingMod>,
     /// True when the BareBones gate marker was written for this import.
     pub barebones_marker: bool,
 }
@@ -404,6 +452,21 @@ pub async fn import_curseforge_pack(
     import_curseforge_pack_core(&game_dir, api_key.trim(), &bytes).await
 }
 
+/// Returns the single top-level wrapper folder an archive nests its files in
+/// (e.g. `MyPack/`), or an empty prefix when the files live at the root.
+pub(crate) fn archive_prefix(entries: &[(String, Vec<u8>)], marker: &str) -> String {
+    for (name, _) in entries {
+        let Some(prefix) = name.strip_suffix(marker) else {
+            continue;
+        };
+        let folder = prefix.trim_end_matches(['/', '\\']);
+        if !folder.is_empty() && !folder.contains(['/', '\\']) {
+            return format!("{folder}/");
+        }
+    }
+    String::new()
+}
+
 /// AppHandle-free core of [`import_curseforge_pack`] for hermetic tests.
 pub(crate) async fn import_curseforge_pack_core(
     game_dir: &Path,
@@ -411,13 +474,13 @@ pub(crate) async fn import_curseforge_pack_core(
     bytes: &[u8],
 ) -> Result<CurseImportReport, String> {
     let entries = extract_archive(bytes).map_err(|e| e.to_string())?;
+    let prefix = archive_prefix(&entries, "manifest.json");
     let manifest_raw = entries
         .iter()
-        .find(|(name, _)| name == "manifest.json")
+        .find(|(name, _)| name.strip_prefix(&prefix) == Some("manifest.json"))
         .map(|(_, data)| data)
         .ok_or_else(|| "not a CurseForge modpack: manifest.json is missing".to_owned())?;
-    let manifest: CurseManifest = serde_json::from_slice(manifest_raw)
-        .map_err(|e| format!("malformed CurseForge manifest.json: {e}"))?;
+    let manifest = parse_curse_manifest(manifest_raw)?;
 
     let mods_dir = game_dir.join("mods");
 
@@ -428,10 +491,15 @@ pub(crate) async fn import_curseforge_pack_core(
     };
     let mut overrides_extracted = 0usize;
     for (name, data) in &entries {
-        let Some(dest) = override_dest(game_dir, &overrides_dir, name) else {
+        // A cursed archive may hide both payloads under a single wrapper
+        // folder; strip it before matching the manifest-declared overrides.
+        let clean = name.strip_prefix(&prefix).unwrap_or(name);
+        let Some(dest) = override_dest(game_dir, &overrides_dir, clean)
+            .or_else(|| override_dest(game_dir, "client-overrides", clean))
+        else {
             continue;
         };
-        if name.ends_with('/') {
+        if clean.ends_with('/') {
             std::fs::create_dir_all(&dest).map_err(|e| e.to_string())?;
             continue;
         }
@@ -458,13 +526,21 @@ pub(crate) async fn import_curseforge_pack_core(
     // as skipped instead (the UI tells the user what to do about Scalar)
     let mut downloaded = Vec::new();
     let mut skipped = 0usize;
+    let mut missing_mods = Vec::new();
     let listed: Vec<_> = manifest
         .files
         .iter()
         .filter(|f| f.project_id != 0 && f.file_id != 0)
         .collect();
+    let skipped_entry = |file: &&CurseFileRef| CurseMissingMod {
+        project_id: file.project_id,
+        file_id: file.file_id,
+        required: file.required,
+        url: curse_fallback_url(file.project_id, file.file_id),
+    };
     if api_key.trim().is_empty() {
         skipped = listed.len();
+        missing_mods.extend(listed.iter().map(skipped_entry));
     } else {
         let client = reqwest::Client::new();
         for file in &listed {
@@ -478,7 +554,10 @@ pub(crate) async fn import_curseforge_pack_core(
             .await
             {
                 Ok(Some(name)) => downloaded.push(name),
-                Ok(None) | Err(_) => skipped += 1,
+                Ok(None) | Err(_) => {
+                    skipped += 1;
+                    missing_mods.push(skipped_entry(file));
+                }
             }
         }
     }
@@ -490,6 +569,7 @@ pub(crate) async fn import_curseforge_pack_core(
         files_listed: listed.len(),
         mods_downloaded: downloaded,
         mods_skipped: skipped,
+        missing_mods,
         barebones_marker: barebones,
     })
 }

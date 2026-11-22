@@ -213,6 +213,14 @@ pub(crate) fn parse_mmc_pack(
             "net.fabricmc.fabric-loader" => loader = Some(("fabric", version())),
             "org.quiltmc.quilt-loader" => loader = Some(("quilt", version())),
             "net.legacyfabric.legacy-fabric-loader" => loader = Some(("legacyfabric", version())),
+            // Prism ships Legacy Fabric instances with only the intermediary
+            // component pinned; that uid still identifies the loader fork
+            // (its version is an intermediary build, not a loader build).
+            "net.legacyfabric.intermediary" => {
+                if loader.is_none() {
+                    loader = Some(("legacyfabric", Some(String::new())));
+                }
+            }
             // Cleanroom reuses Forge's uid: real Forge 1.12.2 builds are
             // `14.23.5.*`, while Cleanroom publishes `0.x.y-alpha` for the
             // same game version

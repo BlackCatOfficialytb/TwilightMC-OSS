@@ -268,6 +268,13 @@ code-signing certificate, so Windows SmartScreen and macOS Gatekeeper will
 warn the first time you run a downloaded binary. Nothing is wrong with the
 archive; it simply has no third-party signature attached yet.
 
+Once community funding allows — voluntary support goes exclusively through
+[Ko-fi](https://ko-fi.com/quanvm0501alt1) — and as we evaluate open-source
+signing foundations during Beta and Stable, the project plans to obtain a
+trusted, affordable code-signing certificate so these SmartScreen and
+Gatekeeper warnings can be removed. Until then, verify the published
+checksums and use the walkthrough below.
+
 There is no trust gap to bridge, because every binary is compiled
 reproducibly, straight from public open-source commits, by the public GitHub
 Actions workflows in [`.github/workflows/`](.github/workflows/) — the exact

@@ -127,6 +127,7 @@
 
   // ---- new instance wizard (layout lives in NewInstanceModal) ----
   let wizardOpen = $state(false);
+  let wizardImportPath = $state('');
 
   // ---- install modpack modal (path/URL + drop target) ----
   let modpackOpen = $state(false);
@@ -198,6 +199,7 @@
   // ---- wizard flow ----
 
   function openWizard() {
+    wizardImportPath = '';
     wizardOpen = true;
   }
 
@@ -737,13 +739,19 @@
           await window.__TAURI__.event.listen('tauri://drag-drop', (e) => {
             const path = e.payload?.paths?.[0];
             if (!path) return;
-            if (path.endsWith('.mrpack')) {
+            const lower = path.toLowerCase();
+            if (lower.endsWith('.mrpack')) {
               // install modal open: it owns the path; anywhere else:
               // intercept into the dedicated install modal
               if (modpackOpen) modpackTarget = path;
               else mrpackFor = path;
-            } else if (path.endsWith('.twpack')) {
+            } else if (lower.endsWith('.twpack')) {
               twpackFor = path;
+            } else if (lower.endsWith('.zip')) {
+              // Prism/MultiMC and CurseForge exports: open the wizard's
+              // Import tab, which inspects the archive before installing.
+              wizardImportPath = path;
+              wizardOpen = true;
             }
           }),
         );
@@ -1176,16 +1184,8 @@
       groups={groupList}
       {blindMode}
       {deafMode}
+      importPath={wizardImportPath}
       onclose={() => (wizardOpen = false)}
-      onimport={(path) => {
-        wizardOpen = false;
-        if (path.endsWith('.mrpack')) mrpackFor = path;
-        else if (path.endsWith('.twpack')) twpackFor = path;
-        else {
-          modpackOpen = true;
-          modpackTarget = path;
-        }
-      }}
       oncreated={onWizardCreated}
     />
   {/if}

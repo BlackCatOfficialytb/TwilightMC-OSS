@@ -98,9 +98,9 @@ pub async fn export_instance_twpack(
     Ok(dest.display().to_string())
 }
 
-/// Reads only the pack manifest for the import modal.
-#[tauri::command]
-pub async fn inspect_twpack(path: String) -> Result<TwpackInfo, String> {
+/// Reads only the pack manifest for the import modal (and the universal
+/// importer's format preview).
+pub(crate) async fn inspect_twpack_core(path: &str) -> Result<TwpackInfo, String> {
     let archive = path.trim().to_owned();
     if archive.is_empty() {
         return Err("pack path is required".into());
@@ -116,6 +116,11 @@ pub async fn inspect_twpack(path: String) -> Result<TwpackInfo, String> {
         loader_version: manifest.loader_version,
         file_count: manifest.files.len(),
     })
+}
+
+#[tauri::command]
+pub async fn inspect_twpack(path: String) -> Result<TwpackInfo, String> {
+    inspect_twpack_core(&path).await
 }
 
 /// Installs a `.twpack` into the resolved instances library as a new managed
