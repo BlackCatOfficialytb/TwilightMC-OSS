@@ -16,12 +16,20 @@
     saveCustomTheme,
   } from './theme';
   import { t, getLocale, setLocale, SUPPORTED_LOCALES } from './i18n.svelte.ts';
+  import { toast } from './alerts.svelte.js';
 
   let {
     version = '',
     theme = $bindable('twilight-dark'),
     blindMode = $bindable(false),
     deafMode = $bindable(false),
+    // App Developer Mode is owned by App.svelte so every screen can see it.
+    devSettings = $bindable({
+      devMode: false,
+      jdwpEnabled: false,
+      jdwpPort: 5005,
+      mixinDebug: false,
+    }),
     storage = null,
     runtimes = [],
     scanning = false,
@@ -223,9 +231,61 @@
     { id: 'apikeys', label: 'settings-api', icon: '🔑' },
     { id: 'accessibility', label: 'settings-accessibility', icon: '♿' },
     { id: 'about', label: 'settings-about', icon: 'ℹ' },
+    ...(devSettings.devMode ? [{ id: 'developer', label: 'settings-dev-title', icon: '🛠️' }] : []),
   ];
   let section = $state('appearance');
   let iconPack = $state(getIconPack());
+
+  // ---- App Developer Mode (About-tab easter egg) ----
+  let versionClicks = $state(0);
+  let devDiagnostics = $state(null);
+  let devConfig = $state('');
+  let devConfigOpen = $state(false);
+  let devBusy = $state(false);
+
+  async function onVersionClick() {
+    if (devSettings.devMode) return;
+    versionClicks += 1;
+    if (versionClicks < 7) return;
+    versionClicks = 0;
+    devSettings.devMode = true;
+    toast(t('dev-mode-unlocked'), 'success');
+    section = 'developer';
+    await loadDevDiagnostics();
+  }
+
+  async function loadDevDiagnostics() {
+    devBusy = true;
+    try {
+      devDiagnostics = await window.__TAURI__.core.invoke('get_dev_diagnostics');
+    } catch (e) {
+      toast(String(e), 'error');
+    } finally {
+      devBusy = false;
+    }
+  }
+
+  async function openDevtools() {
+    try {
+      await window.__TAURI__.core.invoke('open_devtools');
+    } catch (e) {
+      toast(String(e), 'error');
+    }
+  }
+
+  async function inspectConfig() {
+    try {
+      devConfig = await window.__TAURI__.core.invoke('get_raw_config_json');
+      devConfigOpen = true;
+    } catch (e) {
+      toast(String(e), 'error');
+    }
+  }
+
+  async function setDevMode(enabled) {
+    devSettings.devMode = enabled;
+    if (enabled) await loadDevDiagnostics();
+  }
 
   const GC_FLAGS = [
     { flag: '-XX:+UseZGC', badge: 'settings-gc-badge-15plus' },
@@ -1304,7 +1364,7 @@
             deaf: deafMode ? t('common-on') : t('common-off'),
           })}
         </p>
-      {:else}
+      {:else if section === 'about'}
         <h2 class="text-[16px] font-semibold">{t('settings-about-title')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">{t('settings-about-desc')}</p>
 
@@ -1312,7 +1372,14 @@
           <div class="flex items-center gap-2">
             <img src="/logo.png" alt="" draggable="false" class="h-10 w-10" />
             <div>
-              <div class="text-[13px] font-semibold">{t('settings-about-version', { version })}</div>
+              <button
+                type="button"
+                class="text-[13px] font-semibold text-left hover:text-(--accent)"
+                title={devSettings.devMode ? t('settings-dev-title') : t('settings-dev-hint')}
+                onclick={onVersionClick}
+              >
+                {t('settings-about-version', { version })}
+              </button>
               <div class="mt-0.5 text-[12px] text-(--text-muted)">
                 {t('settings-about-channel')}
               </div>
@@ -1337,6 +1404,120 @@
         <p class="mt-6 text-[12px] text-(--text-muted)">
           {t('settings-about-footer')}
         </p>
+      {:else if section === 'developer'}
+        <h2 class="text-[16px] font-semibold">{t('settings-dev-title')}</h2>
+        <p class="mt-1 text-[12px] text-(--text-muted)">{t('settings-dev-desc')}</p>
+
+        <div class="mt-5 rounded border border-(--border) bg-(--bg-subtle) p-4">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <div class="text-[12px] font-medium">{t('settings-dev-mode')}</div>
+              <div class="mt-0.5 text-[11px] text-(--text-muted)">{t('settings-dev-mode-desc')}</div>
+            </div>
+            <button
+              role="switch"
+              aria-checked={devSettings.devMode}
+              aria-label={t('settings-dev-mode')}
+              class="relative h-6 w-11 shrink-0 rounded-full border transition-colors {devSettings.devMode
+                ? 'border-(--accent) bg-(--accent)'
+                : 'border-(--border) bg-(--bg-subtle)'}"
+              onclick={() => setDevMode(!devSettings.devMode)}
+            >
+              <span
+                class="absolute top-[2px] left-[2px] h-[18px] w-[18px] rounded-full bg-white transition-transform {devSettings.devMode
+                  ? 'translate-x-5'
+                  : ''}"
+              ></span>
+            </button>
+          </div>
+          <button
+            class="mt-3 rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
+            onclick={openDevtools}
+          >
+            {t('settings-dev-open-devtools')}
+          </button>
+        </div>
+
+        <h3 class="mt-6 text-[12px] font-semibold uppercase tracking-wide text-(--text-muted)">
+          {t('settings-dev-debugging')}
+        </h3>
+        <div class="mt-2 space-y-2 rounded border border-(--border) bg-(--bg-subtle) p-4">
+          <label class="flex items-center gap-2 text-[12px]">
+            <input type="checkbox" bind:checked={devSettings.jdwpEnabled} />
+            {t('settings-dev-jdwp')}
+          </label>
+          <label class="flex items-center gap-2 text-[12px]">
+            <span class="text-(--text-muted)">{t('settings-dev-jdwp-port')}</span>
+            <input
+              type="number"
+              min="0"
+              max="65535"
+              class="h-7 w-24 rounded border border-(--border) bg-(--bg-subtle) px-2 font-mono text-[12px] outline-none focus:border-(--accent)"
+              bind:value={devSettings.jdwpPort}
+            />
+          </label>
+          <label class="flex items-center gap-2 text-[12px]">
+            <input type="checkbox" bind:checked={devSettings.mixinDebug} />
+            {t('settings-dev-mixin')}
+          </label>
+        </div>
+
+        <h3 class="mt-6 text-[12px] font-semibold uppercase tracking-wide text-(--text-muted)">
+          {t('settings-dev-filesystem')}
+        </h3>
+        <div class="mt-2 rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px] leading-relaxed">
+          <div class="flex justify-between gap-3">
+            <span class="text-(--text-muted)">{t('settings-dev-symlinks')}</span>
+            <span class="font-mono">
+              {devDiagnostics?.unprivilegedSymlinks === null
+                ? t('settings-dev-symlinks-na')
+                : devDiagnostics?.unprivilegedSymlinks
+                  ? t('common-on')
+                  : t('common-off')}
+            </span>
+          </div>
+          <div class="mt-1 flex justify-between gap-3">
+            <span class="text-(--text-muted)">{t('settings-dev-cas-root')}</span>
+            <span class="min-w-0 truncate font-mono" title={devDiagnostics?.casRoot}>
+              {devDiagnostics?.casRoot ?? '—'}
+            </span>
+          </div>
+          <div class="mt-1 flex justify-between gap-3">
+            <span class="text-(--text-muted)">{t('settings-dev-link-strategy')}</span>
+            <span class="font-mono">{devDiagnostics?.linkStrategy ?? '—'}</span>
+          </div>
+          <button
+            class="mt-3 rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main) disabled:opacity-50"
+            disabled={devBusy}
+            onclick={loadDevDiagnostics}
+          >
+            {t('settings-dev-refresh')}
+          </button>
+        </div>
+
+        <h3 class="mt-6 text-[12px] font-semibold uppercase tracking-wide text-(--text-muted)">
+          {t('settings-dev-storage')}
+        </h3>
+        <div class="mt-2 rounded border border-(--border) bg-(--bg-subtle) p-4">
+          <button
+            class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
+            onclick={inspectConfig}
+          >
+            {t('settings-dev-inspect-config')}
+          </button>
+        </div>
+
+        {#if devConfigOpen}
+          <div class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-3">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-[12px] font-medium">{t('settings-dev-config-title')}</span>
+              <button class="text-[12px] text-(--accent) hover:underline" onclick={() => (devConfigOpen = false)}>
+                {t('settings-dev-close')}
+              </button>
+            </div>
+            <pre class="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] text-(--text-muted)">{devConfig}</pre>
+          </div>
+        {/if}
       {/if}
 
       {#if javaMsg || storageMsg}

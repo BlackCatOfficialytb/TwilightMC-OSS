@@ -26,6 +26,9 @@ pub struct LaunchPlan {
 /// Line-oriented output pump target.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LaunchEvent {
+    /// The exact JVM command assembled for this launch (Developer Mode uses
+    /// it for "Copy Raw Launch Command"). Never printed in normal consoles.
+    Command(String),
     /// Emitted once, right after a successful spawn: engine child pid.
     Started(u32),
     Stdout(String),
@@ -46,6 +49,31 @@ pub fn build_command(plan: &LaunchPlan) -> Command {
     cmd.arg(&plan.main_class);
     cmd.args(&plan.game_args);
     cmd
+}
+
+/// Renders a launch plan as the exact command line a shell would run. Paths
+/// containing spaces are quoted; the game directory is shown for context.
+pub fn command_line(plan: &LaunchPlan) -> String {
+    fn quote(value: &str) -> String {
+        if value.contains([' ', '\t', '"']) {
+            format!("\"{}\"", value.replace('"', "\\\""))
+        } else {
+            value.to_owned()
+        }
+    }
+    let mut parts = vec![quote(&plan.java_executable.to_string_lossy())];
+    parts.extend(plan.jvm_args.iter().map(|arg| quote(arg)));
+    if !plan.classpath.is_empty() {
+        parts.push("-cp".to_owned());
+        parts.push(quote(&plan.classpath));
+    }
+    parts.push(quote(&plan.main_class));
+    parts.extend(plan.game_args.iter().map(|arg| quote(arg)));
+    format!(
+        "cd {} && {}",
+        quote(&plan.work_dir.to_string_lossy()),
+        parts.join(" ")
+    )
 }
 
 /// Spawns the game, streams stdout/stderr lines through `events`, then returns

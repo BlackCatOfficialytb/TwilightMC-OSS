@@ -7,11 +7,13 @@
   import InstanceIconPicker from './InstanceIconPicker.svelte';
   import { iconKeyAsset } from './twemoji.js';
   import { t, formatDate, formatDuration } from './i18n.svelte.ts';
+  import { toast } from './alerts.svelte.js';
 
   let {
     instance,
     storage = null,
     gameRunning = false,
+    devMode = false,
     modsCount = null,
     groups = [],
     onlaunch,
@@ -112,6 +114,26 @@
   function instancePath() {
     if (!storage) return instance.id;
     return [storage.instances_dir.replace(/\\/g, '/'), instance.id].join('/');
+  }
+
+  async function copyValue(value, message) {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast(t(message), 'success');
+    } catch (e) {
+      toast(String(e), 'error');
+    }
+  }
+
+  async function copyRawLaunchCommand() {
+    try {
+      const command = await window.__TAURI__.core.invoke('get_raw_launch_command', {
+        instanceId: instance.id,
+      });
+      await copyValue(command, 'dev-copied-command');
+    } catch (e) {
+      toast(String(e), 'error');
+    }
   }
 
   // i18n-ready: the whole sentence is one Fluent template with Intl-formatted
@@ -316,6 +338,31 @@
     >
       <LauncherIcon name="copy" size={13} /> {t('action-copy')}
     </button>
+    {#if devMode}
+      <div class="mt-1 border-t border-(--border) pt-1">
+        <p class="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">
+          {t('dev-actions-title')}
+        </p>
+        <button
+          class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+          onclick={copyRawLaunchCommand}
+        >
+          <LauncherIcon name="copy" size={13} /> {t('dev-copy-command')}
+        </button>
+        <button
+          class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+          onclick={() => copyValue(instance.id, 'dev-copied-id')}
+        >
+          <LauncherIcon name="copy" size={13} /> {t('dev-copy-id')}
+        </button>
+        <button
+          class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+          onclick={() => copyValue(instancePath(), 'dev-copied-path')}
+        >
+          <LauncherIcon name="folder" size={13} /> {t('dev-copy-path')}
+        </button>
+      </div>
+    {/if}
     <button
       class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-rose-400 hover:bg-rose-500/10"
       onclick={ondelete}

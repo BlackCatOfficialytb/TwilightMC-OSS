@@ -4,6 +4,7 @@
 
 mod args;
 mod classpath;
+mod dev;
 mod diagnostics;
 mod error;
 mod gate;
@@ -16,6 +17,7 @@ pub use args::{
     replace_tokens_in,
 };
 pub use classpath::{active_paths, classpath_string, profile_classpath, separator};
+pub use dev::{DevDebugOptions, dev_jvm_args, jdwp_arg};
 pub use diagnostics::{
     DiagnosticInfo, Hardware, SERVICE_HOSTS, VERSION_LABEL, auth_mode_name, collect_hardware,
     header_lines, mask_access_token, render, resolve_service_hosts,
@@ -30,4 +32,4 @@ pub use natives::{
     clean_natives_dir, extract_natives, extract_natives_with_7z, extract_natives_with_fallback,
     find_seven_zip, sevenzip_arguments,
 };
-pub use process::{LaunchEvent, LaunchPlan, build_command, run};
+pub use process::{LaunchEvent, LaunchPlan, build_command, command_line, run};

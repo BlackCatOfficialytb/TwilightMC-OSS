@@ -9,7 +9,7 @@ description = "Desktop launcher interface for TwilightMC"
 tauri-build = { workspace = true }
 
 [dependencies]
-tauri = { workspace = true, features = ["protocol-asset"] }
+tauri = { workspace = true, features = ["protocol-asset", "devtools"] }
 tauri-plugin-dialog = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }

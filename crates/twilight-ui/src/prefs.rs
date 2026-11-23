@@ -1,7 +1,7 @@
 // IPC bridge for launcher preferences: theme selection, java override and
 // the -Xms/-Xmx memory allocation, all persisted in `settings.json`.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
 use crate::accounts::{load_settings, save_settings, settings_path};
@@ -198,6 +198,99 @@ pub async fn set_horizon_prefs(app: AppHandle, horizon_path: Option<String>) -> 
     let mut settings = load_settings(&settings_path(&app).await?).await;
     settings.horizon_path = cleaned;
     save_settings(&settings_path(&app).await?, &settings).await
+}
+
+/// App Developer Mode preferences (Settings → Developer).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevSettings {
+    pub dev_mode: bool,
+    pub jdwp_enabled: bool,
+    pub jdwp_port: u16,
+    pub mixin_debug: bool,
+}
+
+#[tauri::command]
+pub async fn get_dev_settings(app: AppHandle) -> Result<DevSettings, String> {
+    let settings = load_settings(&settings_path(&app).await?).await;
+    Ok(DevSettings {
+        dev_mode: settings.dev_mode,
+        jdwp_enabled: settings.jdwp_enabled,
+        jdwp_port: if settings.jdwp_port == 0 {
+            5005
+        } else {
+            settings.jdwp_port
+        },
+        mixin_debug: settings.mixin_debug,
+    })
+}
+
+#[tauri::command]
+pub async fn set_dev_settings(app: AppHandle, settings: DevSettings) -> Result<(), String> {
+    let mut stored = load_settings(&settings_path(&app).await?).await;
+    stored.dev_mode = settings.dev_mode;
+    stored.jdwp_enabled = settings.jdwp_enabled;
+    stored.jdwp_port = if settings.jdwp_port == 0 {
+        5005
+    } else {
+        settings.jdwp_port
+    };
+    stored.mixin_debug = settings.mixin_debug;
+    save_settings(&settings_path(&app).await?, &stored).await
+}
+
+/// Raw `twilight_config.json` (`settings.json`) contents for the Developer tab.
+#[tauri::command]
+pub async fn get_raw_config_json(app: AppHandle) -> Result<String, String> {
+    let path = settings_path(&app).await?;
+    let bytes = tokio::fs::read(&path).await.map_err(|e| e.to_string())?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Filesystem facts the Developer tab shows alongside the CAS stats.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevDiagnostics {
+    /// `Some(true)` when an unprivileged symlink could be created on Windows;
+    /// `None` on platforms where the distinction does not apply.
+    pub unprivileged_symlinks: Option<bool>,
+    pub cas_root: String,
+    /// Strategy cascade used for a file link.
+    pub link_strategy: &'static str,
+}
+
+#[tauri::command]
+pub async fn get_dev_diagnostics(app: AppHandle) -> Result<DevDiagnostics, String> {
+    let cas_root = crate::storage::shared_root(&app)
+        .await?
+        .join("cas")
+        .to_string_lossy()
+        .into_owned();
+    Ok(DevDiagnostics {
+        unprivileged_symlinks: probe_unprivileged_symlinks(),
+        cas_root,
+        link_strategy: "hardlink → NTFS junction → symlink → copy",
+    })
+}
+
+#[cfg(windows)]
+fn probe_unprivileged_symlinks() -> Option<bool> {
+    use std::os::windows::fs::symlink_file;
+    let dir = std::env::temp_dir().join(format!("twilight-symlink-probe-{}", std::process::id()));
+    let target = dir.join("target");
+    let link = dir.join("link");
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(&target, b"probe");
+    let ok = symlink_file(&target, &link).is_ok();
+    let _ = std::fs::remove_file(&link);
+    let _ = std::fs::remove_file(&target);
+    let _ = std::fs::remove_dir(&dir);
+    Some(ok)
+}
+
+#[cfg(not(windows))]
+fn probe_unprivileged_symlinks() -> Option<bool> {
+    None
 }
 
 /// Persisted zero-copy linking preference (Settings → Folders).

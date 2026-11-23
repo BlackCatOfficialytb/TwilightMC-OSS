@@ -115,7 +115,13 @@ pub fn client_command(
         .filter(|world| !world.is_empty())
     {
         // Horizon accepts exactly one normal path component: no `/`, `\`,
-        // drive prefixes, `.` or `..` (launch_options.rs).
+        // drive prefixes, `.` or `..` (launch_options.rs). Check the raw
+        // separators too: on Unix a backslash is an ordinary filename byte.
+        if world.contains(['/', '\\']) {
+            return Err(HorizonError::Launch(format!(
+                "{world:?} is not a folder name under saves/"
+            )));
+        }
         let mut parts = Path::new(world).components();
         if !matches!(
             (parts.next(), parts.next()),

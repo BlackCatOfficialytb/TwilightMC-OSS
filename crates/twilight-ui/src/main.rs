@@ -29,6 +29,48 @@ fn get_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+/// Opens the WebView inspector. The UI only exposes this while App Developer
+/// Mode is on; the Tauri `devtools` feature must be enabled for the binary.
+#[tauri::command]
+async fn open_devtools(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+    let settings_path = crate::accounts::settings_path(&app).await?;
+    if !crate::accounts::load_settings(&settings_path)
+        .await
+        .dev_mode
+    {
+        return Err("Developer Mode is not enabled".to_owned());
+    }
+    window.open_devtools();
+    Ok(())
+}
+
+/// Injects a one-time webview keyboard listener for F12 / Ctrl+Shift+I /
+/// Cmd+Option+I. It invokes `open_devtools` only after checking the persisted
+/// setting, so a normal user never gets a debug shortcut.
+fn install_devtools_shortcut() -> tauri::Builder<tauri::Wry> {
+    tauri::Builder::default().on_page_load(|webview, _payload| {
+        let script = r#"
+          (() => {
+            if (window.__twilightDevShortcut) return;
+            window.__twilightDevShortcut = true;
+            window.addEventListener('keydown', async (e) => {
+              const chord = e.key === 'F12' ||
+                ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'i' || e.key === 'I')) ||
+                ((e.metaKey || e.ctrlKey) && e.altKey && (e.key === 'i' || e.key === 'I'));
+              if (!chord) return;
+              try {
+                const prefs = await window.__TAURI__.core.invoke('get_dev_settings');
+                if (!prefs.devMode) return;
+                e.preventDefault();
+                await window.__TAURI__.core.invoke('open_devtools');
+              } catch (_) { /* plain web build */ }
+            });
+          })();
+        "#;
+        let _ = webview.eval(script);
+    })
+}
+
 /// Reveals a filesystem path in the platform file browser.
 #[tauri::command]
 fn open_path(path: String) -> Result<(), String> {
@@ -137,10 +179,11 @@ fn main() {
     // auto-launch target before Tauri takes over the event loop.
     shortcut::init_startup_launch(&std::env::args().collect::<Vec<_>>());
 
-    let result = tauri::Builder::default()
+    let result = install_devtools_shortcut()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             get_version,
+            open_devtools,
             open_path,
             open_external_url,
             accounts::get_accounts,
@@ -215,6 +258,7 @@ fn main() {
             worlds::restore_world_backup,
             launch::launch_instance,
             launch::kill_instance,
+            launch::get_raw_launch_command,
             instances::get_instances,
             instances::create_instance,
             instances::duplicate_instance,
@@ -250,6 +294,10 @@ fn main() {
             modpack::import_curseforge_pack,
             import::inspect_instance_import,
             import::import_instance_archive,
+            prefs::get_dev_settings,
+            prefs::set_dev_settings,
+            prefs::get_raw_config_json,
+            prefs::get_dev_diagnostics,
             prefs::get_java_prefs,
             prefs::set_java_prefs,
             prefs::add_custom_java,

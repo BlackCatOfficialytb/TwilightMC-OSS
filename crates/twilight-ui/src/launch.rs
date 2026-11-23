@@ -36,6 +36,20 @@ static RUNNING: AtomicBool = AtomicBool::new(false);
 /// Live game pid (0 = none); set from the pipeline's `Started` event so
 /// `kill_instance` can stop the process tree.
 static GAME_PID: AtomicU32 = AtomicU32::new(0);
+/// Most recent assembled command per instance, captured from the pipeline's
+/// `Command` event for Developer Mode's "Copy Raw Launch Command" action.
+static LAST_COMMAND: std::sync::Mutex<Option<(String, String)>> = std::sync::Mutex::new(None);
+
+/// Exact command line of the last launch of `instance_id` (Developer Mode).
+#[tauri::command]
+pub async fn get_raw_launch_command(instance_id: String) -> Result<String, String> {
+    instances::validate_instance_id(&instance_id)?;
+    let cached = LAST_COMMAND.lock().map_err(|e| e.to_string())?;
+    match cached.as_ref() {
+        Some((id, command)) if id == &instance_id => Ok(command.clone()),
+        _ => Err("launch this instance once to capture its raw command".to_owned()),
+    }
+}
 
 /// Launches the instance `instance_id` from the shared instance library with
 /// the UI storage layout: shared artifacts live under the app data dir,
@@ -487,6 +501,38 @@ async fn run(
     }
     jvm_args.extend(gc_flags);
 
+    // App Developer Mode: debuggers never leak into a normal profile. The
+    // settings are checked again here at launch time, not just in the UI.
+    if settings.dev_mode {
+        let dev_args = twilight_launch::dev_jvm_args(twilight_launch::DevDebugOptions {
+            jdwp_enabled: settings.jdwp_enabled,
+            jdwp_port: settings.jdwp_port,
+            mixin_debug: settings.mixin_debug,
+        });
+        if settings.jdwp_enabled {
+            let _ = app.emit(
+                "launch-log",
+                LaunchLine {
+                    stream: "stdout",
+                    line: format!(
+                        "[DEV] JDWP Debugger listening on port {}",
+                        settings.jdwp_port
+                    ),
+                },
+            );
+        }
+        if settings.mixin_debug {
+            let _ = app.emit(
+                "launch-log",
+                LaunchLine {
+                    stream: "stdout",
+                    line: "[DEV] Mixin debug export and verbose logging enabled".to_owned(),
+                },
+            );
+        }
+        jvm_args.extend(dev_args);
+    }
+
     // Deaf Mode: closed captions must be on before the game boots (Horizon
     // and JVM launches share the same options.txt)
     if settings.deaf_mode {
@@ -534,9 +580,15 @@ async fn run(
     let (sink_tx, mut sink_rx) = mpsc::channel::<LaunchEvent>(512);
     let forwarder = {
         let emitters = app.clone();
+        let instance_id = instance_id.to_owned();
         tokio::spawn(async move {
             while let Some(event) = sink_rx.recv().await {
                 match event {
+                    LaunchEvent::Command(line) => {
+                        if let Ok(mut cached) = LAST_COMMAND.lock() {
+                            *cached = Some((instance_id.clone(), line));
+                        }
+                    }
                     LaunchEvent::Started(pid) => {
                         GAME_PID.store(pid, Ordering::SeqCst);
                         let _ = emitters.emit(

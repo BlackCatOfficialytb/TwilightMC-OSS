@@ -90,6 +90,22 @@
   let blindMode = $state(localStorage.getItem('twilight-blind-mode') === 'true');
   let deafMode = $state(localStorage.getItem('twilight-deaf-mode') === 'true');
 
+  // App Developer Mode: unlocked in Settings → About, persisted in settings.json.
+  let devSettings = $state({
+    devMode: false,
+    jdwpEnabled: false,
+    jdwpPort: 5005,
+    mixinDebug: false,
+  });
+  let devMode = $derived(devSettings.devMode);
+
+  $effect(() => {
+    localStorage.setItem('twilight-dev-mode', String(devSettings.devMode));
+    window.__TAURI__?.core
+      .invoke('set_dev_settings', { settings: devSettings })
+      .catch(() => {});
+  });
+
   $effect(() => {
     localStorage.setItem('twilight-blind-mode', String(blindMode));
     localStorage.setItem('twilight-deaf-mode', String(deafMode));
@@ -570,6 +586,17 @@
       } catch {
         // plain web build
       }
+      try {
+        const dev = await api('get_dev_settings');
+        devSettings = {
+          devMode: dev.devMode ?? false,
+          jdwpEnabled: dev.jdwpEnabled ?? false,
+          jdwpPort: dev.jdwpPort ?? 5005,
+          mixinDebug: dev.mixinDebug ?? false,
+        };
+      } catch {
+        // plain web build: developer tools stay off
+      }
       // lazy, once: the first Settings visit may kick off the disk scan, but
       // the page renders instantly and later visits reuse the cached list
       if (!javaScanned && runtimes.length === 0) void scanJava();
@@ -931,6 +958,7 @@
           {storage}
           {blindMode}
           {deafMode}
+          {devMode}
           bind:section={editSection}
           onback={() => (editFor = null)}
           onopenconsole={() => (drawerOpen = true)}
@@ -943,6 +971,7 @@
           bind:theme
           bind:blindMode
           bind:deafMode
+          bind:devSettings
           {storage}
           {runtimes}
           {scanning}
@@ -1122,6 +1151,7 @@
       instance={selectedInst}
       {storage}
       {gameRunning}
+      {devMode}
       modsCount={ctxMods}
       groups={groupList}
       onlaunch={() => launchInstance(selectedInst.id)}

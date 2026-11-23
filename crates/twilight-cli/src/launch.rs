@@ -941,6 +941,11 @@ pub async fn run_launch_with(
     let mut plan = plan;
     plan.jvm_args.extend(cfg.jvm_args);
     inject_authlib(&mut plan, &authlib_jar);
+    if let Some(sink) = &sink {
+        let _ = sink
+            .send(LaunchEvent::Command(twilight_launch::command_line(&plan)))
+            .await;
+    }
     let (tx, mut rx) = mpsc::channel::<LaunchEvent>(512);
     let printer = tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
@@ -963,6 +968,8 @@ pub async fn run_launch_with(
                         let _ = sink.send(LaunchEvent::Stderr(line)).await;
                     }
                 }
+                // The raw command was already forwarded to the sink above.
+                LaunchEvent::Command(_) => {}
             }
         }
     });

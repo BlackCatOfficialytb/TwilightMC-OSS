@@ -103,6 +103,22 @@ pub(crate) struct Settings {
     /// Defaults to **true** for both existing and new settings files.
     #[serde(default = "default_true")]
     pub(crate) use_cas_links: bool,
+    /// App Developer Mode: unlocks diagnostics and debugging tools.
+    #[serde(default)]
+    pub(crate) dev_mode: bool,
+    /// Add a JDWP socket to every JVM game launch (Dev Mode only).
+    #[serde(default)]
+    pub(crate) jdwp_enabled: bool,
+    /// Port for the JDWP socket; 0 lets the JVM choose a free port.
+    #[serde(default = "default_jdwp_port")]
+    pub(crate) jdwp_port: u16,
+    /// Export and verbose Sphinx Mixin debug dumps (Dev Mode only).
+    #[serde(default)]
+    pub(crate) mixin_debug: bool,
+}
+
+fn default_jdwp_port() -> u16 {
+    5005
 }
 
 fn default_true() -> bool {
@@ -139,6 +155,10 @@ impl Default for Settings {
             custom_gc_flags: Vec::new(),
             extra_jvm_args: None,
             use_cas_links: true,
+            dev_mode: false,
+            jdwp_enabled: false,
+            jdwp_port: default_jdwp_port(),
+            mixin_debug: false,
         }
     }
 }

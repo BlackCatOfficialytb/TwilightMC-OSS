@@ -21,6 +21,7 @@
     storage = null,
     blindMode = false,
     deafMode = false,
+    devMode = false,
     section = $bindable('mods'),
     onback,
     onopenconsole,
@@ -636,6 +637,26 @@
     if (!selectedLog) return;
     if (!logText) await selectLog(selectedLog);
     await copyText(logText, 'logs-copied-log');
+  }
+
+  async function copyDevValue(value, message) {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast(t(message), 'success');
+    } catch (e) {
+      toast(String(e), 'error');
+    }
+  }
+
+  async function copyRawLaunchCommand() {
+    try {
+      const command = await window.__TAURI__.core.invoke('get_raw_launch_command', {
+        instanceId: instance.id,
+      });
+      await copyDevValue(command, 'dev-copied-command');
+    } catch (e) {
+      toast(String(e), 'error');
+    }
   }
 
   // lazy per-tab loads: worlds, packs, screenshots and logs fetch on open
@@ -1308,6 +1329,33 @@
             <p class="mt-1">
               {t('edit-cleanroom-body')}
             </p>
+          </div>
+        {/if}
+
+        {#if devMode}
+          <div class="mt-4 rounded border border-(--accent)/40 bg-(--accent)/5 p-4 text-[12px]">
+            <p class="font-medium text-(--accent)">{t('dev-actions-title')}</p>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <button
+                class="rounded border border-(--border) px-3 py-1.5 text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
+                onclick={copyRawLaunchCommand}
+              >
+                {t('dev-copy-command')}
+              </button>
+              <button
+                class="rounded border border-(--border) px-3 py-1.5 text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
+                onclick={() => copyDevValue(instance.id, 'dev-copied-id')}
+              >
+                {t('dev-copy-id')}
+              </button>
+              <button
+                class="rounded border border-(--border) px-3 py-1.5 text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
+                onclick={() =>
+                  copyDevValue(gameDirDisplay.replace(/\/minecraft$/, ''), 'dev-copied-path')}
+              >
+                {t('dev-copy-path')}
+              </button>
+            </div>
           </div>
         {/if}
 
