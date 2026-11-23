@@ -122,21 +122,23 @@ validators — so precedence is defined here:
 ## 6. Current version
 
 - Latest Stable: `v0.2.0`.
-- Bolide line: `v0.5.0` — the workspace `version` carries `0.5.0` since the
-  Milestone-4 auth, skins & client-mode UI (Bolide tags `alpha-v0.4.1` …
-  `alpha-v0.5.0`: the README security/unsigned-binaries guide, the Microsoft
-  OAuth2 device-flow token chain with sha256-verified authlib-injector
-  auto-fetch for custom Yggdrasil accounts, the account manager modal with a
-  skinview3d 3D character viewer and skin/cape editors, the Launcher/Client
-  mode toggle with the minimal client dashboard and `--server` quick-play
-  joining). The Milestone-6.5 train adds the Horizon (Rust) engine option with
-  a Settings-managed binary path, Gruvbox Dark/Light presets, and the
-  `.twpack` 7z instance format; Bolide builds carry no API-stability
+- Bolide line: `v0.6.0` — the workspace `version` carries `0.6.0` from Mission 5
+  onward. Bolide tags `alpha-v0.4.1` … `alpha-v0.5.0` delivered the README
+  security/unsigned-binaries guide, the Microsoft OAuth2 device-flow token
+  chain with sha256-verified authlib-injector auto-fetch, the account manager
+  with its skinview3d viewer and skin/cape editors, and the Launcher/Client
+  mode toggle. `alpha-v0.6.0` adds the aligned native Horizon engine path:
+  `horizon-client --resources/--game-dir/--home`, prepared-resource schema 7 /
+  output version 5, on-demand Mojang assets (never bundled), read-once session
+  hand-over, release install in Settings, Java-major import detection and the
+  uv-style zero-copy CAS links. Backport tags `alpha-v0.0.1` …
+  `alpha-v0.0.3` are published as pre-releases titled
+  `TwilightMC Bolide v0.0.X (Backported)`; Bolide builds carry no API-stability
   promises (§2).
-- Star (beta) line: `beta-v0.5.0-b1` once the `beta` branch is cut; Star
+- Star (beta) line: `beta-v0.6.0-b1` once the `beta` branch is cut; Star
   releases are built from that branch and published as
   `TwilightMC Star (<tag>)` by `.github/workflows/beta.yml`.
-- Snapshot line: `v0.5.0-ddmmyyyy-<commit>`, built as rolling works land on
+- Snapshot line: `v0.6.0-ddmmyyyy-<commit>`, built as rolling works land on
   `main`.
 
 ## 7. Supported build targets
