@@ -337,7 +337,13 @@ jobs:
           set -e
           case "$CHANNEL" in
             snapshot) TITLE="TwilightMC Snapshot v${VERSION}-${DATE}-${COMMIT}" ;;
-            alpha)    TITLE="TwilightMC Bolide (${TAG})" ;;
+            alpha)
+              # Backported 0.0.x tags are maintenance builds, named explicitly.
+              case "$TAG" in
+                alpha-v0.0.*) TITLE="TwilightMC Bolide v${TAG#alpha-v} (Backported)" ;;
+                *)            TITLE="TwilightMC Bolide (${TAG})" ;;
+              esac
+              ;;
             beta)     TITLE="TwilightMC Star (${TAG})" ;;
             *)        TITLE="TwilightMC ${TAG}" ;;
           esac

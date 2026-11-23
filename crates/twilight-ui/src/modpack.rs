@@ -263,6 +263,9 @@ pub(crate) struct CurseManifest {
     pub(crate) overrides: String,
     #[serde(default)]
     pub(crate) minecraft: CurseMinecraft,
+    /// Cleanroom-style Java requirement, surfaced by import inspection.
+    #[serde(default)]
+    pub(crate) compatible_java_majors: Vec<i32>,
 }
 
 /// The `minecraft` block: target game version and the loaders the pack needs.

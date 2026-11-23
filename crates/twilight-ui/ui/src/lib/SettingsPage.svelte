@@ -112,6 +112,9 @@
   let horizonMsg = $state('');
   let horizonError = $state('');
   let horizonBusy = $state(false);
+  let horizonDetected = $state([]);
+  let horizonReleases = $state([]);
+  let horizonTag = $state('latest');
 
   async function refreshHorizon() {
     try {
@@ -158,6 +161,52 @@
       horizonMsg = horizonConfigured
         ? t('settings-horizon-saved')
         : t('settings-horizon-cleared');
+    } catch (e) {
+      horizonError = String(e);
+    } finally {
+      horizonBusy = false;
+    }
+  }
+
+  async function detectHorizonBuilds() {
+    horizonBusy = true;
+    horizonError = '';
+    try {
+      horizonDetected = await window.__TAURI__.core.invoke('detect_horizon');
+      horizonMsg = horizonDetected.length
+        ? t('settings-horizon-detected')
+        : t('settings-horizon-none-detected');
+    } catch (e) {
+      horizonError = String(e);
+    } finally {
+      horizonBusy = false;
+    }
+  }
+
+  async function loadHorizonReleases() {
+    horizonBusy = true;
+    horizonError = '';
+    try {
+      horizonReleases = await window.__TAURI__.core.invoke('list_horizon_releases');
+      horizonMsg = t('settings-horizon-releases');
+    } catch (e) {
+      horizonError = String(e);
+    } finally {
+      horizonBusy = false;
+    }
+  }
+
+  async function installHorizonRelease() {
+    horizonBusy = true;
+    horizonError = '';
+    horizonMsg = '';
+    try {
+      const installed = await window.__TAURI__.core.invoke('install_horizon_release', {
+        tag: horizonTag,
+      });
+      horizonPath = installed.client;
+      await refreshHorizon();
+      horizonMsg = t('settings-horizon-installed', { tag: installed.tag });
     } catch (e) {
       horizonError = String(e);
     } finally {
@@ -931,8 +980,68 @@
           <p role="alert" class="mt-1 text-[12px] text-rose-400">{horizonError}</p>
         {/if}
 
+        <div class="mt-4 flex flex-wrap gap-2">
+          <button
+            class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main) disabled:opacity-50"
+            disabled={horizonBusy}
+            onclick={detectHorizonBuilds}
+          >
+            {t('settings-horizon-detect')}
+          </button>
+          <button
+            class="rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main) disabled:opacity-50"
+            disabled={horizonBusy}
+            onclick={loadHorizonReleases}
+          >
+            {t('settings-horizon-releases')}
+          </button>
+        </div>
+        {#if horizonDetected.length}
+          <p class="mt-3 text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">
+            {t('settings-horizon-detected')}
+          </p>
+          <div class="mt-1 space-y-1">
+            {#each horizonDetected as build}
+              <div class="flex items-center gap-2 rounded border border-(--border) bg-(--bg-subtle) px-2.5 py-1.5 text-[11px]">
+                <span class="min-w-0 flex-1 truncate font-mono" title={build.path}>{build.path}</span>
+                {#if build.horizon}
+                  <span class="text-(--text-muted)">{build.horizon}{build.minecraft ? ` · MC ${build.minecraft}` : ''}</span>
+                {/if}
+                <button
+                  class="rounded border border-(--border) px-2 py-0.5 text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
+                  onclick={() => { horizonPath = build.path; saveHorizon(); }}
+                >
+                  {t('settings-horizon-use')}
+                </button>
+              </div>
+            {/each}
+          </div>
+        {/if}
+        {#if horizonReleases.length}
+          <p class="mt-3 text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">
+            {t('settings-horizon-releases')}
+          </p>
+          <div class="mt-1 flex gap-2">
+            <select
+              class="h-8 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2 text-[12px] outline-none focus:border-(--accent)"
+              bind:value={horizonTag}
+            >
+              <option value="latest">{t('settings-horizon-latest')}</option>
+              {#each horizonReleases as release}
+                <option value={release.tag}>{release.tag}{release.prerelease ? ' · pre' : ''}</option>
+              {/each}
+            </select>
+            <button
+              class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-50"
+              disabled={horizonBusy}
+              onclick={installHorizonRelease}
+            >
+              {t('settings-horizon-install')}
+            </button>
+          </div>
+        {/if}
         <p class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-3 text-[11px] leading-relaxed text-(--text-muted)">
-          {t('settings-horizon-contract')} <span class="font-mono">horizon --assets &lt;store&gt; --game-dir &lt;dir&gt;</span>.
+          {t('settings-horizon-contract')} <span class="font-mono">{t('settings-horizon-contract-line')}</span>.
           {t('settings-horizon-contract-note')}
         </p>
       {:else if section === 'storage'}

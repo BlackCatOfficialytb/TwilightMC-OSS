@@ -4177,12 +4177,18 @@ dependencies = [
 name = "twilight-horizon"
 version = "0.5.0"
 dependencies = [
+ "flate2",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sha1",
+ "sha2",
  "thiserror 2.0.21",
  "tokio",
+ "twilight-cas",
  "twilight-downloader",
+ "twilight-manifest",
+ "twilight-modrinth",
 ]
 
 [[package]]

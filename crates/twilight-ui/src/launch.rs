@@ -8,12 +8,16 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::mpsc;
+use twilight_auth::AccountType;
 use twilight_cli::{LaunchConfig, run_launch_with};
 use twilight_downloader::{
-    AssetIndex, FREESM_META_BASE, PRISM_META_BASE, ParallelDownloader, fetch_json_failover,
-    resolve_vanilla_version, vanilla_sources,
+    FREESM_META_BASE, PRISM_META_BASE, fetch_json_failover, resolve_vanilla_version,
+    vanilla_sources,
 };
-use twilight_horizon::AssetStore;
+use twilight_horizon::{
+    InstallRequest, LaunchOptions, client_command, describe, ensure_resources, probe_launch_api,
+    session_json,
+};
 use twilight_launch::LaunchEvent;
 
 use crate::accounts::{Settings, active_account, load_settings, settings_path};
@@ -154,40 +158,80 @@ async fn pump_lines<R: tokio::io::AsyncRead + Unpin>(
 
 /// Horizon (native Rust engine) launch path.
 ///
-/// `twilight-cli`'s generic pipeline composes a JVM command and rejects the
-/// `horizon` loader token, while the native engine only needs its verified
-/// asset store plus a game directory. Assets are installed with the same
-/// [`AssetStore`] layout the CLI uses (`assets/objects/…` +
-/// `horizon-assets.json`), so one shared store serves both launchers.
-///
-/// Binary contract: `<horizon> --assets <store> --game-dir <dir>`.
+/// The real contract is `horizon-client --resources <dir> --game-dir <dir>
+/// --home <dir>` with the signed-in Microsoft session on stdin. Resources are
+/// prepared from the player's own Mojang jar/asset objects on demand (never
+/// bundled), and the prepared folder is shared across Horizon instances by
+/// version. No JVM, no classpath, no Java loader tokens.
 async fn run_horizon(
     app: &AppHandle,
     instance_dir: &Path,
     meta: &instances::InstanceMeta,
     settings: &Settings,
+    server: Option<String>,
+    world: Option<String>,
 ) -> Result<i32, String> {
-    let horizon = settings
-        .horizon_path
-        .as_deref()
-        .map(str::trim)
-        .filter(|p| !p.is_empty())
-        .ok_or_else(|| {
-            "Horizon (Rust) is not configured. Open Settings -> Horizon Engine and set the \
-             Horizon binary path, then launch again."
-                .to_owned()
-        })?;
-    if !Path::new(horizon).is_file() {
-        return Err(format!(
-            "Horizon binary not found at {horizon}. Update Settings -> Horizon Engine."
-        ));
-    }
-
     let log = |stream: &'static str, line: String| {
         let _ = app.emit("launch-log", LaunchLine { stream, line });
     };
 
-    // ---- version manifest -> asset index (same failover chain as the CLI)
+    // Explicit setting wins; otherwise accept a binary discovered on PATH /
+    // beside this executable (a bundled Horizon is never shipped by us).
+    let binary = settings
+        .horizon_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            twilight_horizon::discover_client_binaries()
+                .into_iter()
+                .next()
+        })
+        .ok_or_else(|| {
+            "Horizon (Rust) is not configured. Open Settings -> Horizon Engine and set the \
+             native client path, then launch again."
+                .to_owned()
+        })?;
+    if !binary.is_file() {
+        return Err(format!(
+            "Horizon binary not found at {}. Update Settings -> Horizon Engine.",
+            binary.display()
+        ));
+    }
+    log(
+        "stdout",
+        format!(
+            "Horizon native client: {} (Launch API {})",
+            binary.display(),
+            twilight_horizon::LAUNCH_API_VERSION
+        ),
+    );
+    // Best-effort probe: an older build may not answer, but the documented
+    // command line still applies. Diagnostics only, never a launch blocker.
+    match probe_launch_api(&binary).await {
+        Ok(info) => log(
+            "stdout",
+            format!(
+                "Horizon build {} targets Minecraft {} (Launch API {}, {} options)",
+                info.horizon.as_deref().unwrap_or("unknown"),
+                info.minecraft.as_deref().unwrap_or("unknown"),
+                info.launch_api,
+                info.options.len()
+            ),
+        ),
+        Err(error) => log("stderr", format!("Horizon: Launch API probe: {error}")),
+    }
+    if settings.blind_mode {
+        log(
+            "stderr",
+            "Accessibility: Blind Mode - Horizon is a Vanilla engine without the deep \
+             screen-reader hooks of modded clients; screen-reader navigation may be limited."
+                .to_owned(),
+        );
+    }
+
+    // ---- version manifest -> client jar + asset index (same failover chain)
     let client = reqwest::Client::new();
     let sources = vanilla_sources();
     let meta_version = resolve_vanilla_version(&client, &sources, &meta.version)
@@ -206,77 +250,147 @@ async fn run_horizon(
     let version_text = raw.to_string();
     let version = twilight_manifest::parse_version_file(&version_text)
         .map_err(|e| format!("cannot parse the {} manifest: {e}", meta_version.id))?;
+    let client_jar = version
+        .client()
+        .ok_or_else(|| format!("{} declares no client jar download", meta_version.id))?;
     let index_info = version
         .effective_asset_index()
         .ok_or_else(|| format!("{} declares no asset index", meta_version.id))?;
-    let index_raw = fetch_json_failover(&client, std::slice::from_ref(&index_info.url))
-        .await
-        .map_err(|e| e.to_string())?;
-    let index_text = index_raw.to_string();
-    let index = AssetIndex::parse(index_text.as_bytes()).map_err(|e| e.to_string())?;
 
-    // ---- verified asset store under the shared library
+    // ---- prepare the exact layout `horizon-client --resources` reads
     let shared_dir = crate::storage::shared_root(app).await?;
-    let assets_root = shared_dir.join("assets");
-    let index_dir = assets_root.join("indexes");
-    tokio::fs::create_dir_all(&index_dir)
-        .await
-        .map_err(|e| e.to_string())?;
-    tokio::fs::write(
-        index_dir.join(format!("{}.json", index_info.id)),
-        &index_text,
+    log(
+        "stdout",
+        format!(
+            "Horizon: verifying prepared resources for Minecraft {} (asset index {})…",
+            meta_version.id, index_info.id
+        ),
+    );
+    let prepared = ensure_resources(
+        &client,
+        &InstallRequest {
+            version: &meta_version.id,
+            shared_root: &shared_dir,
+            client: client_jar,
+            asset_index: &index_info,
+        },
     )
     .await
     .map_err(|e| e.to_string())?;
+    log("stdout", describe(&prepared));
 
-    log(
-        "stdout",
-        format!(
-            "Horizon: installing/verifying vanilla assets (index {})…",
-            index_info.id
-        ),
-    );
-    let store = AssetStore::new(&assets_root);
-    let downloader = ParallelDownloader::new(client, 8);
-    let manifest = store
-        .install(&index_info.id, &index, &downloader)
-        .await
-        .map_err(|e| e.to_string())?;
-    log(
-        "stdout",
-        format!(
-            "Horizon: assets ready ({} objects, {})",
-            manifest.entries.len(),
-            assets_root.display()
-        ),
-    );
+    // ---- session hand-over: Microsoft MSA only, never on the command line
+    let account = active_account(app).await;
+    let developer_offline = std::env::var_os("TWILIGHTMC_HORIZON_DEVELOPER_OFFLINE")
+        .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
+    let session = match account.as_ref() {
+        Some(account) if account.account_type == AccountType::Microsoft => {
+            let mut account = account.clone();
+            if account
+                .access_token
+                .as_deref()
+                .is_none_or(|token| token.trim().is_empty())
+                && account.refresh_token.is_some()
+            {
+                log(
+                    "stdout",
+                    "Horizon: renewing the Microsoft session before launch…".to_owned(),
+                );
+                account =
+                    crate::accounts::refresh_microsoft_account(app.clone(), account.id.clone())
+                        .await?;
+            }
+            let token = account
+                .access_token
+                .as_deref()
+                .filter(|token| !token.trim().is_empty())
+                .ok_or_else(|| {
+                    "the active Microsoft account has no Minecraft access token; sign in again"
+                        .to_owned()
+                })?;
+            Some(
+                session_json(&account.username, &account.uuid.to_string(), token)
+                    .map_err(|e| e.to_string())?,
+            )
+        }
+        Some(account) if developer_offline => {
+            log(
+                "stderr",
+                format!(
+                    "Horizon: developer offline start as {:?}; released builds require a \
+                     Microsoft account that owns Minecraft",
+                    account.username
+                ),
+            );
+            None
+        }
+        Some(other) => {
+            return Err(format!(
+                "Horizon runs only with a Microsoft account that owns Minecraft; {:?} is {:?}. \
+                 Sign in with Microsoft in Accounts.",
+                other.username, other.account_type
+            ));
+        }
+        None if developer_offline => None,
+        None => {
+            return Err(
+                "Horizon requires a Microsoft account that owns Minecraft. Sign in with \
+                 Microsoft in Accounts, then launch again."
+                    .to_owned(),
+            );
+        }
+    };
 
-    // ---- spawn the native engine and stream both pipes
+    // ---- assemble and spawn the native client
     let game_dir = instance_dir.join("minecraft");
+    let home = instance_dir.join("horizon");
     tokio::fs::create_dir_all(&game_dir)
         .await
         .map_err(|e| e.to_string())?;
-    log(
-        "stdout",
-        format!(
-            "Horizon: launching {} --assets {} --game-dir {}",
-            horizon,
-            assets_root.display(),
-            game_dir.display()
-        ),
-    );
-    let mut child = tokio::process::Command::new(horizon)
-        .arg("--assets")
-        .arg(&assets_root)
-        .arg("--game-dir")
-        .arg(&game_dir)
+    tokio::fs::create_dir_all(&home)
+        .await
+        .map_err(|e| e.to_string())?;
+    let mut options = LaunchOptions::new(&prepared.dir, &game_dir, &home);
+    options.session_stdin = session.is_some();
+    options.developer_offline = developer_offline;
+    options.developer_single_player = developer_offline;
+    options.quick_play_singleplayer = world.filter(|_| server.is_none());
+    options.quick_play_multiplayer = server;
+    let command = client_command(&binary, &options).map_err(|e| e.to_string())?;
+    log("stdout", format!("Horizon: {}", command.display()));
+
+    let mut process = tokio::process::Command::new(&command.program);
+    process.args(&command.args);
+    for (key, value) in &command.environment {
+        process.env(key, value);
+    }
+    for key in &command.remove_environment {
+        process.env_remove(key);
+    }
+    process
+        .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = process
         .spawn()
-        .map_err(|e| format!("cannot start Horizon ({horizon}): {e}"))?;
+        .map_err(|e| format!("cannot start Horizon ({}): {e}", binary.display()))?;
     let pid = child.id().unwrap_or(0);
     GAME_PID.store(pid, Ordering::SeqCst);
     log("stdout", format!("Horizon process ID: {pid}"));
+
+    if let Some(session) = session {
+        use tokio::io::AsyncWriteExt;
+        let mut stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "Horizon stdin pipe unavailable".to_owned())?;
+        stdin
+            .write_all(session.as_bytes())
+            .await
+            .map_err(|e| format!("cannot hand over the Horizon session: {e}"))?;
+        // Closing stdin makes --session-stdin read exactly one JSON value.
+        drop(stdin);
+    }
 
     let stdout = child
         .stdout
@@ -404,7 +518,7 @@ async fn run(
     // It installs the verified asset store and runs its own binary.
     if meta.loader.as_deref() == Some("horizon") {
         let started = std::time::Instant::now();
-        let code = run_horizon(app, &instance_dir, &meta, &settings).await?;
+        let code = run_horizon(app, &instance_dir, &meta, &settings, server, world).await?;
         instances::stamp_last_played(app, instance_id, started.elapsed().as_secs()).await;
         let _ = app.emit(
             "launch-log",
@@ -477,6 +591,8 @@ async fn run(
             .map(PathBuf::from),
         loader: meta.loader,
         loader_version: meta.loader_version,
+        horizon: None,
+        horizon_session: None,
         jvm_args,
         account,
         server,

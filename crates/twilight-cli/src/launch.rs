@@ -9,12 +9,15 @@ use std::path::{Path, PathBuf};
 
 use tokio::sync::mpsc;
 
-use twilight_auth::Account;
+use twilight_auth::{Account, AccountType};
 use twilight_downloader::{
     AssetIndex, DownloadRequest, FREESM_META_BASE, PRISM_META_BASE, ParallelDownloader,
     fetch_json_failover, resolve_vanilla_version, vanilla_sources,
 };
-use twilight_horizon::AssetStore;
+use twilight_horizon::{
+    AssetStore, HorizonError, InstallRequest, LaunchOptions, client_command,
+    discover_client_binaries, ensure_resources, resources_dir, session_json,
+};
 use twilight_launch::{
     GameOptions, LaunchEvent, LaunchPlan, ProfileVars, QuickPlay, active_paths, classpath_string,
     game_arguments, inject_account_vars, jvm_arguments, replace_tokens_in, separator,
@@ -491,6 +494,139 @@ fn build_diagnostics(
 /// Runs the `launch` subcommand: metadata failover, JVM selection, artifact
 /// downloads, horizon assets, natives extraction, spawn. `--dry-run` stops
 /// after the (network-read-only) plan assembly, prints and exits 0.
+/// Native Horizon path: prepare the resources Horizon reads, assemble its
+/// documented command line and hand the Microsoft session over on stdin.
+async fn run_horizon_cli(cfg: &LaunchConfig, account: &Account) -> Result<i32, CliError> {
+    let binary = cfg
+        .horizon
+        .clone()
+        .or_else(|| discover_client_binaries().into_iter().next())
+        .ok_or_else(|| {
+            CliError::Horizon(HorizonError::Probe(
+                "no horizon-client binary found; pass --horizon /path/to/horizon-client".to_owned(),
+            ))
+        })?;
+    if !cfg.dry_run && !binary.is_file() {
+        return Err(CliError::Horizon(HorizonError::Probe(format!(
+            "{} does not exist",
+            binary.display()
+        ))));
+    }
+
+    let client = reqwest::Client::new();
+    let sources = vanilla_sources();
+    let meta = resolve_vanilla_version(&client, &sources, &cfg.version_or_id).await?;
+    let mut detail_chain = vec![meta.details_url.clone()];
+    for base in [PRISM_META_BASE, FREESM_META_BASE] {
+        let fallback = format!("{base}net.minecraft/{}.json", meta.id);
+        if !detail_chain.contains(&fallback) {
+            detail_chain.push(fallback);
+        }
+    }
+    let raw = fetch_json_failover(&client, &detail_chain).await?;
+    let version = twilight_manifest::parse_version_file(&raw.to_string()).map_err(|source| {
+        CliError::ManifestParse {
+            id: meta.id.clone(),
+            source,
+        }
+    })?;
+    let client_jar = version.client().ok_or_else(|| {
+        CliError::Horizon(HorizonError::MissingResourceFile(format!(
+            "{} declares no client jar download",
+            meta.id
+        )))
+    })?;
+    let index_info = version.effective_asset_index().ok_or_else(|| {
+        CliError::Horizon(HorizonError::MissingResourceFile(format!(
+            "{} declares no asset index",
+            meta.id
+        )))
+    })?;
+
+    // A dry run never downloads, but still shows the real paths it would use.
+    let resources = if cfg.dry_run {
+        resources_dir(&cfg.shared_dir, &meta.id)
+    } else {
+        ensure_resources(
+            &client,
+            &InstallRequest {
+                version: &meta.id,
+                shared_root: &cfg.shared_dir,
+                client: client_jar,
+                asset_index: &index_info,
+            },
+        )
+        .await?
+        .dir
+    };
+    let instance_dir = cfg
+        .instance_dir
+        .clone()
+        .unwrap_or_else(|| cfg.shared_dir.join("instances").join(&meta.id));
+    let game_dir = instance_dir.join("minecraft");
+    let home = instance_dir.join("horizon");
+    if !cfg.dry_run {
+        tokio::fs::create_dir_all(&game_dir).await?;
+        tokio::fs::create_dir_all(&home).await?;
+    }
+
+    let mut options = LaunchOptions::new(&resources, &game_dir, &home);
+    options.quick_play_multiplayer = cfg.server.clone();
+    options.quick_play_singleplayer = cfg.world.clone().filter(|_| cfg.server.is_none());
+    let session = if let Some(file) = &cfg.horizon_session {
+        options.session_file = Some(file.clone());
+        None
+    } else if account.account_type == AccountType::Microsoft && !cfg.dry_run {
+        let token = account
+            .access_token
+            .as_deref()
+            .filter(|token| !token.trim().is_empty())
+            .ok_or_else(|| {
+                CliError::Horizon(HorizonError::Session(
+                    "the active Microsoft account has no Minecraft access token; sign in again"
+                        .to_owned(),
+                ))
+            })?;
+        let json = session_json(&account.username, &account.uuid.to_string(), token)?;
+        options.session_stdin = true;
+        Some(json)
+    } else if !cfg.dry_run {
+        return Err(CliError::Horizon(HorizonError::Launch(
+            "Horizon requires a Microsoft account that owns Minecraft (or --horizon-session)"
+                .to_owned(),
+        )));
+    } else {
+        None
+    };
+    let command = client_command(&binary, &options)?;
+    if cfg.dry_run {
+        println!("{}", command.display());
+        return Ok(0);
+    }
+
+    let mut process = tokio::process::Command::new(&command.program);
+    process.args(&command.args);
+    for (key, value) in &command.environment {
+        process.env(key, value);
+    }
+    for key in &command.remove_environment {
+        process.env_remove(key);
+    }
+    let mut child = process.spawn()?;
+    if let Some(session) = session {
+        use tokio::io::AsyncWriteExt;
+        let mut stdin = child.stdin.take().ok_or_else(|| {
+            CliError::Horizon(HorizonError::Session(
+                "Horizon stdin pipe unavailable".to_owned(),
+            ))
+        })?;
+        stdin.write_all(session.as_bytes()).await?;
+        drop(stdin);
+    }
+    let status = child.wait().await?;
+    Ok(status.code().unwrap_or(-1))
+}
+
 pub async fn run_launch(args: LaunchArgs) -> Result<i32, CliError> {
     run_launch_with(args.to_config()?, None).await
 }
@@ -505,6 +641,15 @@ pub async fn run_launch_with(
         .account
         .clone()
         .unwrap_or_else(|| Account::offline(cfg.username.clone()));
+    // `horizon` is an engine, not a JVM loader: it has no Java, classpath or
+    // loader profile, so it leaves the generic pipeline before those stages.
+    if cfg
+        .loader
+        .as_deref()
+        .is_some_and(|loader| loader.eq_ignore_ascii_case("horizon"))
+    {
+        return run_horizon_cli(&cfg, &account).await;
+    }
     let game_options = GameOptions {
         quick_play: QuickPlay {
             server_address: cfg.server.clone(),
@@ -749,7 +894,7 @@ pub async fn run_launch_with(
             .await?;
         }
         let store = AssetStore::new(&paths.assets_root);
-        store.install(&paths.assets_id, &index, &downloader).await?;
+        store.ensure_objects(&index, &downloader).await?;
         let needs_export = index.is_virtual == Some(true) || is_virtual_assets_id(&paths.assets_id);
         if needs_export {
             let virtual_root = paths.assets_root.join("virtual").join(&paths.assets_id);
@@ -898,6 +1043,8 @@ mod tests {
             java: None,
             loader: None,
             loader_version: None,
+            horizon: None,
+            horizon_session: None,
             jvm_args: Vec::new(),
             account: None,
             server: None,

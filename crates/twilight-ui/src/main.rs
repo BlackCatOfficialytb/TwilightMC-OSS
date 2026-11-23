@@ -5,6 +5,7 @@ mod accounts;
 mod cas;
 mod curseforge;
 mod export;
+mod horizon;
 mod import;
 mod instance;
 mod instances;
@@ -266,6 +267,9 @@ fn main() {
             prefs::set_curseforge_api_key,
             prefs::get_horizon_prefs,
             prefs::set_horizon_prefs,
+            horizon::detect_horizon,
+            horizon::list_horizon_releases,
+            horizon::install_horizon_release,
             prefs::get_cas_stats,
             prefs::set_cas_links,
             prefs::run_cas_deduplicate,

@@ -147,12 +147,16 @@
 
 - [x] **`twilight-cas` publishing preparation / release readiness (Apache-2.0)** — complete `crates.io` metadata (version 0.1.0, repo/homepage/readme/keywords/categories), vendored `LICENSE` inside the crate, passing `cargo publish --dry-run --allow-dirty`, fully generic API (`deduplicate_dirs`, `cas_garbage_collect_dirs`) with game-launcher-agnostic docs, plus a reusable `twilight-ui/src/cas.rs` wrapper for instance scanning.
 
-## Mission 5: Deep Horizon Launcher & Engine Integration — *ACTIVE upcoming milestone* (`upstream/horizon` reference)
+## Mission 5: Deep Horizon Launcher & Engine Integration — *COMPLETE* (`upstream/horizon` reference)
 
-Preamble: `upstream/horizon` is a read-only reference submodule; integration lives in `crates/twilight-horizon` (reference) plus the `twilight-ui` engine-selection surface — never compiling or linking Horizon's C++ from the client.
+Preamble: `upstream/horizon` is a read-only reference submodule; integration lives in `crates/twilight-horizon` plus the `twilight-ui` engine-selection surface — never compiling or linking Horizon's C++ from the client. Reference consumption is static: the CLI/launch API and `horizon-prepare` output contract are read from the pinned submodule and encoded as pure-Rust checks; no launcher process spawns upstream tooling at runtime.
 
-- [ ] **Reference consumption:** `twilight-horizon` reads `upstream/horizon` via `std::process::Command` (best-effort, no direct compile) for launcher CLI, asset/CLI conventions and `map_to_resources` export so we can stay compatible.
-- [ ] **Engine selection:** `Settings → Horizon Engine` already exists; ensure `--assets` / `--game-dir` flags map to upstream Horizon launcher CLI, and Horrhi logs stream into the console drawer (Partial integration exists).
-- [ ] **Zero-copy global CAS doc:** Extract `uv`-style global CAS, symlink, hardlink and NTFS junction concepts from `upstream/horizon` into `crates/twilight-cas` notes.
-- [ ] **Horizon Java compat:** Detect `compatibleJavaMajors` from `mmc-pack.json`/`manifest.json` when a user creates/imports a Horri instance (Java 8+, use newest).
-- [ ] **Read-only manifest hardening:** Enforce no `unwrap()/expect()` and read-only paths in `upstream/horizon` usage; add a CI audit that Horizon submodule is never modified (CI fails if `git diff -- upstream/horizon`).
+- [x] **Reference consumption:** inspected `launch_api.rs`, `launch_options.rs`, `horizon-prepare` (`check.rs`, `sounds.rs`, `lib.rs`) and the launcher backend at `322774f158`; encoded the real `--resources/--game-dir/--home`, `--quickPlaySingleplayer/--quickPlayMultiplayer` and read-once session contract, plus schema `7` / output version `5` resource checks and the `asset-index.json` map-to-resources overlay.
+- [x] **Engine selection / launch:** `twilight-ui` and `twilight-cli` now assemble the real Horizon command line (no `--assets`), prepare resources from Mojang CDN artifacts on demand, hand the Microsoft session over on stdin, stream stdout/stderr into the console drawer and keep the Blind Mode advisory. Settings can detect local builds and download a published release; Horizon output streams into the same drawer as JVM instances.
+- [x] **Zero-copy global CAS doc:** `crates/twilight-cas` documents uv-style global CAS, hardlink → NTFS junction → symlink → copy cascade; prepared assets are linked straight from the already content-addressed Mojang store.
+- [x] **Horizon Java compat:** import inspection reads nested `compatibleJavaMajors` / `javaVersion.majorVersion` from `mmc-pack.json` and `manifest.json` (Java 8+, newest surfaced) without making the native engine require a JVM.
+- [x] **Read-only manifest hardening:** no production `unwrap()/expect()` in the integration; `upstream/horizon` is never written, and CI audits that the submodule stays clean (`git diff --exit-code --stat upstream/horizon`, skipped only when uninitialized).
+
+## Mission 6: App Developer Mode — *next milestone*
+
+- [ ] **App Developer Mode:** a launcher switch that exposes unsigned developer installs (Horizon `HORIZON_LAUNCHER_DEVELOPER_OFFLINE=1` provenance, `--developer-single-player`, build-from-source workflows) behind an explicit opt-in, with clear "unsupported / may break saves" warnings and a persisted record of which builds were launched in that mode.
