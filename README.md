@@ -250,7 +250,7 @@ All four channels share the reusable
 | Workflow | Trigger | Release |
 | --- | --- | --- |
 | [`snapshot.yml`](.github/workflows/snapshot.yml) | push to `main`, `workflow_dispatch` | rolling `snapshot` pre-release |
-| [`alpha.yml`](.github/workflows/alpha.yml) | push `alpha-*` | `TwilightMC Bolide (<tag>)`, pre-release |
+| [`alpha.yml`](.github/workflows/alpha.yml) | push `alpha-*` | `TwilightMC Bolide (<tag>)`, full release |
 | [`beta.yml`](.github/workflows/beta.yml) | push `beta-*` | `TwilightMC Star (<tag>)`, pre-release |
 | [`release.yml`](.github/workflows/release.yml) | push `vX.Y.Z` | `TwilightMC <tag>`, stable |
 

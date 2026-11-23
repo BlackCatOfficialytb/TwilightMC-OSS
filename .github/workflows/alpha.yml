@@ -2,7 +2,9 @@ name: alpha
 
 # Bolide (alpha) channel. Pushing an `alpha-*` tag (e.g. `alpha-v0.5.1`)
 # triggers the shared build pipeline, which publishes the release as
-# `TwilightMC Bolide (<tag>)` with `is_prerelease: true`.
+# `TwilightMC Bolide (<tag>)` with `is_prerelease: false`: Bolide builds ship
+# as normal GitHub releases so they can be tagged "Latest" and downloaded
+# without the pre-release filter.
 #
 # Stable and Star tags use release.yml / beta.yml; roll-forward pushes use
 # snapshot.yml. The tag patterns are disjoint, so a tag never builds twice.
@@ -24,5 +26,5 @@ jobs:
     with:
       channel: alpha
       tag: ${{ github.ref_name }}
-      prerelease: true
+      prerelease: false
       rolling: false
