@@ -21,6 +21,7 @@ use twilight_horizon::{
 use twilight_launch::LaunchEvent;
 
 use crate::accounts::{Settings, active_account, load_settings, settings_path};
+use crate::devmode::{self, DevLaunchRecord};
 use crate::instance::resolved_instances_root;
 use crate::instances;
 
@@ -42,11 +43,18 @@ static LAST_COMMAND: std::sync::Mutex<Option<(String, String)>> = std::sync::Mut
 
 /// Exact command line of the last launch of `instance_id` (Developer Mode).
 #[tauri::command]
-pub async fn get_raw_launch_command(instance_id: String) -> Result<String, String> {
+pub async fn get_raw_launch_command(
+    instance_id: String,
+    unredacted: Option<bool>,
+) -> Result<String, String> {
     instances::validate_instance_id(&instance_id)?;
     let cached = LAST_COMMAND.lock().map_err(|e| e.to_string())?;
     match cached.as_ref() {
-        Some((id, command)) if id == &instance_id => Ok(command.clone()),
+        Some((id, command)) if id == &instance_id => Ok(if unredacted.unwrap_or(false) {
+            command.clone()
+        } else {
+            devmode::redact_launch_command(command)
+        }),
         _ => Err("launch this instance once to capture its raw command".to_owned()),
     }
 }
@@ -177,8 +185,74 @@ async fn pump_lines<R: tokio::io::AsyncRead + Unpin>(
 /// prepared from the player's own Mojang jar/asset objects on demand (never
 /// bundled), and the prepared folder is shared across Horizon instances by
 /// version. No JVM, no classpath, no Java loader tokens.
+/// JVM debug flags for one launch. Returns an empty vector unless Developer
+/// Mode is enabled, so a persisted JDWP/Mixin preference is inert by itself.
+fn java_dev_flags(settings: &Settings) -> Vec<String> {
+    if !settings.dev_mode {
+        return Vec::new();
+    }
+    twilight_launch::dev_jvm_args(twilight_launch::DevDebugOptions {
+        jdwp_enabled: settings.jdwp_enabled,
+        jdwp_port: settings.jdwp_port,
+        mixin_debug: settings.mixin_debug,
+    })
+}
+
+/// The launcher-managed release store. A binary outside it is a local build
+/// or an unsigned artifact, which needs an explicit opt-in in Dev Mode.
+fn horizon_is_official(binary: &Path, shared_dir: &Path) -> bool {
+    binary.starts_with(shared_dir.join("horizon-releases"))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HorizonDevPlan {
+    developer_offline: bool,
+    developer_single_player: bool,
+    provenance: &'static str,
+    flags_used: Vec<String>,
+    blocked: bool,
+}
+
+/// Maps persisted Developer settings to Horizon's documented developer
+/// switches. Every switch is double-gated on `dev_mode`; outside Dev Mode the
+/// plan is empty even if old settings still carry `true` values.
+fn horizon_dev_plan(settings: &Settings, official: bool) -> HorizonDevPlan {
+    if !settings.dev_mode {
+        return HorizonDevPlan {
+            developer_offline: false,
+            developer_single_player: false,
+            provenance: "official",
+            flags_used: Vec::new(),
+            blocked: false,
+        };
+    }
+    let developer_offline = settings.horizon_dev_offline;
+    let developer_single_player = settings.horizon_dev_single_player;
+    let mut flags_used = Vec::new();
+    if developer_offline {
+        flags_used.push("HORIZON_LAUNCHER_DEVELOPER_OFFLINE=1".to_owned());
+    }
+    if developer_single_player {
+        flags_used.push("--developer-single-player".to_owned());
+    }
+    HorizonDevPlan {
+        developer_offline,
+        developer_single_player,
+        provenance: if developer_offline {
+            "build-from-source"
+        } else if official {
+            "official-with-dev-flags"
+        } else {
+            "unsigned-local"
+        },
+        flags_used,
+        blocked: !official && !settings.horizon_allow_unsigned_local,
+    }
+}
+
 async fn run_horizon(
     app: &AppHandle,
+    instance_id: &str,
     instance_dir: &Path,
     meta: &instances::InstanceMeta,
     settings: &Settings,
@@ -213,6 +287,32 @@ async fn run_horizon(
             binary.display()
         ));
     }
+    let shared_dir = crate::storage::shared_root(app).await?;
+    let official = horizon_is_official(&binary, &shared_dir);
+    let dev_plan = horizon_dev_plan(settings, official);
+    if dev_plan.blocked {
+        return Err(format!(
+            "Developer Mode: {} is outside the launcher-managed Horizon release store. \
+             Enable \"Allow unsigned or local build-from-source Horizon binaries\" in \
+             Settings -> Developer to launch it.",
+            binary.display()
+        ));
+    }
+    if settings.dev_mode {
+        log(
+            "stderr",
+            "[DEV] Unsupported / Developer Mode: unsigned Horizon builds and developer flags \
+             may corrupt worlds or break saves."
+                .to_owned(),
+        );
+        log(
+            "stdout",
+            format!("[DEV] Horizon provenance: {}", dev_plan.provenance),
+        );
+        for flag in &dev_plan.flags_used {
+            log("stdout", format!("[DEV] {flag}"));
+        }
+    }
     log(
         "stdout",
         format!(
@@ -246,6 +346,7 @@ async fn run_horizon(
     }
 
     // ---- version manifest -> client jar + asset index (same failover chain)
+    let preflight_started = std::time::Instant::now();
     let client = reqwest::Client::new();
     let sources = vanilla_sources();
     let meta_version = resolve_vanilla_version(&client, &sources, &meta.version)
@@ -270,9 +371,14 @@ async fn run_horizon(
     let index_info = version
         .effective_asset_index()
         .ok_or_else(|| format!("{} declares no asset index", meta_version.id))?;
+    devmode::record_phase(
+        instance_id,
+        "preflight",
+        preflight_started.elapsed().as_millis() as u64,
+    );
 
     // ---- prepare the exact layout `horizon-client --resources` reads
-    let shared_dir = crate::storage::shared_root(app).await?;
+    let assets_started = std::time::Instant::now();
     log(
         "stdout",
         format!(
@@ -291,12 +397,16 @@ async fn run_horizon(
     )
     .await
     .map_err(|e| e.to_string())?;
+    devmode::record_phase(
+        instance_id,
+        "assets",
+        assets_started.elapsed().as_millis() as u64,
+    );
     log("stdout", describe(&prepared));
 
     // ---- session hand-over: Microsoft MSA only, never on the command line
     let account = active_account(app).await;
-    let developer_offline = std::env::var_os("TWILIGHTMC_HORIZON_DEVELOPER_OFFLINE")
-        .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
+    let developer_offline = dev_plan.developer_offline;
     let session = match account.as_ref() {
         Some(account) if account.account_type == AccountType::Microsoft => {
             let mut account = account.clone();
@@ -366,8 +476,8 @@ async fn run_horizon(
         .map_err(|e| e.to_string())?;
     let mut options = LaunchOptions::new(&prepared.dir, &game_dir, &home);
     options.session_stdin = session.is_some();
-    options.developer_offline = developer_offline;
-    options.developer_single_player = developer_offline;
+    options.developer_offline = dev_plan.developer_offline;
+    options.developer_single_player = dev_plan.developer_single_player;
     options.quick_play_singleplayer = world.filter(|_| server.is_none());
     options.quick_play_multiplayer = server;
     let command = client_command(&binary, &options).map_err(|e| e.to_string())?;
@@ -385,12 +495,35 @@ async fn run_horizon(
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+    let spawn_started = std::time::Instant::now();
     let mut child = process
         .spawn()
         .map_err(|e| format!("cannot start Horizon ({}): {e}", binary.display()))?;
+    devmode::record_phase(
+        instance_id,
+        "spawn",
+        spawn_started.elapsed().as_millis() as u64,
+    );
     let pid = child.id().unwrap_or(0);
     GAME_PID.store(pid, Ordering::SeqCst);
     log("stdout", format!("Horizon process ID: {pid}"));
+
+    if settings.dev_mode {
+        let record = DevLaunchRecord {
+            timestamp: devmode::now_unix(),
+            instance_id: instance_id.to_owned(),
+            engine_or_loader: "horizon".to_owned(),
+            binary_or_version: binary.display().to_string(),
+            flags_used: dev_plan.flags_used.clone(),
+            provenance: dev_plan.provenance.to_owned(),
+        };
+        if let Err(error) = devmode::record_launch(app, record).await {
+            log(
+                "stderr",
+                format!("[DEV] could not persist the launch record: {error}"),
+            );
+        }
+    }
 
     if let Some(session) = session {
         use tokio::io::AsyncWriteExt;
@@ -458,6 +591,7 @@ async fn run(
         .unwrap_or_else(|| "Player".to_owned());
     // settings: explicit java override and the -Xms/-Xmx memory allocation
     let settings = load_settings(&settings_path(app).await?).await;
+    devmode::reset_timings(instance_id);
     let mut jvm_args = Vec::new();
     if settings.max_memory_mb > 0 {
         jvm_args.push(format!("-Xmx{}M", settings.max_memory_mb));
@@ -503,12 +637,17 @@ async fn run(
 
     // App Developer Mode: debuggers never leak into a normal profile. The
     // settings are checked again here at launch time, not just in the UI.
+    let dev_flags = java_dev_flags(&settings);
     if settings.dev_mode {
-        let dev_args = twilight_launch::dev_jvm_args(twilight_launch::DevDebugOptions {
-            jdwp_enabled: settings.jdwp_enabled,
-            jdwp_port: settings.jdwp_port,
-            mixin_debug: settings.mixin_debug,
-        });
+        let _ = app.emit(
+            "launch-log",
+            LaunchLine {
+                stream: "stderr",
+                line: "[DEV] Unsupported / Developer Mode: debug flags are for development \
+                       only and may corrupt worlds or break saves."
+                    .to_owned(),
+            },
+        );
         if settings.jdwp_enabled {
             let _ = app.emit(
                 "launch-log",
@@ -530,7 +669,7 @@ async fn run(
                 },
             );
         }
-        jvm_args.extend(dev_args);
+        jvm_args.extend(dev_flags.iter().cloned());
     }
 
     // Deaf Mode: closed captions must be on before the game boots (Horizon
@@ -564,7 +703,16 @@ async fn run(
     // It installs the verified asset store and runs its own binary.
     if meta.loader.as_deref() == Some("horizon") {
         let started = std::time::Instant::now();
-        let code = run_horizon(app, &instance_dir, &meta, &settings, server, world).await?;
+        let code = run_horizon(
+            app,
+            instance_id,
+            &instance_dir,
+            &meta,
+            &settings,
+            server,
+            world,
+        )
+        .await?;
         instances::stamp_last_played(app, instance_id, started.elapsed().as_secs()).await;
         let _ = app.emit(
             "launch-log",
@@ -617,6 +765,9 @@ async fn run(
                             },
                         );
                     }
+                    LaunchEvent::Phase(name, ms) => {
+                        devmode::record_phase(&instance_id, name, ms);
+                    }
                 }
             }
         })
@@ -625,6 +776,25 @@ async fn run(
     // artifacts (libraries/assets) always live in the shared library store,
     // wherever the instance itself is scanned from
     let shared_dir = crate::storage::shared_root(app).await?;
+    if settings.dev_mode {
+        let record = DevLaunchRecord {
+            timestamp: devmode::now_unix(),
+            instance_id: instance_id.to_owned(),
+            engine_or_loader: meta.loader.clone().unwrap_or_else(|| "vanilla".to_owned()),
+            binary_or_version: format!("Minecraft {}", meta.version),
+            flags_used: dev_flags.clone(),
+            provenance: "official-with-dev-flags".to_owned(),
+        };
+        if let Err(error) = devmode::record_launch(app, record).await {
+            let _ = app.emit(
+                "launch-log",
+                LaunchLine {
+                    stream: "stderr",
+                    line: format!("[DEV] could not persist the launch record: {error}"),
+                },
+            );
+        }
+    }
     let cfg = LaunchConfig {
         version_or_id: meta.version,
         username,
@@ -749,5 +919,93 @@ mod tests {
         assert_eq!(ensure_deaf_subtitles(&game_dir).unwrap(), "already-set");
         assert_eq!(read(&game_dir), before);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn dev_settings() -> Settings {
+        Settings {
+            dev_mode: true,
+            horizon_dev_offline: true,
+            horizon_dev_single_player: true,
+            horizon_allow_unsigned_local: true,
+            jdwp_enabled: true,
+            jdwp_port: 5005,
+            mixin_debug: true,
+            ..Settings::default()
+        }
+    }
+
+    #[test]
+    fn horizon_developer_flags_are_never_injected_without_dev_mode() {
+        let settings = Settings {
+            dev_mode: false,
+            ..dev_settings()
+        };
+        let plan = horizon_dev_plan(&settings, false);
+        assert!(!plan.developer_offline);
+        assert!(!plan.developer_single_player);
+        assert!(plan.flags_used.is_empty());
+        assert!(!plan.blocked);
+    }
+
+    #[test]
+    fn horizon_developer_flags_are_recorded_and_provenance_is_explicit() {
+        let plan = horizon_dev_plan(&dev_settings(), true);
+        assert!(plan.developer_offline);
+        assert!(plan.developer_single_player);
+        assert_eq!(
+            plan.flags_used,
+            [
+                "HORIZON_LAUNCHER_DEVELOPER_OFFLINE=1",
+                "--developer-single-player"
+            ]
+        );
+        assert_eq!(plan.provenance, "build-from-source");
+        assert!(!plan.blocked);
+
+        let single_player_only = Settings {
+            horizon_dev_offline: false,
+            ..dev_settings()
+        };
+        let plan = horizon_dev_plan(&single_player_only, false);
+        assert!(!plan.developer_offline);
+        assert!(plan.developer_single_player);
+        assert_eq!(plan.provenance, "unsigned-local");
+    }
+
+    #[test]
+    fn unsigned_horizon_requires_an_explicit_allow_flag() {
+        let settings = Settings {
+            horizon_dev_offline: false,
+            horizon_dev_single_player: false,
+            horizon_allow_unsigned_local: false,
+            ..dev_settings()
+        };
+        assert!(horizon_dev_plan(&settings, false).blocked);
+        assert!(!horizon_dev_plan(&settings, true).blocked);
+        assert!(!horizon_is_official(
+            std::path::Path::new(r"C:\dev\horizon-client.exe"),
+            std::path::Path::new(r"C:\TwilightMC")
+        ));
+        assert!(horizon_is_official(
+            std::path::Path::new(r"C:\TwilightMC\horizon-releases\v1\horizon-client.exe"),
+            std::path::Path::new(r"C:\TwilightMC")
+        ));
+    }
+
+    #[test]
+    fn java_debug_flags_obey_the_dev_mode_gate() {
+        let settings = Settings {
+            dev_mode: false,
+            ..dev_settings()
+        };
+        assert!(java_dev_flags(&settings).is_empty());
+        assert_eq!(
+            java_dev_flags(&dev_settings()),
+            [
+                "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005",
+                "-Dmixin.debug.export=true",
+                "-Dmixin.debug.verbose=true",
+            ]
+        );
     }
 }

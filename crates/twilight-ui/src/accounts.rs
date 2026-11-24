@@ -106,6 +106,18 @@ pub(crate) struct Settings {
     /// App Developer Mode: unlocks diagnostics and debugging tools.
     #[serde(default)]
     pub(crate) dev_mode: bool,
+    /// Horizon developer install: sets
+    /// `HORIZON_LAUNCHER_DEVELOPER_OFFLINE=1` (Dev Mode only).
+    #[serde(default)]
+    pub(crate) horizon_dev_offline: bool,
+    /// Horizon developer install: passes `--developer-single-player`
+    /// (Dev Mode only).
+    #[serde(default)]
+    pub(crate) horizon_dev_single_player: bool,
+    /// Allows a Horizon binary outside the launcher-managed release store
+    /// (local build / unsigned artifact) while Dev Mode is active.
+    #[serde(default)]
+    pub(crate) horizon_allow_unsigned_local: bool,
     /// Add a JDWP socket to every JVM game launch (Dev Mode only).
     #[serde(default)]
     pub(crate) jdwp_enabled: bool,
@@ -156,6 +168,9 @@ impl Default for Settings {
             extra_jvm_args: None,
             use_cas_links: true,
             dev_mode: false,
+            horizon_dev_offline: false,
+            horizon_dev_single_player: false,
+            horizon_allow_unsigned_local: false,
             jdwp_enabled: false,
             jdwp_port: default_jdwp_port(),
             mixin_debug: false,

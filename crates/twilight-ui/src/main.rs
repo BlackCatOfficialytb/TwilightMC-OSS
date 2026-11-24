@@ -4,6 +4,7 @@
 mod accounts;
 mod cas;
 mod curseforge;
+mod devmode;
 mod export;
 mod horizon;
 mod import;
@@ -298,6 +299,8 @@ fn main() {
             prefs::set_dev_settings,
             prefs::get_raw_config_json,
             prefs::get_dev_diagnostics,
+            devmode::list_dev_launch_records,
+            devmode::clear_dev_launch_records,
             prefs::get_java_prefs,
             prefs::set_java_prefs,
             prefs::add_custom_java,

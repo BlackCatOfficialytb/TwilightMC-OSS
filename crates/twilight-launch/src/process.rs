@@ -33,6 +33,8 @@ pub enum LaunchEvent {
     Started(u32),
     Stdout(String),
     Stderr(String),
+    /// Pipeline stage duration in milliseconds (Developer Mode diagnostics).
+    Phase(&'static str, u64),
 }
 
 /// Builds a tokio `Command` (for inspection in tests and `run`).
@@ -86,10 +88,17 @@ pub async fn run(
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+    let spawn_started = std::time::Instant::now();
     let mut child = cmd.spawn().map_err(|e| LaunchError::Spawn {
         executable: plan.java_executable.display().to_string(),
         source: e,
     })?;
+    let _ = events
+        .send(LaunchEvent::Phase(
+            "spawn",
+            spawn_started.elapsed().as_millis() as u64,
+        ))
+        .await;
 
     // expose the child pid so hosts (desktop UI) can kill the process tree
     if let Some(pid) = child.id() {

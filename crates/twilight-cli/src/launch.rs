@@ -6,6 +6,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use tokio::sync::mpsc;
 
@@ -633,6 +634,23 @@ pub async fn run_launch(args: LaunchArgs) -> Result<i32, CliError> {
 
 /// Launches from a fully resolved [`LaunchConfig`], forwarding every game
 /// output line into `sink` when provided (the desktop UI's console drawer).
+/// Forwards one developer-timing milestone to the desktop UI without making
+/// the CLI print anything extra.
+async fn send_phase(
+    sink: &Option<mpsc::Sender<LaunchEvent>>,
+    name: &'static str,
+    started: Instant,
+) {
+    if let Some(sink) = sink {
+        let _ = sink
+            .send(LaunchEvent::Phase(
+                name,
+                started.elapsed().as_millis() as u64,
+            ))
+            .await;
+    }
+}
+
 pub async fn run_launch_with(
     cfg: LaunchConfig,
     sink: Option<mpsc::Sender<LaunchEvent>>,
@@ -650,6 +668,7 @@ pub async fn run_launch_with(
     {
         return run_horizon_cli(&cfg, &account).await;
     }
+    let mut phase_started = Instant::now();
     let game_options = GameOptions {
         quick_play: QuickPlay {
             server_address: cfg.server.clone(),
@@ -733,6 +752,8 @@ pub async fn run_launch_with(
         )),
         None => None,
     };
+    send_phase(&sink, "preflight", phase_started).await;
+    phase_started = Instant::now();
 
     // ---- pre-launch diagnostics: service DNS answers, GPU/OS/CPU/RAM and
     //      the classpath layout, collected once for both output branches
@@ -901,6 +922,8 @@ pub async fn run_launch_with(
             store.export_to_resources(&index, &virtual_root).await?;
         }
     }
+    send_phase(&sink, "assets", phase_started).await;
+    phase_started = Instant::now();
 
     // ---- natives: fresh scratchpad; extraction via 7-Zip or the fallback
     twilight_launch::clean_natives_dir(&paths.natives_dir).await?;
@@ -927,6 +950,7 @@ pub async fn run_launch_with(
     }
     let exclude_list: Vec<String> = excludes.into_iter().collect();
     twilight_launch::extract_natives(&paths.natives_dir, &native_jar_paths, &exclude_list).await?;
+    send_phase(&sink, "natives", phase_started).await;
 
     // ---- assemble and spawn, streaming game output to the console
     let plan = assemble_command(
@@ -968,8 +992,9 @@ pub async fn run_launch_with(
                         let _ = sink.send(LaunchEvent::Stderr(line)).await;
                     }
                 }
-                // The raw command was already forwarded to the sink above.
-                LaunchEvent::Command(_) => {}
+                // The raw command was already forwarded to the sink above;
+                // phase timings only feed the desktop Developer tab.
+                LaunchEvent::Command(_) | LaunchEvent::Phase(_, _) => {}
             }
         }
     });

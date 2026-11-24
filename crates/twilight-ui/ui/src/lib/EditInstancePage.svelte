@@ -648,12 +648,14 @@
     }
   }
 
-  async function copyRawLaunchCommand() {
+  async function copyRawLaunchCommand(unredacted = false) {
+    if (unredacted && !window.confirm(t('dev-unredacted-warning'))) return;
     try {
       const command = await window.__TAURI__.core.invoke('get_raw_launch_command', {
         instanceId: instance.id,
+        unredacted,
       });
-      await copyDevValue(command, 'dev-copied-command');
+      await copyDevValue(command, unredacted ? 'dev-copied-command-unredacted' : 'dev-copied-command');
     } catch (e) {
       toast(String(e), 'error');
     }
@@ -1341,6 +1343,13 @@
                 onclick={copyRawLaunchCommand}
               >
                 {t('dev-copy-command')}
+              </button>
+              <button
+                class="rounded border border-(--border) px-3 py-1.5 text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
+                title={t('dev-unredacted-warning')}
+                onclick={() => copyRawLaunchCommand(true)}
+              >
+                {t('dev-copy-command-unredacted')}
               </button>
               <button
                 class="rounded border border-(--border) px-3 py-1.5 text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"

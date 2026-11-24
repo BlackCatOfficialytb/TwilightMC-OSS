@@ -15,7 +15,7 @@
     listCustomThemes,
     saveCustomTheme,
   } from './theme';
-  import { t, getLocale, setLocale, SUPPORTED_LOCALES } from './i18n.svelte.ts';
+  import { t, formatDate, getLocale, setLocale, SUPPORTED_LOCALES } from './i18n.svelte.ts';
   import { toast } from './alerts.svelte.js';
 
   let {
@@ -26,6 +26,9 @@
     // App Developer Mode is owned by App.svelte so every screen can see it.
     devSettings = $bindable({
       devMode: false,
+      horizonDevOffline: false,
+      horizonDevSinglePlayer: false,
+      horizonAllowUnsignedLocal: false,
       jdwpEnabled: false,
       jdwpPort: 5005,
       mixinDebug: false,
@@ -239,6 +242,7 @@
   // ---- App Developer Mode (About-tab easter egg) ----
   let versionClicks = $state(0);
   let devDiagnostics = $state(null);
+  let devRecords = $state([]);
   let devConfig = $state('');
   let devConfigOpen = $state(false);
   let devBusy = $state(false);
@@ -262,6 +266,22 @@
       toast(String(e), 'error');
     } finally {
       devBusy = false;
+    }
+    try {
+      devRecords = await window.__TAURI__.core.invoke('list_dev_launch_records');
+    } catch (e) {
+      toast(String(e), 'error');
+    }
+  }
+
+  async function clearDevRecords() {
+    if (!window.confirm(t('settings-dev-history-clear-confirm'))) return;
+    try {
+      await window.__TAURI__.core.invoke('clear_dev_launch_records');
+      devRecords = [];
+      toast(t('settings-dev-history-cleared'), 'success');
+    } catch (e) {
+      toast(String(e), 'error');
     }
   }
 
@@ -1463,6 +1483,27 @@
         </div>
 
         <h3 class="mt-6 text-[12px] font-semibold uppercase tracking-wide text-(--text-muted)">
+          {t('settings-dev-horizon')}
+        </h3>
+        <div class="mt-2 space-y-2 rounded border border-(--border) bg-(--bg-subtle) p-4">
+          <p class="text-[11px] leading-relaxed text-(--text-muted)">
+            {t('settings-dev-horizon-desc')}
+          </p>
+          <label class="flex items-start gap-2 text-[12px]">
+            <input type="checkbox" bind:checked={devSettings.horizonDevOffline} />
+            <span class="font-mono text-[11px]">{t('settings-dev-horizon-offline')}</span>
+          </label>
+          <label class="flex items-start gap-2 text-[12px]">
+            <input type="checkbox" bind:checked={devSettings.horizonDevSinglePlayer} />
+            <span class="font-mono text-[11px]">{t('settings-dev-horizon-single-player')}</span>
+          </label>
+          <label class="flex items-start gap-2 text-[12px]">
+            <input type="checkbox" bind:checked={devSettings.horizonAllowUnsignedLocal} />
+            <span>{t('settings-dev-horizon-allow-unsigned')}</span>
+          </label>
+        </div>
+
+        <h3 class="mt-6 text-[12px] font-semibold uppercase tracking-wide text-(--text-muted)">
           {t('settings-dev-filesystem')}
         </h3>
         <div class="mt-2 rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px] leading-relaxed">
@@ -1486,6 +1527,42 @@
             <span class="text-(--text-muted)">{t('settings-dev-link-strategy')}</span>
             <span class="font-mono">{devDiagnostics?.linkStrategy ?? '—'}</span>
           </div>
+          <div class="mt-1 flex justify-between gap-3">
+            <span class="text-(--text-muted)">{t('settings-dev-rss')}</span>
+            <span class="font-mono">{formatBytes(devDiagnostics?.launcherRssBytes ?? 0)}</span>
+          </div>
+          <div class="mt-1 flex justify-between gap-3">
+            <span class="text-(--text-muted)">{t('settings-dev-cas-blobs')}</span>
+            <span class="font-mono">{devDiagnostics?.casBlobCount ?? 0}</span>
+          </div>
+          <div class="mt-1 flex justify-between gap-3">
+            <span class="text-(--text-muted)">{t('settings-dev-cas-size')}</span>
+            <span class="font-mono">{formatBytes(devDiagnostics?.casTotalSizeBytes ?? 0)}</span>
+          </div>
+
+          {#if devDiagnostics?.lastLaunch}
+            <div class="mt-2 border-t border-(--border) pt-2">
+              <div class="flex justify-between gap-3">
+                <span class="text-(--text-muted)">{t('settings-dev-last-launch')}</span>
+                <span class="truncate font-mono">{devDiagnostics.lastLaunch.instanceId}</span>
+              </div>
+              <div class="mt-1 grid grid-cols-2 gap-x-3">
+                <span>{t('settings-dev-phase-preflight')}</span>
+                <span class="font-mono">{t('settings-dev-ms', { value: devDiagnostics.lastLaunch.preflightMs })}</span>
+                <span>{t('settings-dev-phase-assets')}</span>
+                <span class="font-mono">{t('settings-dev-ms', { value: devDiagnostics.lastLaunch.assetsMs })}</span>
+                <span>{t('settings-dev-phase-natives')}</span>
+                <span class="font-mono">{t('settings-dev-ms', { value: devDiagnostics.lastLaunch.nativesMs })}</span>
+                <span>{t('settings-dev-phase-spawn')}</span>
+                <span class="font-mono">{t('settings-dev-ms', { value: devDiagnostics.lastLaunch.spawnMs })}</span>
+                <span class="font-medium">{t('settings-dev-phase-total')}</span>
+                <span class="font-mono">{t('settings-dev-ms', { value: devDiagnostics.lastLaunch.totalMs })}</span>
+              </div>
+            </div>
+          {:else}
+            <p class="mt-2 text-[11px] text-(--text-muted)">{t('settings-dev-no-launch')}</p>
+          {/if}
+
           <button
             class="mt-3 rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main) disabled:opacity-50"
             disabled={devBusy}
@@ -1515,9 +1592,53 @@
                 {t('settings-dev-close')}
               </button>
             </div>
+            <p class="mt-1 text-[11px] text-(--text-muted)">{t('settings-dev-config-redacted')}</p>
             <pre class="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] text-(--text-muted)">{devConfig}</pre>
           </div>
         {/if}
+
+        <h3 class="mt-6 text-[12px] font-semibold uppercase tracking-wide text-(--text-muted)">
+          {t('settings-dev-history')}
+        </h3>
+        <div class="mt-2 rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px]">
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-[11px] text-(--text-muted)">{t('settings-dev-history-desc')}</span>
+            <button
+              class="shrink-0 rounded border border-(--border) px-3 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main) disabled:opacity-50"
+              disabled={devRecords.length === 0}
+              onclick={clearDevRecords}
+            >
+              {t('settings-dev-history-clear')}
+            </button>
+          </div>
+          {#if devRecords.length === 0}
+            <p class="mt-2 text-[11px] text-(--text-muted)">{t('settings-dev-history-empty')}</p>
+          {:else}
+            <div class="mt-2 max-h-64 space-y-1 overflow-auto">
+              {#each devRecords as record}
+                <div class="rounded border border-(--border) bg-(--bg-surface) p-2 text-[11px]">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="truncate font-mono">{record.instanceId}</span>
+                    <span class="shrink-0 text-(--text-muted)">{formatDate(record.timestamp * 1000)}</span>
+                  </div>
+                  <div class="mt-0.5 text-(--text-muted)">
+                    {record.engineOrLoader} · {record.binaryOrVersion}
+                  </div>
+                  <div class="mt-0.5">
+                    <span class="rounded bg-(--accent)/15 px-1.5 py-0.5 font-mono text-[10px] text-(--accent)">
+                      {t('dev-provenance')}: {record.provenance}
+                    </span>
+                  </div>
+                  {#if record.flagsUsed.length > 0}
+                    <div class="mt-0.5 break-all font-mono text-[10px] text-(--text-muted)">
+                      {t('settings-dev-history-flags')}: {record.flagsUsed.join(' ')}
+                    </div>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
+        </div>
       {/if}
 
       {#if javaMsg || storageMsg}

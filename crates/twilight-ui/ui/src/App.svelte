@@ -93,6 +93,9 @@
   // App Developer Mode: unlocked in Settings → About, persisted in settings.json.
   let devSettings = $state({
     devMode: false,
+    horizonDevOffline: false,
+    horizonDevSinglePlayer: false,
+    horizonAllowUnsignedLocal: false,
     jdwpEnabled: false,
     jdwpPort: 5005,
     mixinDebug: false,
@@ -590,6 +593,9 @@
         const dev = await api('get_dev_settings');
         devSettings = {
           devMode: dev.devMode ?? false,
+          horizonDevOffline: dev.horizonDevOffline ?? false,
+          horizonDevSinglePlayer: dev.horizonDevSinglePlayer ?? false,
+          horizonAllowUnsignedLocal: dev.horizonAllowUnsignedLocal ?? false,
           jdwpEnabled: dev.jdwpEnabled ?? false,
           jdwpPort: dev.jdwpPort ?? 5005,
           mixinDebug: dev.mixinDebug ?? false,
@@ -931,6 +937,16 @@
       </div>
       <span class="text-xs text-(--text-muted)" aria-live="polite">{statusText}</span>
     </header>
+
+    {#if devMode}
+      <div
+        role="alert"
+        class="flex shrink-0 items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-4 py-1.5 text-[11.5px] leading-snug text-amber-500"
+      >
+        <span aria-hidden="true">⚠</span>
+        <span>{t('dev-warning-banner')}</span>
+      </div>
+    {/if}
 
     <main class="min-w-0 flex-1 overflow-y-auto p-6">
       {#if currentView === 'accounts'}

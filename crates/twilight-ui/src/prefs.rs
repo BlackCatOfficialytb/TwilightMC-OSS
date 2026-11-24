@@ -2,9 +2,11 @@
 // the -Xms/-Xmx memory allocation, all persisted in `settings.json`.
 
 use serde::{Deserialize, Serialize};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use tauri::AppHandle;
 
 use crate::accounts::{load_settings, save_settings, settings_path};
+use crate::devmode::{LaunchTimings, last_timings, redact_settings_json};
 
 /// Persisted java/memory allocation shown in the Settings modal.
 #[derive(Debug, Clone, Serialize)]
@@ -205,6 +207,9 @@ pub async fn set_horizon_prefs(app: AppHandle, horizon_path: Option<String>) -> 
 #[serde(rename_all = "camelCase")]
 pub struct DevSettings {
     pub dev_mode: bool,
+    pub horizon_dev_offline: bool,
+    pub horizon_dev_single_player: bool,
+    pub horizon_allow_unsigned_local: bool,
     pub jdwp_enabled: bool,
     pub jdwp_port: u16,
     pub mixin_debug: bool,
@@ -215,6 +220,9 @@ pub async fn get_dev_settings(app: AppHandle) -> Result<DevSettings, String> {
     let settings = load_settings(&settings_path(&app).await?).await;
     Ok(DevSettings {
         dev_mode: settings.dev_mode,
+        horizon_dev_offline: settings.horizon_dev_offline,
+        horizon_dev_single_player: settings.horizon_dev_single_player,
+        horizon_allow_unsigned_local: settings.horizon_allow_unsigned_local,
         jdwp_enabled: settings.jdwp_enabled,
         jdwp_port: if settings.jdwp_port == 0 {
             5005
@@ -229,6 +237,9 @@ pub async fn get_dev_settings(app: AppHandle) -> Result<DevSettings, String> {
 pub async fn set_dev_settings(app: AppHandle, settings: DevSettings) -> Result<(), String> {
     let mut stored = load_settings(&settings_path(&app).await?).await;
     stored.dev_mode = settings.dev_mode;
+    stored.horizon_dev_offline = settings.horizon_dev_offline;
+    stored.horizon_dev_single_player = settings.horizon_dev_single_player;
+    stored.horizon_allow_unsigned_local = settings.horizon_allow_unsigned_local;
     stored.jdwp_enabled = settings.jdwp_enabled;
     stored.jdwp_port = if settings.jdwp_port == 0 {
         5005
@@ -244,7 +255,7 @@ pub async fn set_dev_settings(app: AppHandle, settings: DevSettings) -> Result<(
 pub async fn get_raw_config_json(app: AppHandle) -> Result<String, String> {
     let path = settings_path(&app).await?;
     let bytes = tokio::fs::read(&path).await.map_err(|e| e.to_string())?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    Ok(redact_settings_json(&String::from_utf8_lossy(&bytes)))
 }
 
 /// Filesystem facts the Developer tab shows alongside the CAS stats.
@@ -257,20 +268,41 @@ pub struct DevDiagnostics {
     pub cas_root: String,
     /// Strategy cascade used for a file link.
     pub link_strategy: &'static str,
+    /// Resident set size of the launcher process itself.
+    pub launcher_rss_bytes: u64,
+    pub cas_blob_count: usize,
+    pub cas_total_size_bytes: u64,
+    /// Phase timings from the most recent launch (in-memory).
+    pub last_launch: Option<LaunchTimings>,
 }
 
 #[tauri::command]
 pub async fn get_dev_diagnostics(app: AppHandle) -> Result<DevDiagnostics, String> {
-    let cas_root = crate::storage::shared_root(&app)
-        .await?
-        .join("cas")
-        .to_string_lossy()
-        .into_owned();
+    let cas_path = crate::storage::shared_root(&app).await?.join("cas");
+    let stats = twilight_cas::cas_stats(&cas_path).ok();
     Ok(DevDiagnostics {
         unprivileged_symlinks: probe_unprivileged_symlinks(),
-        cas_root,
+        cas_root: cas_path.to_string_lossy().into_owned(),
         link_strategy: "hardlink → NTFS junction → symlink → copy",
+        launcher_rss_bytes: launcher_rss_bytes(),
+        cas_blob_count: stats.as_ref().map_or(0, |stats| stats.blob_count),
+        cas_total_size_bytes: stats.as_ref().map_or(0, |stats| stats.total_size_bytes),
+        last_launch: last_timings(),
     })
+}
+
+/// One sysinfo refresh of the launcher's own PID: RSS in bytes.
+fn launcher_rss_bytes() -> u64 {
+    let pid = Pid::from_u32(std::process::id());
+    let Ok(mut system) = System::new() else {
+        return 0;
+    };
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        true,
+        ProcessRefreshKind::nothing().with_memory(),
+    );
+    system.process(pid).map_or(0, |process| process.memory())
 }
 
 #[cfg(windows)]
