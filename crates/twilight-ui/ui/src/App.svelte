@@ -889,6 +889,18 @@
       {/if}
     </button>
 
+    {#if devMode}
+      <div
+        class="mt-2 flex items-center justify-center gap-1 rounded border border-(--accent)/50 bg-(--accent)/10 px-2 py-1 text-[10px] text-(--accent)"
+        title={t('dev-mode-active')}
+      >
+        <span aria-hidden="true">🛠</span>
+        {#if sidebarExpanded}
+          <span class="truncate">{t('dev-mode-badge')}</span>
+        {/if}
+      </div>
+    {/if}
+
     <!-- collapse (expanded) / expand-on-hover (compact) trigger at the logo edge -->
     <button
       class="absolute top-1.5 -right-3 z-20 flex h-6 w-6 items-center justify-center rounded-full border border-(--border) bg-(--bg-surface) text-[9px] text-(--text-muted) transition-opacity duration-100 hover:text-(--text-main) {sidebarExpanded
@@ -935,6 +947,11 @@
           </div>
         {/if}
       </div>
+      {#if devMode}
+        <span class="shrink-0 rounded bg-(--accent)/15 px-1.5 py-0.5 text-[10px] font-medium text-(--accent)">
+          {t('dev-mode-active')}
+        </span>
+      {/if}
       <span class="text-xs text-(--text-muted)" aria-live="polite">{statusText}</span>
     </header>
 

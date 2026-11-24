@@ -14,7 +14,7 @@
   import { toast, confirmAlert } from './alerts.svelte.js';
   import InstanceIconPicker from './InstanceIconPicker.svelte';
   import ModrinthBrowserModal from './ModrinthBrowserModal.svelte';
-  import { t } from './i18n.svelte.ts';
+  import { t, formatDate } from './i18n.svelte.ts';
 
   let {
     instance,

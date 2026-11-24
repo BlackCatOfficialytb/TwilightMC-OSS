@@ -225,7 +225,9 @@
     }
   }
 
-  const sections = [
+  // Reactive so the rail gains/loses the Developer tab the moment the
+  // 7-tap unlock or the master toggle changes devMode.
+  const sections = $derived.by(() => [
     { id: 'appearance', label: 'settings-appearance', icon: '🎨' },
     { id: 'language', label: 'settings-language', icon: '🌐' },
     { id: 'java', label: 'settings-java', icon: '☕' },
@@ -235,12 +237,13 @@
     { id: 'accessibility', label: 'settings-accessibility', icon: '♿' },
     { id: 'about', label: 'settings-about', icon: 'ℹ' },
     ...(devSettings.devMode ? [{ id: 'developer', label: 'settings-dev-title', icon: '🛠️' }] : []),
-  ];
+  ]);
   let section = $state('appearance');
   let iconPack = $state(getIconPack());
 
   // ---- App Developer Mode (About-tab easter egg) ----
   let versionClicks = $state(0);
+  let tapHint = $state('');
   let devDiagnostics = $state(null);
   let devRecords = $state([]);
   let devConfig = $state('');
@@ -250,15 +253,26 @@
   async function onVersionClick() {
     if (devSettings.devMode) return;
     versionClicks += 1;
-    if (versionClicks < 7) return;
+    if (versionClicks < 7) {
+      // Android-style feedback from tap 3 onward, purely local.
+      tapHint =
+        versionClicks >= 3
+          ? t('dev-mode-tap-hint', { remaining: 7 - versionClicks })
+          : '';
+      return;
+    }
     versionClicks = 0;
+    tapHint = '';
     devSettings.devMode = true;
     toast(t('dev-mode-unlocked'), 'success');
     section = 'developer';
     await loadDevDiagnostics();
   }
 
+  const hasBackend = () => Boolean(window.__TAURI__?.core);
+
   async function loadDevDiagnostics() {
+    if (!hasBackend()) return;
     devBusy = true;
     try {
       devDiagnostics = await window.__TAURI__.core.invoke('get_dev_diagnostics');
@@ -275,7 +289,7 @@
   }
 
   async function clearDevRecords() {
-    if (!window.confirm(t('settings-dev-history-clear-confirm'))) return;
+    if (!hasBackend() || !window.confirm(t('settings-dev-history-clear-confirm'))) return;
     try {
       await window.__TAURI__.core.invoke('clear_dev_launch_records');
       devRecords = [];
@@ -286,6 +300,7 @@
   }
 
   async function openDevtools() {
+    if (!hasBackend()) return;
     try {
       await window.__TAURI__.core.invoke('open_devtools');
     } catch (e) {
@@ -294,6 +309,7 @@
   }
 
   async function inspectConfig() {
+    if (!hasBackend()) return;
     try {
       devConfig = await window.__TAURI__.core.invoke('get_raw_config_json');
       devConfigOpen = true;
@@ -304,7 +320,26 @@
 
   async function setDevMode(enabled) {
     devSettings.devMode = enabled;
-    if (enabled) await loadDevDiagnostics();
+    if (!enabled) {
+      // Disabling the master switch also retires every dependent tool so a
+      // later re-enable starts from a clean, safe posture.
+      devSettings.horizonDevOffline = false;
+      devSettings.horizonDevSinglePlayer = false;
+      devSettings.horizonAllowUnsignedLocal = false;
+      devSettings.jdwpEnabled = false;
+      devSettings.mixinDebug = false;
+      versionClicks = 0;
+      tapHint = '';
+      devDiagnostics = null;
+      devRecords = [];
+      devConfig = '';
+      devConfigOpen = false;
+      // Never strand the user on a tab that is about to disappear.
+      if (section === 'developer') section = 'about';
+      toast(t('dev-mode-disabled'), 'info');
+      return;
+    }
+    await loadDevDiagnostics();
   }
 
   const GC_FLAGS = [
@@ -549,7 +584,24 @@
   }
 
   const REPO = 'https://github.com/BlackCatOfficialytb/TwilightMC-OSS';
-  const CROWDIN = 'https://crowdin.com/';
+  const CROWDIN = 'https://crowdin.com/project/twilightmc-oss';
+  const CAS_CRATE = 'https://crates.io/crates/twilight-cas';
+  const DISCORD = 'https://dsc.gg/blackcatofficial';
+  const SABATANK = 'https://discord.gg/sabatank';
+
+  // Offline host identity: no network call, just the browser's platform
+  // hints. The build version comes from the `version` prop.
+  const HOST = (() => {
+    if (typeof navigator === 'undefined') return { os: 'unknown', arch: 'unknown' };
+    const ua = navigator.userAgent || '';
+    const os = navigator.userAgentData?.platform || navigator.platform || 'unknown';
+    const arch = /arm64|aarch64/i.test(ua)
+      ? 'arm64'
+      : /x86_64|x64|win64|intel/i.test(ua)
+        ? 'x86_64'
+        : 'unknown';
+    return { os, arch };
+  })();
 </script>
 
 <div class="flex h-full">
@@ -1388,56 +1440,141 @@
         <h2 class="text-[16px] font-semibold">{t('settings-about-title')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">{t('settings-about-desc')}</p>
 
-        <div class="mt-6 rounded border border-(--border) bg-(--bg-subtle) p-4">
-          <div class="flex items-center gap-2">
-            <img src="/logo.png" alt="" draggable="false" class="h-10 w-10" />
-            <div>
+        <!-- Identity & build information -->
+        <div class="mt-5 rounded border border-(--border) bg-(--bg-subtle) p-4">
+          <div class="flex items-start gap-3">
+            <img src="/logo.png" alt="" draggable="false" class="h-12 w-12 shrink-0 rounded" />
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-[14px] font-semibold">
+                  {t('about-brand-title', { channel: t('app-channel'), version })}
+                </span>
+                <span class="rounded bg-(--accent-star)/15 px-1.5 py-0.5 text-[10px] font-medium text-(--accent-star)">
+                  {t('app-channel')}
+                </span>
+                {#if devSettings.devMode}
+                  <span class="rounded bg-(--accent)/15 px-1.5 py-0.5 text-[10px] font-medium text-(--accent)">
+                    {t('dev-mode-active')}
+                  </span>
+                {/if}
+              </div>
               <button
                 type="button"
-                class="text-[13px] font-semibold text-left hover:text-(--accent)"
+                class="mt-1 text-left font-mono text-[12px] text-(--accent) hover:underline"
                 title={devSettings.devMode ? t('settings-dev-title') : t('settings-dev-hint')}
                 onclick={onVersionClick}
               >
                 {t('settings-about-version', { version })}
               </button>
-              <div class="mt-0.5 text-[12px] text-(--text-muted)">
-                {t('settings-about-channel')}
+              <div class="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-(--text-muted)">
+                <span>{t('about-workspace', { version })}</span>
+                <span>{t('about-host', { os: HOST.os, arch: HOST.arch })}</span>
               </div>
+              {#if versionClicks >= 3 && !devSettings.devMode}
+                <p class="mt-1 text-[11px] text-(--accent)" aria-live="polite">{tapHint}</p>
+              {/if}
             </div>
           </div>
         </div>
 
-        <div class="mt-4 flex flex-col items-start gap-2">
-          <button class="text-[12px] text-(--accent) hover:underline" onclick={() => onopenurl?.(`${REPO}`)}>
-            ↗ {t('settings-github')}
-          </button>
-          <button class="text-[12px] text-(--accent) hover:underline" onclick={() => onopenurl?.(`${REPO}/releases`)}>
+        <!-- Updates: manual and opt-in only (see TODO.md for the live check) -->
+        <h3 class="mt-6 text-[12px] font-semibold uppercase tracking-wide text-(--text-muted)">
+          {t('about-updates-title')}
+        </h3>
+        <div class="mt-2 rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px] leading-relaxed">
+          <p class="text-(--text-muted)">{t('about-updates-desc')}</p>
+          <p class="mt-2">{t('about-updates-deferred')}</p>
+          <button
+            class="mt-3 rounded border border-(--border) px-3 py-1.5 text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
+            onclick={() => onopenurl?.(`${REPO}/releases`)}
+          >
             ↗ {t('settings-releases')}
           </button>
-          <button class="text-[12px] text-(--accent) hover:underline" onclick={() => onopenurl?.(`${REPO}/issues`)}>
-            ↗ {t('settings-report')}
+        </div>
+
+        <!-- Channel taxonomy -->
+        <h3 class="mt-6 text-[12px] font-semibold uppercase tracking-wide text-(--text-muted)">
+          {t('about-channels-title')}
+        </h3>
+        <div class="mt-2 grid grid-cols-1 gap-2 text-[11px] sm:grid-cols-2">
+          <div class="rounded border border-(--border) bg-(--bg-subtle) p-3">
+            <div class="font-semibold">{t('about-channel-stable')}</div>
+            <p class="mt-0.5 text-(--text-muted)">{t('about-channel-stable-desc')}</p>
+          </div>
+          <div class="rounded border border-(--border) bg-(--bg-subtle) p-3">
+            <div class="font-semibold">{t('about-channel-star')}</div>
+            <p class="mt-0.5 text-(--text-muted)">{t('about-channel-star-desc')}</p>
+          </div>
+          <div class="rounded border border-(--border) bg-(--bg-subtle) p-3">
+            <div class="font-semibold">{t('about-channel-bolide')}</div>
+            <p class="mt-0.5 text-(--text-muted)">{t('about-channel-bolide-desc')}</p>
+          </div>
+          <div class="rounded border border-(--border) bg-(--bg-subtle) p-3">
+            <div class="font-semibold">{t('about-channel-snapshot')}</div>
+            <p class="mt-0.5 text-(--text-muted)">{t('about-channel-snapshot-desc')}</p>
+          </div>
+        </div>
+
+        <!-- Ecosystem -->
+        <h3 class="mt-6 text-[12px] font-semibold uppercase tracking-wide text-(--text-muted)">
+          {t('about-ecosystem-title')}
+        </h3>
+        <div class="mt-2 flex flex-wrap gap-2 text-[12px]">
+          <button class="rounded border border-(--border) px-3 py-1.5 text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)" onclick={() => onopenurl?.(REPO)}>
+            ↗ {t('settings-github')}
           </button>
-          <button class="text-[12px] text-(--accent) hover:underline" onclick={() => onopenurl?.('https://ko-fi.com/quanvm0501alt1')}>
+          <button class="rounded border border-(--border) px-3 py-1.5 text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)" onclick={() => onopenurl?.(`${REPO}/issues`)}>
+            ↗ {t('about-link-issues')}
+          </button>
+          <button class="rounded border border-(--border) px-3 py-1.5 text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)" onclick={() => onopenurl?.(CROWDIN)}>
+            ↗ {t('about-link-crowdin')}
+          </button>
+          <button class="rounded border border-(--border) px-3 py-1.5 text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)" onclick={() => onopenurl?.(CAS_CRATE)}>
+            ↗ {t('about-link-cas')}
+          </button>
+          <button class="rounded border border-(--border) px-3 py-1.5 text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)" onclick={() => onopenurl?.(DISCORD)}>
+            ↗ {t('about-link-discord')}
+          </button>
+        </div>
+
+        <!-- Voluntary support -->
+        <h3 class="mt-6 text-[12px] font-semibold uppercase tracking-wide text-(--text-muted)">
+          {t('about-support-title')}
+        </h3>
+        <div class="mt-2 rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px] leading-relaxed">
+          <p class="text-(--text-muted)">{t('about-support-desc')}</p>
+          <button class="mt-3 rounded border border-(--accent)/50 px-3 py-1.5 text-(--accent) hover:bg-(--accent)/10" onclick={() => onopenurl?.('https://ko-fi.com/quanvm0501alt1')}>
             ↗ {t('settings-kofi')}
           </button>
         </div>
-        <p class="mt-6 text-[12px] text-(--text-muted)">
-          {t('settings-about-footer')}
-        </p>
+
+        <!-- Security, licensing and credits -->
+        <h3 class="mt-6 text-[12px] font-semibold uppercase tracking-wide text-(--text-muted)">
+          {t('about-security-title')}
+        </h3>
+        <div class="mt-2 space-y-2 rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px] leading-relaxed">
+          <p>{t('about-security-desc')}</p>
+          <p>{t('about-license-desc')}</p>
+          <p>{t('about-credits-desc')}</p>
+          <button class="text-[12px] text-(--accent) hover:underline" onclick={() => onopenurl?.(SABATANK)}>
+            ↗ {t('about-credits-discord')}
+          </button>
+          <p class="text-(--text-muted)">{t('settings-about-footer')}</p>
+        </div>
       {:else if section === 'developer'}
         <h2 class="text-[16px] font-semibold">{t('settings-dev-title')}</h2>
         <p class="mt-1 text-[12px] text-(--text-muted)">{t('settings-dev-desc')}</p>
 
-        <div class="mt-5 rounded border border-(--border) bg-(--bg-subtle) p-4">
+        <div class="mt-5 rounded border border-(--accent)/50 bg-(--accent)/5 p-4">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <div class="text-[12px] font-medium">{t('settings-dev-mode')}</div>
-              <div class="mt-0.5 text-[11px] text-(--text-muted)">{t('settings-dev-mode-desc')}</div>
+              <div class="text-[12px] font-semibold text-(--accent)">{t('settings-dev-master')}</div>
+              <div class="mt-0.5 text-[11px] text-(--text-muted)">{t('settings-dev-master-desc')}</div>
             </div>
             <button
               role="switch"
               aria-checked={devSettings.devMode}
-              aria-label={t('settings-dev-mode')}
+              aria-label={t('settings-dev-master')}
               class="relative h-6 w-11 shrink-0 rounded-full border transition-colors {devSettings.devMode
                 ? 'border-(--accent) bg-(--accent)'
                 : 'border-(--border) bg-(--bg-subtle)'}"
