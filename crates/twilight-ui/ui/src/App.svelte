@@ -1,4 +1,5 @@
 <script>
+  import { tauriInvoke, tauriListen } from './lib/tauri';
   import { onMount } from 'svelte';
   import InstanceGrid from './lib/InstanceGrid.svelte';
   import EditInstancePage from './lib/EditInstancePage.svelte';
@@ -184,7 +185,7 @@
   let javaMsg = $state('');
 
   async function api(cmd, args) {
-    return window.__TAURI__.core.invoke(cmd, args);
+    return tauriInvoke(cmd, args);
   }
 
   // ---- theme / chrome ----
@@ -766,10 +767,10 @@
       }
       try {
         unlisteners.push(
-          await window.__TAURI__.event.listen('launch-log', (e) => logLine(e.payload)),
+          await tauriListen('launch-log', (e) => logLine(e.payload)),
         );
         unlisteners.push(
-          await window.__TAURI__.event.listen('tauri://drag-drop', (e) => {
+          await tauriListen('tauri://drag-drop', (e) => {
             const path = e.payload?.paths?.[0];
             if (!path) return;
             const lower = path.toLowerCase();

@@ -1,4 +1,5 @@
 <script>
+  import { tauriInvoke } from './tauri';
   // Full-page edit-instance view (SettingsPage grammar): left navigation
   // rail over eight sections and a spacious content column. The mods tab is
   // fully live (list/toggle/delete/add + Modrinth browser); worlds manage
@@ -83,7 +84,7 @@
       });
       if (!dest) return;
       const cmd = kind === 'twpack' ? 'export_instance_twpack' : 'export_instance_zip';
-      const path = await window.__TAURI__.core.invoke(cmd, {
+      const path = await tauriInvoke(cmd, {
         instanceId: instance.id,
         destPath: dest,
       });
@@ -110,7 +111,7 @@
     if (!value || value === instance.name) return;
     nameNotice = '';
     try {
-      const row = await window.__TAURI__.core.invoke('rename_instance', {
+      const row = await tauriInvoke('rename_instance', {
         instanceId: instance.id,
         newName: value,
       });
@@ -132,7 +133,7 @@
   async function applyIconKey(key) {
     iconNotice = '';
     try {
-      await window.__TAURI__.core.invoke('set_instance_icon_key', {
+      await tauriInvoke('set_instance_icon_key', {
         instanceId: instance.id,
         iconKey: key,
       });
@@ -153,7 +154,7 @@
       filters: [{ name: t('filter-images'), extensions: ['png', 'jpg', 'jpeg', 'webp', 'ico'] }],
     });
     if (!picked) return null;
-    const path = await window.__TAURI__.core.invoke('set_instance_icon', {
+    const path = await tauriInvoke('set_instance_icon', {
       instanceId: instance.id,
       imagePath: String(picked),
     });
@@ -179,7 +180,7 @@
   // or the bare instance root); the UI never guesses a game-dir layout.
   async function gamePath(sub, name) {
     try {
-      return await window.__TAURI__.core.invoke('instance_game_path', {
+      return await tauriInvoke('instance_game_path', {
         instanceId: instance.id,
         sub,
         fileName: name ?? null,
@@ -192,7 +193,7 @@
 
   async function openGameFolder(sub, name) {
     try {
-      await window.__TAURI__.core.invoke('open_instance_game_folder', {
+      await tauriInvoke('open_instance_game_folder', {
         instanceId: instance.id,
         sub,
         fileName: name ?? null,
@@ -216,7 +217,7 @@
     const pairs = await Promise.all(
       rows.map(async (row) => {
         try {
-          const uri = await window.__TAURI__.core.invoke('read_instance_screenshot', {
+          const uri = await tauriInvoke('read_instance_screenshot', {
             instanceId: instance.id,
             fileName: row.name,
           });
@@ -257,7 +258,7 @@
   async function listMods() {
     modsBusy = true;
     try {
-      mods = await window.__TAURI__.core.invoke('list_instance_mods', {
+      mods = await tauriInvoke('list_instance_mods', {
         instanceId: instance.id,
       });
       modsMsg = '';
@@ -288,7 +289,7 @@
     assistInstalling = true;
     try {
       for (const projectId of missingKeyMods) {
-        await window.__TAURI__.core.invoke('install_mod_with_deps', {
+        await tauriInvoke('install_mod_with_deps', {
           instanceId: instance.id,
           projectId,
           gameVersion: instance.minecraft_version,
@@ -307,7 +308,7 @@
   async function toggleMod(mod) {
     modsBusy = true;
     try {
-      await window.__TAURI__.core.invoke('toggle_mod', {
+      await tauriInvoke('toggle_mod', {
         instanceId: instance.id,
         filename: mod.filename,
         enable: !mod.is_enabled,
@@ -324,7 +325,7 @@
   async function deleteMod(mod) {
     modsBusy = true;
     try {
-      await window.__TAURI__.core.invoke('delete_mod', {
+      await tauriInvoke('delete_mod', {
         instanceId: instance.id,
         filename: mod.filename,
       });
@@ -360,7 +361,7 @@
     modsBusy = true;
     try {
       for (const path of paths) {
-        await window.__TAURI__.core.invoke('import_mod', { instanceId: instance.id, jarPath: path });
+        await tauriInvoke('import_mod', { instanceId: instance.id, jarPath: path });
       }
       modsMsg = '';
     } catch (e) {
@@ -374,7 +375,7 @@
   async function listFiles(which) {
     filesBusy = true;
     try {
-      const rows = await window.__TAURI__.core.invoke(which, { instanceId: instance.id });
+      const rows = await tauriInvoke(which, { instanceId: instance.id });
       if (which === 'list_screenshots') {
         screenshots = rows;
         await loadScreenshotUris(rows);
@@ -399,8 +400,8 @@
   async function listWorlds() {
     worldsBusy = true;
     try {
-      worlds = await window.__TAURI__.core.invoke('list_instance_worlds', { instanceId: instance.id });
-      worldBackups = await window.__TAURI__.core.invoke('list_world_backups', { instanceId: instance.id });
+      worlds = await tauriInvoke('list_instance_worlds', { instanceId: instance.id });
+      worldBackups = await tauriInvoke('list_world_backups', { instanceId: instance.id });
       worldsMsg = '';
     } catch (e) {
       worldsMsg = String(e);
@@ -412,7 +413,7 @@
   async function backupWorld(w) {
     worldsBusy = true;
     try {
-      const path = await window.__TAURI__.core.invoke('backup_instance_world', {
+      const path = await tauriInvoke('backup_instance_world', {
         instanceId: instance.id,
         worldName: w.name,
       });
@@ -435,7 +436,7 @@
     if (!ok) return;
     worldsBusy = true;
     try {
-      const name = await window.__TAURI__.core.invoke('restore_world_backup', {
+      const name = await tauriInvoke('restore_world_backup', {
         instanceId: instance.id,
         backupName: b.name,
       });
@@ -465,7 +466,7 @@
   async function listPacks() {
     packsBusy = true;
     try {
-      packs = await window.__TAURI__.core.invoke('list_instance_packs', {
+      packs = await tauriInvoke('list_instance_packs', {
         instanceId: instance.id,
         projectType: packKind === 'shaderpacks' ? 'shader' : 'resourcepack',
       });
@@ -499,7 +500,7 @@
     packsBusy = true;
     try {
       for (const path of paths) {
-        await window.__TAURI__.core.invoke('import_pack', {
+        await tauriInvoke('import_pack', {
           instanceId: instance.id,
           projectType: packKind === 'shaderpacks' ? 'shader' : 'resourcepack',
           filePath: path,
@@ -523,7 +524,7 @@
     if (!ok) return;
     packsBusy = true;
     try {
-      await window.__TAURI__.core.invoke('delete_pack', {
+      await tauriInvoke('delete_pack', {
         instanceId: instance.id,
         projectType: packKind === 'shaderpacks' ? 'shader' : 'resourcepack',
         fileName: p.name,
@@ -582,7 +583,7 @@
     });
     if (!ok) return;
     try {
-      await window.__TAURI__.core.invoke('delete_screenshot', {
+      await tauriInvoke('delete_screenshot', {
         instanceId: instance.id,
         fileName: shot.name,
       });
@@ -601,7 +602,7 @@
   async function openFolder(target) {
     const path = typeof target === 'string' ? target : await target;
     try {
-      await window.__TAURI__.core.invoke('open_path', { path });
+      await tauriInvoke('open_path', { path });
     } catch (e) {
       filesMsg = String(e);
       toast(String(e), 'error');
@@ -619,7 +620,7 @@
     logTextBusy = true;
     logTextMsg = '';
     try {
-      logText = await window.__TAURI__.core.invoke('read_instance_log', {
+      logText = await tauriInvoke('read_instance_log', {
         instanceId: instance.id,
         fileName: entry.name,
         source: entry.source || 'logs',
@@ -651,7 +652,7 @@
   async function copyRawLaunchCommand(unredacted = false) {
     if (unredacted && !window.confirm(t('dev-unredacted-warning'))) return;
     try {
-      const command = await window.__TAURI__.core.invoke('get_raw_launch_command', {
+      const command = await tauriInvoke('get_raw_launch_command', {
         instanceId: instance.id,
         unredacted,
       });

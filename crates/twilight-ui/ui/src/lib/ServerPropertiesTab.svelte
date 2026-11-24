@@ -1,4 +1,5 @@
 <script>
+  import { tauriInvoke } from './tauri';
   // Properties tab: the ordered server.properties editor (key=value lines
   // reach the backend; comments stay untouched). Native servers keep their
   // port in Pumpkin.toml — only server-port is applied there.
@@ -12,7 +13,7 @@
   let busy = $state(false);
 
   function api(cmd, args) {
-    return window.__TAURI__.core.invoke(cmd, args);
+    return tauriInvoke(cmd, args);
   }
 
   async function load() {

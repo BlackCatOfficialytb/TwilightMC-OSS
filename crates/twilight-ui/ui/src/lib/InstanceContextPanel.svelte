@@ -1,4 +1,5 @@
 <script>
+  import { tauriInvoke } from './tauri';
   // Yardarm direction's right context panel: the selection surface. Shows
   // the selected instance's identity, path and actions in Prism's order,
   // plus a playtime/version footer. The parent owns selection; actions
@@ -81,7 +82,7 @@
   async function applyIconKey(key) {
     iconNotice = '';
     try {
-      await window.__TAURI__.core.invoke('set_instance_icon_key', {
+      await tauriInvoke('set_instance_icon_key', {
         instanceId: instance.id,
         iconKey: key,
       });
@@ -102,7 +103,7 @@
       filters: [{ name: t('filter-images'), extensions: ['png', 'jpg', 'jpeg', 'webp', 'ico'] }],
     });
     if (!picked) return null;
-    const path = await window.__TAURI__.core.invoke('set_instance_icon', {
+    const path = await tauriInvoke('set_instance_icon', {
       instanceId: instance.id,
       imagePath: String(picked),
     });
@@ -128,7 +129,7 @@
   async function copyRawLaunchCommand(unredacted = false) {
     if (unredacted && !window.confirm(t('dev-unredacted-warning'))) return;
     try {
-      const command = await window.__TAURI__.core.invoke('get_raw_launch_command', {
+      const command = await tauriInvoke('get_raw_launch_command', {
         instanceId: instance.id,
         unredacted,
       });

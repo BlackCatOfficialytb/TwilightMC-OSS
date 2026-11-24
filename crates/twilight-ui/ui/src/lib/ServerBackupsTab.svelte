@@ -1,4 +1,5 @@
 <script>
+  import { tauriInvoke } from './tauri';
   // Backups tab: timestamped zip archives of world/ + identity configs,
   // created on demand and restored over the server directory (backend blocks
   // restore while the server runs).
@@ -14,7 +15,7 @@
   let busy = $state('');
 
   function api(cmd, args) {
-    return window.__TAURI__.core.invoke(cmd, args);
+    return tauriInvoke(cmd, args);
   }
 
   async function load() {

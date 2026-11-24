@@ -1,4 +1,5 @@
 <script>
+  import { tauriInvoke } from './tauri';
   // `.twpack` drop target: reads the pack manifest (name, target version,
   // loader, file count) and extracts it into a new managed instance. The
   // backend validates every archive path first (zip-slip guard), so a hostile
@@ -23,7 +24,7 @@
   onMount(async () => {
     const closer = pushOverlay(() => onclose?.());
     try {
-      info = await window.__TAURI__.core.invoke('inspect_twpack', { path });
+      info = await tauriInvoke('inspect_twpack', { path });
       name = info.name;
     } catch (e) {
       inspectError = String(e);
@@ -36,7 +37,7 @@
     busy = true;
     error = '';
     try {
-      const id = await window.__TAURI__.core.invoke('install_twpack', {
+      const id = await tauriInvoke('install_twpack', {
         path,
         instanceName: name.trim(),
       });

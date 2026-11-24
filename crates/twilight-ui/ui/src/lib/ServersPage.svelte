@@ -1,4 +1,5 @@
 <script>
+  import { tauriInvoke, tauriListen } from './tauri';
   // The Servers & P2P dashboard: an overview of server cards with status
   // pills, and a full-page control panel per server — live console with
   // sparklines, file manager, properties editor, startup config, backups and
@@ -38,7 +39,7 @@
   ];
 
   function api(cmd, args) {
-    return window.__TAURI__.core.invoke(cmd, args);
+    return tauriInvoke(cmd, args);
   }
 
   async function refresh() {
@@ -150,9 +151,9 @@
     const unlisteners = [];
     (async () => {
       try {
-        unlisteners.push(await window.__TAURI__.event.listen('server-log', (e) => pushLog(e.payload.id, e.payload.line)));
-        unlisteners.push(await window.__TAURI__.event.listen('server-state', (e) => refresh()));
-        unlisteners.push(await window.__TAURI__.event.listen('server-connect', (e) => refresh()));
+        unlisteners.push(await tauriListen('server-log', (e) => pushLog(e.payload.id, e.payload.line)));
+        unlisteners.push(await tauriListen('server-state', () => refresh()));
+        unlisteners.push(await tauriListen('server-connect', () => refresh()));
       } catch {}
       await refresh();
     })();

@@ -1,4 +1,5 @@
 <script>
+  import { tauriInvoke } from './tauri';
   // Files tab: breadcrumb navigation, action bar (new folder / upload /
   // archive / delete selected) and the file table with a built-in text
   // editor for configs (Save/Discard).
@@ -21,7 +22,7 @@
   let editorDirty = $state(false);
 
   function api(cmd, args) {
-    return window.__TAURI__.core.invoke(cmd, args);
+    return tauriInvoke(cmd, args);
   }
 
   const breadcrumbs = $derived(

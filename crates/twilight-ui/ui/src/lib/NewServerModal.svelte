@@ -1,4 +1,5 @@
 <script>
+  import { tauriInvoke } from './tauri';
   // The New Server wizard: Step 1 software → Step 2 version (live fetch) →
   // Step 3 settings (name/port/RAM) → Step 4 networking (Local Only vs
   // Minekube Connect tunnel + offline mode with the AuthMe recommendation).
@@ -60,7 +61,7 @@
     versionError = '';
     loadingVersions = true;
     try {
-      const list = await window.__TAURI__.core.invoke('fetch_server_versions', { software: id });
+      const list = await tauriInvoke('fetch_server_versions', { software: id });
       if (token !== fetchToken) return; // stale response for a changed pick
       versions = list ?? [];
       if (id === 'fabric') versions = versions.slice(0, 80);
@@ -108,7 +109,7 @@
     error = '';
     busy = 'create';
     try {
-      await window.__TAURI__.core.invoke('create_server', {
+      await tauriInvoke('create_server', {
         config: {
           name: name.trim(),
           software,

@@ -1,4 +1,5 @@
 <script>
+  import { tauriInvoke } from './tauri';
   // Full-page settings: a left navigation rail over four sections and a
   // spacious content column. Input values are $bindable so App.svelte keeps
   // owning persistence; actions bubble up as callbacks.
@@ -86,7 +87,7 @@
       if (!picked) return;
       javaBusy = true;
       // probe first: a wrong file must never enter the saved list
-      const probed = await window.__TAURI__.core.invoke('probe_java_path', { path: String(picked) });
+      const probed = await tauriInvoke('probe_java_path', { path: String(picked) });
       const saved = await onaddjava?.(probed.executable);
       if (Array.isArray(saved)) addedJava = saved;
       javaPickMsg = t('settings-java-added', { major: probed.major, version: probed.version });
@@ -129,7 +130,7 @@
 
   async function refreshHorizon() {
     try {
-      const prefs = await window.__TAURI__.core.invoke('get_horizon_prefs');
+      const prefs = await tauriInvoke('get_horizon_prefs');
       horizonPath = prefs.horizon_path ?? '';
       horizonConfigured = !!prefs.configured;
     } catch (e) {
@@ -165,7 +166,7 @@
     horizonError = '';
     horizonMsg = '';
     try {
-      await window.__TAURI__.core.invoke('set_horizon_prefs', {
+      await tauriInvoke('set_horizon_prefs', {
         horizonPath: horizonPath.trim() || null,
       });
       await refreshHorizon();
@@ -183,7 +184,7 @@
     horizonBusy = true;
     horizonError = '';
     try {
-      horizonDetected = await window.__TAURI__.core.invoke('detect_horizon');
+      horizonDetected = await tauriInvoke('detect_horizon');
       horizonMsg = horizonDetected.length
         ? t('settings-horizon-detected')
         : t('settings-horizon-none-detected');
@@ -198,7 +199,7 @@
     horizonBusy = true;
     horizonError = '';
     try {
-      horizonReleases = await window.__TAURI__.core.invoke('list_horizon_releases');
+      horizonReleases = await tauriInvoke('list_horizon_releases');
       horizonMsg = t('settings-horizon-releases');
     } catch (e) {
       horizonError = String(e);
@@ -212,7 +213,7 @@
     horizonError = '';
     horizonMsg = '';
     try {
-      const installed = await window.__TAURI__.core.invoke('install_horizon_release', {
+      const installed = await tauriInvoke('install_horizon_release', {
         tag: horizonTag,
       });
       horizonPath = installed.client;
@@ -275,14 +276,14 @@
     if (!hasBackend()) return;
     devBusy = true;
     try {
-      devDiagnostics = await window.__TAURI__.core.invoke('get_dev_diagnostics');
+      devDiagnostics = await tauriInvoke('get_dev_diagnostics');
     } catch (e) {
       toast(String(e), 'error');
     } finally {
       devBusy = false;
     }
     try {
-      devRecords = await window.__TAURI__.core.invoke('list_dev_launch_records');
+      devRecords = await tauriInvoke('list_dev_launch_records');
     } catch (e) {
       toast(String(e), 'error');
     }
@@ -291,7 +292,7 @@
   async function clearDevRecords() {
     if (!hasBackend() || !window.confirm(t('settings-dev-history-clear-confirm'))) return;
     try {
-      await window.__TAURI__.core.invoke('clear_dev_launch_records');
+      await tauriInvoke('clear_dev_launch_records');
       devRecords = [];
       toast(t('settings-dev-history-cleared'), 'success');
     } catch (e) {
@@ -302,7 +303,7 @@
   async function openDevtools() {
     if (!hasBackend()) return;
     try {
-      await window.__TAURI__.core.invoke('open_devtools');
+      await tauriInvoke('open_devtools');
     } catch (e) {
       toast(String(e), 'error');
     }
@@ -311,7 +312,7 @@
   async function inspectConfig() {
     if (!hasBackend()) return;
     try {
-      devConfig = await window.__TAURI__.core.invoke('get_raw_config_json');
+      devConfig = await tauriInvoke('get_raw_config_json');
       devConfigOpen = true;
     } catch (e) {
       toast(String(e), 'error');
@@ -368,7 +369,7 @@
 
   async function refreshApiKey() {
     try {
-      const key = await window.__TAURI__.core.invoke('get_curseforge_api_key');
+      const key = await tauriInvoke('get_curseforge_api_key');
       apiKeyConfigured = key.configured;
     } catch (e) {
       apiKeyError = String(e);
@@ -380,8 +381,8 @@
     apiKeyError = '';
     apiKeyMsg = '';
     try {
-      await window.__TAURI__.core.invoke('set_curseforge_api_key', { apiKey });
-      const key = await window.__TAURI__.core.invoke('get_curseforge_api_key');
+      await tauriInvoke('set_curseforge_api_key', { apiKey });
+      const key = await tauriInvoke('get_curseforge_api_key');
       apiKeyConfigured = key.configured;
       apiKey = '';
       apiKeyMsg = key.configured
@@ -525,7 +526,7 @@
     casBusy = true;
     casMsg = '';
     try {
-      casStats = await window.__TAURI__.core.invoke('get_cas_stats');
+      casStats = await tauriInvoke('get_cas_stats');
     } catch (e) {
       casMsg = String(e);
     } finally {
@@ -537,7 +538,7 @@
     casBusy = true;
     casMsg = '';
     try {
-      const report = await window.__TAURI__.core.invoke('run_cas_deduplicate');
+      const report = await tauriInvoke('run_cas_deduplicate');
       casMsg = t('cas-done-deduplicate', {
         files: report.deduplicated_files,
         size: formatBytes(report.bytes_reclaimed),
@@ -554,7 +555,7 @@
     casBusy = true;
     casMsg = '';
     try {
-      const report = await window.__TAURI__.core.invoke('run_cas_gc');
+      const report = await tauriInvoke('run_cas_gc');
       casMsg = t('cas-done-gc', {
         count: report.removed_blobs,
         size: formatBytes(report.reclaimed_bytes),
@@ -1285,7 +1286,7 @@
                   onchange={async (e) => {
                     const enabled = e.currentTarget.checked;
                     try {
-                      await window.__TAURI__.core.invoke('set_cas_links', { enabled });
+                      await tauriInvoke('set_cas_links', { enabled });
                       if (casStats) casStats = { ...casStats, use_cas_links: enabled };
                     } catch (err) {
                       casMsg = String(err);
