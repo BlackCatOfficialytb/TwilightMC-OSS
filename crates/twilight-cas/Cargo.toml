@@ -11,7 +11,10 @@ keywords = ["cas", "hardlink", "symlink", "deduplication", "storage"]
 categories = ["filesystem", "caching"]
 
 [dependencies]
-tokio = { workspace = true }
-sha1 = { workspace = true }
-serde = { workspace = true }
-thiserror = { workspace = true }
+# Minimal tokio surface for a standalone crates.io library: async filesystem,
+# read/seek/copy helpers, and the current-thread runtime used by the tests.
+# No `path` dependencies, so the packaged manifest is self-contained.
+tokio = { version = "1", features = ["fs", "io-util", "macros", "rt"] }
+sha1 = "0.10"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"

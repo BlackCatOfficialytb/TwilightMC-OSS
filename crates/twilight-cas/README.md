@@ -51,5 +51,8 @@ let stats = twilight_cas::cas_stats(&cas_root)?; // CasStats { blob_count, total
 ## License
 
 Apache-2.0 (like `twilight-manifest`, `twilight-downloader`,
-`twilight-runtime`, `twilight-horizon`). See `LICENSE.md` for the
-launcher's multi-tier licensing policy.
+`twilight-runtime`, `twilight-horizon`). The full license text ships with this
+crate as [`LICENSE`](LICENSE); the launcher's multi-tier licensing policy —
+including the AGPL-3.0-or-later application tier and commercial alternatives —
+is documented at
+<https://github.com/BlackCatOfficialytb/TwilightMC-OSS/blob/main/LICENSE.md>.

@@ -131,7 +131,11 @@ validators — so precedence is defined here:
   `horizon-client --resources/--game-dir/--home`, prepared-resource schema 7 /
   output version 5, on-demand Mojang assets (never bundled), read-once session
   hand-over, release install in Settings, Java-major import detection and the
-  uv-style zero-copy CAS links. Backport tags `alpha-v0.0.1` …
+  uv-style zero-copy CAS links. It also ships App Developer Mode: a persisted
+  opt-in (About version chip ×7), JDWP and Mixin debug launch flags, the
+  WebView DevTools shortcut, copy raw-command/instance-ID/storage-path actions,
+  and a Developer settings tab with symlink, CAS and raw-config diagnostics.
+  Backport tags `alpha-v0.0.1` …
   `alpha-v0.0.3` are published as pre-releases titled
   `TwilightMC Bolide v0.0.X (Backported)`; Bolide builds carry no API-stability
   promises (§2).
