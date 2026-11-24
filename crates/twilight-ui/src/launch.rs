@@ -982,13 +982,14 @@ mod tests {
         };
         assert!(horizon_dev_plan(&settings, false).blocked);
         assert!(!horizon_dev_plan(&settings, true).blocked);
+        // Relative components keep this assertion valid on every platform.
         assert!(!horizon_is_official(
-            std::path::Path::new(r"C:\dev\horizon-client.exe"),
-            std::path::Path::new(r"C:\TwilightMC")
+            std::path::Path::new("dev/horizon-client"),
+            std::path::Path::new("shared")
         ));
         assert!(horizon_is_official(
-            std::path::Path::new(r"C:\TwilightMC\horizon-releases\v1\horizon-client.exe"),
-            std::path::Path::new(r"C:\TwilightMC")
+            std::path::Path::new("shared/horizon-releases/v1/horizon-client"),
+            std::path::Path::new("shared")
         ));
     }
 
