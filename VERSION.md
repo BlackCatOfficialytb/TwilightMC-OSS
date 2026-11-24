@@ -122,27 +122,30 @@ validators — so precedence is defined here:
 ## 6. Current version
 
 - Latest Stable: `v0.2.0`.
-- Bolide line: `v0.6.0` — the workspace `version` carries `0.6.0` from Mission 5
+- Bolide line: `v0.7.0` — the workspace `version` carries `0.7.0` from Mission 6
   onward. Bolide tags `alpha-v0.4.1` … `alpha-v0.5.0` delivered the README
   security/unsigned-binaries guide, the Microsoft OAuth2 device-flow token
   chain with sha256-verified authlib-injector auto-fetch, the account manager
   with its skinview3d viewer and skin/cape editors, and the Launcher/Client
-  mode toggle. `alpha-v0.6.0` adds the aligned native Horizon engine path:
+  mode toggle. `alpha-v0.6.0` added the aligned native Horizon engine path:
   `horizon-client --resources/--game-dir/--home`, prepared-resource schema 7 /
   output version 5, on-demand Mojang assets (never bundled), read-once session
-  hand-over, release install in Settings, Java-major import detection and the
-  uv-style zero-copy CAS links. It also ships App Developer Mode: a persisted
-  opt-in (About version chip ×7), JDWP and Mixin debug launch flags, the
-  WebView DevTools shortcut, copy raw-command/instance-ID/storage-path actions,
-  and a Developer settings tab with symlink, CAS and raw-config diagnostics.
-  Backport tags `alpha-v0.0.1` …
-  `alpha-v0.0.3` are published as pre-releases titled
+  hand-over, release install in Settings, Java-major import detection, the
+  uv-style zero-copy CAS links and the first App Developer Mode pass (About
+  version chip ×7, JDWP/Mixin flags, WebView DevTools shortcut, copy actions and
+  symlink/CAS diagnostics). `alpha-v0.7.0` completes App Developer Mode with
+  Horizon unsigned/build-from-source provenance aligned to the upstream Launch
+  API (`HORIZON_LAUNCHER_DEVELOPER_OFFLINE=1` and `--developer-single-player`
+  only under an explicit opt-in), bounded `dev_launches.json` launch records,
+  redacted command/config inspection, launcher RSS/CAS and phase-timing
+  diagnostics, and full EN/VI coverage for every developer string. Backport
+  tags `alpha-v0.0.1` … `alpha-v0.0.3` are published as pre-releases titled
   `TwilightMC Bolide v0.0.X (Backported)`; Bolide builds carry no API-stability
   promises (§2).
-- Star (beta) line: `beta-v0.6.0-b1` once the `beta` branch is cut; Star
+- Star (beta) line: `beta-v0.7.0-b1` once the `beta` branch is cut; Star
   releases are built from that branch and published as
   `TwilightMC Star (<tag>)` by `.github/workflows/beta.yml`.
-- Snapshot line: `v0.6.0-ddmmyyyy-<commit>`, built as rolling works land on
+- Snapshot line: `v0.7.0-ddmmyyyy-<commit>`, built as rolling works land on
   `main`.
 
 ## 7. Supported build targets
