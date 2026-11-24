@@ -93,17 +93,15 @@ pub async fn run(
         executable: plan.java_executable.display().to_string(),
         source: e,
     })?;
-    let _ = events
-        .send(LaunchEvent::Phase(
-            "spawn",
-            spawn_started.elapsed().as_millis() as u64,
-        ))
-        .await;
+    let spawn_ms = spawn_started.elapsed().as_millis() as u64;
 
     // expose the child pid so hosts (desktop UI) can kill the process tree
     if let Some(pid) = child.id() {
         let _ = events.send(LaunchEvent::Started(pid)).await;
     }
+    // Timing follows the pid: existing consumers expect `Started` to lead the
+    // stream, while diagnostics still get the exact spawn duration.
+    let _ = events.send(LaunchEvent::Phase("spawn", spawn_ms)).await;
 
     let stdout = child.stdout.take().map(BufReader::new);
     let stderr = child.stderr.take().map(BufReader::new);
@@ -171,6 +169,11 @@ mod tests {
         );
         assert!(out.contains(&LaunchEvent::Stdout("twilight-out".into())));
         assert!(out.contains(&LaunchEvent::Stderr("twilight-err".into())));
+        assert!(
+            out.iter()
+                .any(|event| matches!(event, LaunchEvent::Phase("spawn", _))),
+            "spawn timing must be reported after the pid"
+        );
     }
 
     #[test]
