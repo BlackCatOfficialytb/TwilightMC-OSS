@@ -633,6 +633,16 @@ packs-download-title = Downloads the selected pack into the packs folder
 packs-downloaded = Downloaded { $name }.
 packs-delete-confirm-title = Delete this pack?
 packs-delete-confirm = Removes { $name } from the packs folder for good.
+packs-fonts-confirm-title = Resource pack contains fonts
+packs-fonts-confirm =
+    { $name } contains { $count } { $count ->
+        [one] font file
+       *[other] font files
+    }: { $fonts }.
+
+    Minecraft 1.20.5 and newer can execute code from a malicious .ttf font in a resource pack (Minecraft2Shell). Only import packs you trust.
+packs-fonts-confirm-action = Import anyway
+packs-fonts-cancelled = Import cancelled: { $name } contains fonts and was not copied.
 screenshots-copy-image = Copy Image
 screenshots-copy-path = Copy Path
 screenshots-copied-image = Image copied to the clipboard.

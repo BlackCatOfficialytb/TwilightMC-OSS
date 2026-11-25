@@ -499,14 +499,43 @@
     if (!paths.length) return;
     packsBusy = true;
     try {
+      packsMsg = '';
       for (const path of paths) {
-        await tauriInvoke('import_pack', {
+        const name = String(path).split(/[\\/]/).pop() || String(path);
+        const args = {
           instanceId: instance.id,
           projectType: packKind === 'shaderpacks' ? 'shader' : 'resourcepack',
           filePath: path,
+        };
+        const outcome = await tauriInvoke('import_pack', args);
+        if (!outcome?.requiresConfirmation) continue;
+        // Minecraft2Shell: the backend refused to copy a font-bearing pack
+        // until this explicit confirmation; it re-scans again on the retry.
+        const fontNames = Array.isArray(outcome.fontEntries) ? outcome.fontEntries : [];
+        const listed = fontNames.slice(0, 8).join(', ');
+        const fonts = fontNames.length > 8 ? `${listed}, …` : listed;
+        const ok = await confirmAlert({
+          variant: 'warning',
+          title: t('packs-fonts-confirm-title'),
+          message: t('packs-fonts-confirm', {
+            name,
+            count: fontNames.length,
+            fonts,
+          }),
+          confirmText: t('packs-fonts-confirm-action'),
         });
+        if (!ok) {
+          packsMsg = t('packs-fonts-cancelled', { name });
+          continue;
+        }
+        const confirmed = await tauriInvoke('import_pack', {
+          ...args,
+          confirmFonts: true,
+        });
+        if (confirmed?.requiresConfirmation) {
+          packsMsg = t('packs-fonts-cancelled', { name });
+        }
       }
-      packsMsg = '';
     } catch (e) {
       packsMsg = String(e);
     } finally {

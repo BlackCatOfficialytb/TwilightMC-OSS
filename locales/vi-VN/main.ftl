@@ -617,6 +617,16 @@ packs-download-title = Tải gói đã chọn vào thư mục gói
 packs-downloaded = Đã tải { $name }.
 packs-delete-confirm-title = Xóa gói này?
 packs-delete-confirm = Sẽ xóa vĩnh viễn { $name } khỏi thư mục gói.
+packs-fonts-confirm-title = Gói tài nguyên chứa phông chữ
+packs-fonts-confirm =
+    { $name } chứa { $count } { $count ->
+        [one] tệp phông chữ
+       *[other] tệp phông chữ
+    }: { $fonts }.
+
+    Minecraft 1.20.5 trở lên có thể thực thi mã từ một phông chữ .ttf độc hại trong gói tài nguyên (Minecraft2Shell). Chỉ nhập các gói bạn tin cậy.
+packs-fonts-confirm-action = Vẫn nhập
+packs-fonts-cancelled = Đã hủy nhập: { $name } chứa phông chữ và chưa được sao chép.
 screenshots-copy-image = Sao chép ảnh
 screenshots-copy-path = Sao chép đường dẫn
 screenshots-copied-image = Đã sao chép ảnh vào bộ nhớ tạm.

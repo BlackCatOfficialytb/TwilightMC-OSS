@@ -12,8 +12,8 @@ use tokio::sync::mpsc;
 
 use twilight_auth::{Account, AccountType};
 use twilight_downloader::{
-    AssetIndex, DownloadRequest, FREESM_META_BASE, PRISM_META_BASE, ParallelDownloader,
-    fetch_json_failover, resolve_vanilla_version, vanilla_sources,
+    AssetIndex, DownloadRequest, ParallelDownloader, fetch_json_failover, fetch_version_manifest,
+    vanilla_sources,
 };
 use twilight_horizon::{
     AssetStore, HorizonError, InstallRequest, LaunchOptions, client_command,
@@ -515,43 +515,42 @@ async fn run_horizon_cli(cfg: &LaunchConfig, account: &Account) -> Result<i32, C
     }
 
     let client = reqwest::Client::new();
-    let sources = vanilla_sources();
-    let meta = resolve_vanilla_version(&client, &sources, &cfg.version_or_id).await?;
-    let mut detail_chain = vec![meta.details_url.clone()];
-    for base in [PRISM_META_BASE, FREESM_META_BASE] {
-        let fallback = format!("{base}net.minecraft/{}.json", meta.id);
-        if !detail_chain.contains(&fallback) {
-            detail_chain.push(fallback);
-        }
-    }
-    let raw = fetch_json_failover(&client, &detail_chain).await?;
-    let version = twilight_manifest::parse_version_file(&raw.to_string()).map_err(|source| {
-        CliError::ManifestParse {
-            id: meta.id.clone(),
-            source,
-        }
-    })?;
+    // Fresh piston-meta first; the shared cache only covers offline launches.
+    let manifest = fetch_version_manifest(
+        &client,
+        &vanilla_sources(),
+        &cfg.version_or_id,
+        Some(&cfg.shared_dir.join("meta")),
+    )
+    .await?;
+    let version =
+        twilight_manifest::parse_version_file(&manifest.raw.to_string()).map_err(|source| {
+            CliError::ManifestParse {
+                id: manifest.id.clone(),
+                source,
+            }
+        })?;
     let client_jar = version.client().ok_or_else(|| {
         CliError::Horizon(HorizonError::MissingResourceFile(format!(
             "{} declares no client jar download",
-            meta.id
+            manifest.id
         )))
     })?;
     let index_info = version.effective_asset_index().ok_or_else(|| {
         CliError::Horizon(HorizonError::MissingResourceFile(format!(
             "{} declares no asset index",
-            meta.id
+            manifest.id
         )))
     })?;
 
     // A dry run never downloads, but still shows the real paths it would use.
     let resources = if cfg.dry_run {
-        resources_dir(&cfg.shared_dir, &meta.id)
+        resources_dir(&cfg.shared_dir, &manifest.id)
     } else {
         ensure_resources(
             &client,
             &InstallRequest {
-                version: &meta.id,
+                version: &manifest.id,
                 shared_root: &cfg.shared_dir,
                 client: client_jar,
                 asset_index: &index_info,
@@ -563,7 +562,7 @@ async fn run_horizon_cli(cfg: &LaunchConfig, account: &Account) -> Result<i32, C
     let instance_dir = cfg
         .instance_dir
         .clone()
-        .unwrap_or_else(|| cfg.shared_dir.join("instances").join(&meta.id));
+        .unwrap_or_else(|| cfg.shared_dir.join("instances").join(&manifest.id));
     let game_dir = instance_dir.join("minecraft");
     let home = instance_dir.join("horizon");
     if !cfg.dry_run {
@@ -679,24 +678,22 @@ pub async fn run_launch_with(
     };
     let client = reqwest::Client::new();
 
-    // ---- metadata first: required majors and paths depend on the manifest
-    let sources = vanilla_sources();
-    let meta = resolve_vanilla_version(&client, &sources, &cfg.version_or_id).await?;
-    let mut detail_chain = vec![meta.details_url.clone()];
-    for base in [PRISM_META_BASE, FREESM_META_BASE] {
-        let fallback = format!("{base}net.minecraft/{}.json", meta.id);
-        if !detail_chain.contains(&fallback) {
-            detail_chain.push(fallback);
-        }
-    }
-    let raw = fetch_json_failover(&client, &detail_chain).await?;
-    let version_text = raw.to_string();
-    let version = twilight_manifest::parse_version_file(&version_text).map_err(|e| {
-        CliError::ManifestParse {
-            id: meta.id.clone(),
-            source: e,
-        }
-    })?;
+    // ---- metadata first: required majors and paths depend on the manifest.
+    // Fresh piston-meta always wins; the disk cache is only an offline fallback.
+    let manifest = fetch_version_manifest(
+        &client,
+        &vanilla_sources(),
+        &cfg.version_or_id,
+        Some(&cfg.shared_dir.join("meta")),
+    )
+    .await?;
+    let version =
+        twilight_manifest::parse_version_file(&manifest.raw.to_string()).map_err(|e| {
+            CliError::ManifestParse {
+                id: manifest.id.clone(),
+                source: e,
+            }
+        })?;
     let ctx = RuntimeContext::host();
     let paths = resolve_paths(&cfg, &version);
 
@@ -708,17 +705,17 @@ pub async fn run_launch_with(
     // rejects a mismatched manifest instead of composing a broken launch
     if let Some(loader) = loader_token
         && let Some(fixed) = loader.fixed_game_version()
-        && !meta.id.trim().eq_ignore_ascii_case(fixed)
+        && !manifest.id.trim().eq_ignore_ascii_case(fixed)
     {
         return Err(CliError::LoaderGameMismatch {
             loader: loader.to_string(),
             required: fixed.to_owned(),
-            given: meta.id.clone(),
+            given: manifest.id.clone(),
         });
     }
     let loader_profile: Option<LoaderProfile> = match loader_token {
         Some(loader) => Some(
-            resolve_loader_profile(&client, loader, &meta.id, cfg.loader_version.as_deref())
+            resolve_loader_profile(&client, loader, &manifest.id, cfg.loader_version.as_deref())
                 .await?,
         ),
         None => None,
@@ -891,13 +888,44 @@ pub async fn run_launch_with(
             });
         }
     }
-    downloader.download_all(&requests).await?;
+    // FreeType artifacts are security-relevant: record which requests carry a
+    // manifest SHA-1 so the advisory can distinguish verified from unknown.
+    let mut freetype_requests: Vec<(PathBuf, bool)> = requests
+        .iter()
+        .filter(|request| {
+            twilight_launch::is_lwjgl_freetype_artifact(&request.url)
+                || twilight_launch::is_lwjgl_freetype_artifact(&request.dest.to_string_lossy())
+        })
+        .map(|request| (request.dest.clone(), request.sha1.is_some()))
+        .collect();
+    let mut downloads = downloader.download_all(&requests).await?;
     // loader libraries stage into the same shared store and lead the classpath
     if let Some(profile) = &loader_profile {
-        downloader
-            .download_all(&profile.download_requests(&paths.library_root))
-            .await?;
+        let loader_requests = profile.download_requests(&paths.library_root);
+        for request in &loader_requests {
+            if twilight_launch::is_lwjgl_freetype_artifact(&request.url)
+                || twilight_launch::is_lwjgl_freetype_artifact(&request.dest.to_string_lossy())
+            {
+                freetype_requests.push((request.dest.clone(), request.sha1.is_some()));
+            }
+        }
+        downloads.extend(downloader.download_all(&loader_requests).await?);
     }
+    // A refreshed native is the expected outcome of Mojang re-publishing a
+    // patched lwjgl-freetype; make the replacement visible in the console.
+    let mut freetype_refreshed: Vec<String> = Vec::new();
+    for file in &downloads {
+        let is_freetype = freetype_requests.iter().any(|(dest, _)| dest == &file.dest);
+        if is_freetype && !file.was_skipped {
+            freetype_refreshed.push(format!(
+                "[SECURITY] refreshed lwjgl-freetype artifact {} (sha1 {}) from the fresh manifest",
+                file.dest.display(),
+                file.sha1
+            ));
+        }
+    }
+    let freetype_verified =
+        !freetype_requests.is_empty() && freetype_requests.iter().all(|(_, has_sha1)| *has_sha1);
 
     // ---- assets: horizon store; virtual indexes additionally export the
     //      classic `assets/virtual/<id>` layout the old game versions want
@@ -998,6 +1026,20 @@ pub async fn run_launch_with(
             }
         }
     });
+    // ---- Minecraft2Shell (CVE-2026-10701) advisory: version/platform range
+    //      plus whether this launch verified the patched FreeType native.
+    let advisory = twilight_launch::assess_minecraft2shell(
+        &manifest.id,
+        &ctx,
+        manifest.is_fresh(),
+        freetype_verified,
+    );
+    for line in advisory.advisory_lines() {
+        let _ = tx.send(LaunchEvent::Stdout(line)).await;
+    }
+    for line in &freetype_refreshed {
+        let _ = tx.send(LaunchEvent::Stdout(line.clone())).await;
+    }
     // ---- diagnostics header straight through the same pump, so CLI stdout
     //      and the GUI console drawer print the identical block
     let diag = build_diagnostics(

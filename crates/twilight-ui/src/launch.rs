@@ -10,10 +10,7 @@ use tokio::io::AsyncBufReadExt;
 use tokio::sync::mpsc;
 use twilight_auth::AccountType;
 use twilight_cli::{LaunchConfig, run_launch_with};
-use twilight_downloader::{
-    FREESM_META_BASE, PRISM_META_BASE, fetch_json_failover, resolve_vanilla_version,
-    vanilla_sources,
-};
+use twilight_downloader::{ManifestOrigin, fetch_version_manifest, vanilla_sources};
 use twilight_horizon::{
     InstallRequest, LaunchOptions, client_command, describe, ensure_resources, probe_launch_api,
     session_json,
@@ -345,32 +342,37 @@ async fn run_horizon(
         );
     }
 
-    // ---- version manifest -> client jar + asset index (same failover chain)
+    // ---- version manifest -> client jar + asset index (fresh-first chain;
+    //      the disk cache only covers offline launches)
     let preflight_started = std::time::Instant::now();
     let client = reqwest::Client::new();
-    let sources = vanilla_sources();
-    let meta_version = resolve_vanilla_version(&client, &sources, &meta.version)
-        .await
-        .map_err(|e| e.to_string())?;
-    let mut detail_chain = vec![meta_version.details_url.clone()];
-    for base in [PRISM_META_BASE, FREESM_META_BASE] {
-        let fallback = format!("{base}net.minecraft/{}.json", meta_version.id);
-        if !detail_chain.contains(&fallback) {
-            detail_chain.push(fallback);
-        }
+    let manifest = fetch_version_manifest(
+        &client,
+        &vanilla_sources(),
+        &meta.version,
+        Some(&shared_dir.join("meta")),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    if manifest.origin == ManifestOrigin::DiskCache {
+        log(
+            "stderr",
+            format!(
+                "[SECURITY WARN] {}: using the cached manifest for {} because every remote \
+                 metadata source failed.",
+                twilight_launch::MINECRAFT2SHELL_ADVISORY,
+                manifest.id
+            ),
+        );
     }
-    let raw = fetch_json_failover(&client, &detail_chain)
-        .await
-        .map_err(|e| e.to_string())?;
-    let version_text = raw.to_string();
-    let version = twilight_manifest::parse_version_file(&version_text)
-        .map_err(|e| format!("cannot parse the {} manifest: {e}", meta_version.id))?;
+    let version = twilight_manifest::parse_version_file(&manifest.raw.to_string())
+        .map_err(|e| format!("cannot parse the {} manifest: {e}", manifest.id))?;
     let client_jar = version
         .client()
-        .ok_or_else(|| format!("{} declares no client jar download", meta_version.id))?;
+        .ok_or_else(|| format!("{} declares no client jar download", manifest.id))?;
     let index_info = version
         .effective_asset_index()
-        .ok_or_else(|| format!("{} declares no asset index", meta_version.id))?;
+        .ok_or_else(|| format!("{} declares no asset index", manifest.id))?;
     devmode::record_phase(
         instance_id,
         "preflight",
@@ -383,13 +385,13 @@ async fn run_horizon(
         "stdout",
         format!(
             "Horizon: verifying prepared resources for Minecraft {} (asset index {})…",
-            meta_version.id, index_info.id
+            manifest.id, index_info.id
         ),
     );
     let prepared = ensure_resources(
         &client,
         &InstallRequest {
-            version: &meta_version.id,
+            version: &manifest.id,
             shared_root: &shared_dir,
             client: client_jar,
             asset_index: &index_info,

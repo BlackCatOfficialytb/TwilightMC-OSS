@@ -11,6 +11,7 @@ mod gate;
 mod gc;
 mod natives;
 mod process;
+mod security;
 
 pub use args::{
     GameOptions, ProfileVars, QuickPlay, Vars, game_arguments, inject_account_vars, jvm_arguments,
@@ -33,3 +34,7 @@ pub use natives::{
     find_seven_zip, sevenzip_arguments,
 };
 pub use process::{LaunchEvent, LaunchPlan, build_command, command_line, run};
+pub use security::{
+    MINECRAFT2SHELL_ADVISORY, Minecraft2ShellAssessment, Minecraft2ShellExposure,
+    assess_minecraft2shell, is_lwjgl_freetype_artifact, requires_resource_pack_font_confirmation,
+};
