@@ -122,7 +122,7 @@ validators — so precedence is defined here:
 ## 6. Current version
 
 - Latest Stable: `v0.2.0`.
-- Bolide line: `v0.7.0` — the workspace `version` carries `0.7.0` from Mission 6
+- Bolide line: `v0.7.1` — the workspace `version` carries `0.7.1` from Mission 6
   onward. Bolide tags `alpha-v0.4.1` … `alpha-v0.5.0` delivered the README
   security/unsigned-binaries guide, the Microsoft OAuth2 device-flow token
   chain with sha256-verified authlib-injector auto-fetch, the account manager
@@ -138,14 +138,20 @@ validators — so precedence is defined here:
   API (`HORIZON_LAUNCHER_DEVELOPER_OFFLINE=1` and `--developer-single-player`
   only under an explicit opt-in), bounded `dev_launches.json` launch records,
   redacted command/config inspection, launcher RSS/CAS and phase-timing
-  diagnostics, and full EN/VI coverage for every developer string. Backport
+  diagnostics, and full EN/VI coverage for every developer string. `alpha-v0.7.1`
+  is the Minecraft2Shell security patch: fresh `piston-meta` resolution with
+  offline-only caching, SHA-1 verification/replacement of every
+  `lwjgl-freetype` artifact before launch, a version/platform exposure advisory
+  (Server Resource Packs: Disabled on untrusted servers; avoid untrusted `.zip`
+  packs), and `.ttf`/`.ttc`/`.otf` inspection of imported resource packs with
+  explicit confirmation on 1.20.5+. Backport
   tags `alpha-v0.0.1` … `alpha-v0.0.3` are published as pre-releases titled
   `TwilightMC Bolide v0.0.X (Backported)`; Bolide builds carry no API-stability
   promises (§2).
-- Star (beta) line: `beta-v0.7.0-b1` once the `beta` branch is cut; Star
+- Star (beta) line: `beta-v0.7.1-b1` once the `beta` branch is cut; Star
   releases are built from that branch and published as
   `TwilightMC Star (<tag>)` by `.github/workflows/beta.yml`.
-- Snapshot line: `v0.7.0-ddmmyyyy-<commit>`, built as rolling works land on
+- Snapshot line: `v0.7.1-ddmmyyyy-<commit>`, built as rolling works land on
   `main`.
 
 ## 7. Supported build targets
