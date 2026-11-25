@@ -22,7 +22,7 @@
   import { topOverlay } from './lib/overlays.js';
   import { isDarkTheme, loadSavedAccent, normalizeThemeId, applyTheme } from './lib/theme';
   import { syncIconTheme } from './lib/icons';
-  import { t } from './lib/i18n.svelte.ts';
+  import { initLocale, t } from './lib/i18n.svelte.ts';
   // shared account state: one store drives the sidebar chip, the client
   // dashboard and the account manager modal
   import {
@@ -760,6 +760,9 @@
     };
     window.addEventListener('keydown', onKey);
     (async () => {
+      // restore the persisted language in the background; local first paint
+      // already has a valid locale from detectLocale()
+      void initLocale();
       try {
         version = await api('get_version');
       } catch {
@@ -916,7 +919,7 @@
   </nav>
 
   <!-- ==================== RIGHT COLUMN ==================== -->
-  <div class="flex min-w-0 flex-1 flex-col">
+  <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
     <header class="flex h-11 shrink-0 items-center justify-between border-b border-(--border) bg-(--bg-subtle) px-4">
       <div class="flex min-w-0 items-center gap-2.5">
         {#if currentView === 'edit'}
@@ -966,7 +969,7 @@
       </div>
     {/if}
 
-    <main class="min-w-0 flex-1 overflow-y-auto p-6">
+    <main class="min-h-0 min-w-0 flex-1 overflow-y-auto p-6">
       {#if currentView === 'accounts'}
         <!-- dedicated accounts page: shows in both launcher and client modes -->
         <AccountsPage onback={() => (active = 'instances')} onrefresh={refreshAccounts} />

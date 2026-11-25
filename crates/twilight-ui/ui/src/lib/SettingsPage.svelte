@@ -251,6 +251,44 @@
   let devConfigOpen = $state(false);
   let devBusy = $state(false);
 
+  // ---- Update channel + strictly manual check (About & Updates) ----
+  let updateChannel = $state('bolide');
+  let updateInfo = $state(null);
+  let updateBusy = $state(false);
+  let updateError = $state('');
+
+  async function refreshUpdateChannel() {
+    try {
+      updateChannel = await tauriInvoke('get_update_channel');
+    } catch {
+      updateChannel = 'bolide';
+    }
+  }
+  refreshUpdateChannel();
+
+  async function onUpdateChannelChange(event) {
+    const channel = event.currentTarget.value;
+    updateChannel = channel;
+    try {
+      await tauriInvoke('set_update_channel', { channel });
+    } catch (e) {
+      updateError = String(e);
+    }
+  }
+
+  async function runUpdateCheck() {
+    updateBusy = true;
+    updateError = '';
+    updateInfo = null;
+    try {
+      updateInfo = await tauriInvoke('check_for_updates', { channel: updateChannel });
+    } catch (e) {
+      updateError = String(e);
+    } finally {
+      updateBusy = false;
+    }
+  }
+
   async function onVersionClick() {
     if (devSettings.devMode) return;
     versionClicks += 1;
@@ -366,6 +404,27 @@
   let apiKeyConfigured = $state(false);
   let apiKeyMsg = $state('');
   let apiKeyError = $state('');
+  let cfEnabled = $state(true);
+
+  async function refreshCfEnabled() {
+    try {
+      cfEnabled = await tauriInvoke('get_curseforge_enabled');
+    } catch {
+      cfEnabled = true;
+    }
+  }
+  refreshCfEnabled();
+
+  async function toggleCfEnabled() {
+    const next = !cfEnabled;
+    cfEnabled = next;
+    try {
+      await tauriInvoke('set_curseforge_enabled', { enabled: next });
+    } catch (e) {
+      cfEnabled = !next;
+      apiKeyError = String(e);
+    }
+  }
 
   async function refreshApiKey() {
     try {
@@ -605,10 +664,10 @@
   })();
 </script>
 
-<div class="flex h-full">
+<div class="flex h-full min-h-0 flex-col overflow-hidden">
   <!-- left navigation rail -->
   <nav
-    class="flex w-56 shrink-0 flex-col border-r border-(--border) bg-(--bg-subtle) p-3"
+    class="flex min-h-0 w-56 shrink-0 flex-col overflow-y-auto border-r border-(--border) bg-(--bg-subtle) p-3"
     aria-label={t('settings-sections-aria')}
   >
     <button
@@ -648,7 +707,7 @@
   </nav>
 
   <!-- content column -->
-  <div class="min-w-0 flex-1 overflow-y-auto">
+  <div class="min-h-0 min-w-0 flex-1 overflow-y-auto">
     <div class="mx-auto max-w-2xl p-8">
       {#if section === 'appearance'}
         <h2 class="text-[16px] font-semibold">{t('settings-appearance-title')}</h2>
@@ -868,7 +927,10 @@
         <select
           class="mt-4 h-9 w-full rounded border border-(--border) bg-(--bg-subtle) px-2 text-[13px] outline-none focus:border-(--accent)"
           value={getLocale()}
-          onchange={(e) => setLocale(e.currentTarget.value)}
+          onchange={(e) => {
+            setLocale(e.currentTarget.value);
+            void tauriInvoke('set_locale_config', { locale: e.currentTarget.value }).catch(() => {});
+          }}
           aria-label={t('settings-language')}
         >
           {#each SUPPORTED_LOCALES as loc (loc.id)}
@@ -1336,6 +1398,18 @@
           {t('settings-api-desc')}
         </p>
 
+        <label class="mt-4 flex items-center gap-2 text-[12px]" for="cf-enabled-toggle">
+          <input
+            id="cf-enabled-toggle"
+            type="checkbox"
+            class="h-4 w-4 accent-(--accent)"
+            checked={cfEnabled}
+            onchange={toggleCfEnabled}
+          />
+          <span>{t('settings-cf-enabled')}</span>
+        </label>
+        <p class="mt-1 text-[11px] text-(--text-muted)">{t('settings-cf-enabled-hint')}</p>
+
         <div class="mt-6 rounded border border-(--border) bg-(--bg-subtle) p-4">
           <div class="text-[12px] font-medium">
             {t('settings-cf-key')}
@@ -1478,13 +1552,62 @@
           </div>
         </div>
 
-        <!-- Updates: manual and opt-in only (see TODO.md for the live check) -->
+        <!-- Updates: manual and opt-in only — no background polling anywhere -->
         <h3 class="mt-6 text-[12px] font-semibold uppercase tracking-wide text-(--text-muted)">
           {t('about-updates-title')}
         </h3>
         <div class="mt-2 rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px] leading-relaxed">
           <p class="text-(--text-muted)">{t('about-updates-desc')}</p>
-          <p class="mt-2">{t('about-updates-deferred')}</p>
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <label for="update-channel-select" class="text-[12px]">{t('about-update-channel')}</label>
+            <select
+              id="update-channel-select"
+              class="h-8 rounded border border-(--border) bg-(--bg-canvas) px-2 text-[12px] outline-none focus:border-(--accent)"
+              value={updateChannel}
+              onchange={onUpdateChannelChange}
+            >
+              <option value="bolide">{t('about-channel-bolide')}</option>
+              <option value="star">{t('about-channel-star')}</option>
+              <option value="stable">{t('about-channel-stable')}</option>
+              <option value="snapshot">{t('about-channel-snapshot')}</option>
+            </select>
+            <button
+              class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-50"
+              disabled={updateBusy}
+              onclick={runUpdateCheck}
+            >
+              {updateBusy ? t('about-update-checking') : t('about-update-check')}
+            </button>
+          </div>
+          <p class="mt-2 text-[11px] text-(--text-muted)">
+            {t('about-update-current', { version })}
+          </p>
+          {#if updateInfo}
+            <div class="mt-2 space-y-1">
+              <p>{t('about-update-latest', { channel: updateInfo.channel, tag: updateInfo.latestTag })}</p>
+              <p class={updateInfo.isNewer ? 'text-amber-400' : 'text-green-500'}>
+                {t(updateInfo.isNewer ? 'about-update-newer' : 'about-update-current-ok')}
+              </p>
+              {#if updateInfo.releaseNotes}
+                <details class="rounded border border-(--border) bg-(--bg-canvas) p-2">
+                  <summary class="cursor-pointer text-[11px]">{t('about-update-notes')}</summary>
+                  <pre class="mt-1 max-h-40 overflow-auto whitespace-pre-wrap text-[11px] text-(--text-muted)">{updateInfo.releaseNotes}</pre>
+                </details>
+              {/if}
+              <button
+                class="text-[12px] text-(--accent) hover:underline"
+                onclick={() => onopenurl?.(updateInfo.releaseUrl)}
+              >
+                ↗ {t('about-update-open')}
+              </button>
+              <p class="text-[11px] text-(--text-muted)">{t('about-update-checksums')}</p>
+            </div>
+          {/if}
+          {#if updateError}
+            <p class="mt-2 text-[11px] text-rose-400">
+              {t('about-update-error', { error: updateError })}
+            </p>
+          {/if}
           <button
             class="mt-3 rounded border border-(--border) px-3 py-1.5 text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
             onclick={() => onopenurl?.(`${REPO}/releases`)}

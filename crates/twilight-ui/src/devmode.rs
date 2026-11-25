@@ -17,6 +17,9 @@ use tauri::{AppHandle, Manager};
 /// without bound.
 pub(crate) const MAX_RECORDS: usize = 100;
 
+/// Shared mask for every secret-redaction path in this module.
+const REDACTED: &str = "********";
+
 /// One build launched while Developer Mode (or a Horizon developer flag) was
 /// active. Timestamps are Unix seconds so the UI can format them with the
 /// active locale.
@@ -186,7 +189,7 @@ pub(crate) fn redact_launch_command(command: &str) -> String {
         let core = token.trim_end_matches(char::is_whitespace);
         let whitespace = &token[core.len()..];
         if mask_next {
-            out.push_str("********");
+            out.push_str(REDACTED);
             out.push_str(whitespace);
             mask_next = false;
             continue;
@@ -198,7 +201,7 @@ pub(crate) fn redact_launch_command(command: &str) -> String {
         } else if let Some(equals) = core.find('=') {
             if sensitive_arg(&core[..equals]) {
                 out.push_str(&core[..=equals]);
-                out.push_str("********");
+                out.push_str(REDACTED);
                 out.push_str(whitespace);
             } else {
                 out.push_str(token);
@@ -228,7 +231,7 @@ fn redact_value(value: &mut serde_json::Value) {
         serde_json::Value::Object(map) => {
             for (key, child) in map.iter_mut() {
                 if sensitive_key(key) && !empty_value(child) {
-                    *child = serde_json::Value::String("********".to_owned());
+                    *child = serde_json::Value::String(REDACTED.to_owned());
                 } else {
                     redact_value(child);
                 }
@@ -254,7 +257,7 @@ fn redact_config_line(line: &str) -> String {
     let value = &line[colon + 1..];
     let trimmed = value.trim_end();
     let suffix = &value[trimmed.len()..];
-    format!("{} \"********\"{}", &line[..=colon], suffix)
+    format!("{} \"{REDACTED}\"{}", &line[..=colon], suffix)
 }
 
 /// Returns the raw settings JSON with API keys/tokens/secrets masked. Parsing
@@ -271,6 +274,16 @@ pub(crate) fn redact_settings_json(text: &str) -> String {
             .collect::<Vec<_>>()
             .join("\n"),
     }
+}
+
+/// Replaces every case-sensitive occurrence of `secret` in `text` with the
+/// shared mask. Empty or whitespace-only secrets are a no-op, so callers can
+/// pass an unset Settings value without altering the message.
+pub(crate) fn redact_secret(text: &str, secret: &str) -> String {
+    if secret.trim().is_empty() {
+        return text.to_owned();
+    }
+    text.replace(secret, REDACTED)
 }
 
 #[cfg(test)]
@@ -359,5 +372,21 @@ mod tests {
             redact_settings_json("curseforge_api_key: cf-secret\nactive_account: Alex\n");
         assert!(!redacted.contains("cf-secret"));
         assert!(redacted.contains("active_account: Alex"));
+    }
+
+    #[test]
+    fn secret_redaction_replaces_every_exact_match() {
+        let message = "key=abc123 and again abc123, but ABC123 stays";
+        assert_eq!(
+            redact_secret(message, "abc123"),
+            "key=******** and again ********, but ABC123 stays"
+        );
+    }
+
+    #[test]
+    fn empty_or_whitespace_secrets_are_a_no_op() {
+        let message = "nothing to hide: value";
+        assert_eq!(redact_secret(message, ""), message);
+        assert_eq!(redact_secret(message, "   \t "), message);
     }
 }

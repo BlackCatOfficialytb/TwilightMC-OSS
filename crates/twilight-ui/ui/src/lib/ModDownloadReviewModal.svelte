@@ -172,6 +172,13 @@
                 </td>
                 <td class="px-3 py-2 align-top text-[11px] {row.required_by.length ? 'text-(--accent-1)' : 'text-(--fg-2)'}">
                   {note(row)}
+                  {#if row.advisories?.length}
+                    <div class="mt-1 space-y-0.5 text-amber-400">
+                      {#each row.advisories as advisory}
+                        <div>{t('review-advisory', { note: advisory })}</div>
+                      {/each}
+                    </div>
+                  {/if}
                 </td>
                 <td class="px-3 py-2 text-right align-top text-(--fg-2)">{fmtSize(row.size)}</td>
               </tr>

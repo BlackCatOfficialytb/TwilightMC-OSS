@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 use tauri::AppHandle;
 
-use crate::accounts::{load_settings, save_settings, settings_path};
+use crate::accounts::{Settings, load_settings, save_settings, settings_path};
 use crate::devmode::{LaunchTimings, last_timings, redact_settings_json};
 
 /// Persisted java/memory allocation shown in the Settings modal.
@@ -116,6 +116,82 @@ pub async fn set_theme_config(app: AppHandle, theme: String) -> Result<(), Strin
     }
     let mut settings = load_settings(&settings_path(&app).await?).await;
     settings.theme = Some(theme);
+    save_settings(&settings_path(&app).await?, &settings).await
+}
+
+/// Only the catalogs bundled with the UI can be selected from Settings.
+fn valid_locale(locale: &str) -> bool {
+    matches!(locale, "en-US" | "vi-VN")
+}
+
+/// The accepted update streams; `bolide` is the default channel.
+fn valid_update_channel(channel: &str) -> bool {
+    matches!(channel, "bolide" | "star" | "stable" | "snapshot")
+}
+
+/// Read-side fallback: a legacy or hand-edited settings file cannot select an
+/// unsupported catalog or channel. Kept separate from the command so it can be
+/// tested without an `AppHandle`.
+fn resolved_locale(settings: &Settings) -> String {
+    settings
+        .locale
+        .as_deref()
+        .filter(|locale| valid_locale(locale))
+        .unwrap_or("en-US")
+        .to_owned()
+}
+
+fn resolved_update_channel(settings: &Settings) -> String {
+    settings
+        .update_channel
+        .as_deref()
+        .filter(|channel| valid_update_channel(channel))
+        .unwrap_or("bolide")
+        .to_owned()
+}
+
+#[tauri::command]
+pub async fn get_locale_config(app: AppHandle) -> Result<String, String> {
+    let settings = load_settings(&settings_path(&app).await?).await;
+    Ok(resolved_locale(&settings))
+}
+
+#[tauri::command]
+pub async fn set_locale_config(app: AppHandle, locale: String) -> Result<(), String> {
+    if !valid_locale(&locale) {
+        return Err("locale must be 'en-US' or 'vi-VN'".into());
+    }
+    let mut settings = load_settings(&settings_path(&app).await?).await;
+    settings.locale = Some(locale);
+    save_settings(&settings_path(&app).await?, &settings).await
+}
+
+#[tauri::command]
+pub async fn get_curseforge_enabled(app: AppHandle) -> Result<bool, String> {
+    let settings = load_settings(&settings_path(&app).await?).await;
+    Ok(settings.curseforge_enabled)
+}
+
+#[tauri::command]
+pub async fn set_curseforge_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let mut settings = load_settings(&settings_path(&app).await?).await;
+    settings.curseforge_enabled = enabled;
+    save_settings(&settings_path(&app).await?, &settings).await
+}
+
+#[tauri::command]
+pub async fn get_update_channel(app: AppHandle) -> Result<String, String> {
+    let settings = load_settings(&settings_path(&app).await?).await;
+    Ok(resolved_update_channel(&settings))
+}
+
+#[tauri::command]
+pub async fn set_update_channel(app: AppHandle, channel: String) -> Result<(), String> {
+    if !valid_update_channel(&channel) {
+        return Err("update channel must be 'bolide', 'star', 'stable' or 'snapshot'".into());
+    }
+    let mut settings = load_settings(&settings_path(&app).await?).await;
+    settings.update_channel = Some(channel);
     save_settings(&settings_path(&app).await?, &settings).await
 }
 
@@ -438,4 +514,79 @@ pub async fn set_gc_prefs(
     settings.custom_gc_flags = custom_gc_flags;
     settings.extra_jvm_args = Some(extra_jvm_args.trim().to_owned()).filter(|s| !s.is_empty());
     save_settings(&settings_path(&app).await?, &settings).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn test_settings_path() -> std::path::PathBuf {
+        // tests run in parallel: a per-process counter keeps the dirs distinct
+        // even when two land in the same nanosecond
+        static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "twi-prefs-test-{}-{}-{seq}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .subsec_nanos()
+        ));
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        dir.join("settings.json")
+    }
+
+    #[test]
+    fn locale_and_channel_validation() {
+        assert!(valid_locale("en-US"));
+        assert!(valid_locale("vi-VN"));
+        assert!(!valid_locale("en"));
+        assert!(!valid_locale("fr-FR"));
+        for channel in ["bolide", "star", "stable", "snapshot"] {
+            assert!(valid_update_channel(channel), "{channel}");
+        }
+        assert!(!valid_update_channel("beta"));
+        assert!(!valid_update_channel(""));
+    }
+
+    #[test]
+    fn invalid_stored_values_fall_back() {
+        let settings = Settings {
+            locale: Some("fr-FR".into()),
+            update_channel: Some("beta".into()),
+            ..Settings::default()
+        };
+        assert_eq!(resolved_locale(&settings), "en-US");
+        assert_eq!(resolved_update_channel(&settings), "bolide");
+        // valid values survive unchanged
+        let settings = Settings {
+            locale: Some("vi-VN".into()),
+            update_channel: Some("star".into()),
+            ..Settings::default()
+        };
+        assert_eq!(resolved_locale(&settings), "vi-VN");
+        assert_eq!(resolved_update_channel(&settings), "star");
+    }
+
+    #[tokio::test]
+    async fn locale_channel_and_curseforge_round_trip() {
+        let path = test_settings_path().await;
+        // empty settings file: CurseForge on, default channel, no forced locale
+        let settings = load_settings(&path).await;
+        assert_eq!(settings.locale, None);
+        assert_eq!(settings.update_channel.as_deref(), Some("bolide"));
+        assert!(settings.curseforge_enabled);
+
+        let mut settings = settings;
+        settings.locale = Some("vi-VN".into());
+        settings.update_channel = Some("snapshot".into());
+        settings.curseforge_enabled = false;
+        save_settings(&path, &settings).await.unwrap();
+
+        let loaded = load_settings(&path).await;
+        assert_eq!(resolved_locale(&loaded), "vi-VN");
+        assert_eq!(resolved_update_channel(&loaded), "snapshot");
+        assert!(!loaded.curseforge_enabled);
+    }
 }

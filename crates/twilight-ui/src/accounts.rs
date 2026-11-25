@@ -41,6 +41,12 @@ pub(crate) struct Settings {
     /// `light` / `dark`; falls back to the OS preference.
     #[serde(default)]
     pub(crate) theme: Option<String>,
+    /// UI language: `en-US` / `vi-VN`; `None` = detect on startup.
+    #[serde(default)]
+    pub(crate) locale: Option<String>,
+    /// Update stream: `bolide` / `star` / `stable` / `snapshot`.
+    #[serde(default = "default_update_channel")]
+    pub(crate) update_channel: Option<String>,
     /// Overridable Microsoft OAuth application id (device flow); empty =
     /// the default public client id.
     #[serde(default)]
@@ -83,6 +89,10 @@ pub(crate) struct Settings {
     /// FOSS flow (Modrinth core mods + manual zip import, no key needed).
     #[serde(default)]
     pub(crate) curseforge_api_key: Option<String>,
+    /// Whether CurseForge integration is enabled; defaults to **true** so
+    /// existing settings files keep the previous behavior.
+    #[serde(default = "default_true")]
+    pub(crate) curseforge_enabled: bool,
     /// Horizon (native Rust engine) binary; empty = Horizon instances refuse
     /// to launch with a "set it in Settings" message. Never bundled.
     #[serde(default)]
@@ -137,6 +147,10 @@ fn default_true() -> bool {
     true
 }
 
+fn default_update_channel() -> Option<String> {
+    Some("bolide".to_owned())
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -149,6 +163,8 @@ impl Default for Settings {
             min_memory_mb: 0,
             max_memory_mb: 0,
             theme: None,
+            locale: None,
+            update_channel: default_update_channel(),
             msa_client_id: None,
             elyby_client_id: None,
             mode: None,
@@ -162,6 +178,7 @@ impl Default for Settings {
             downloads_dir: None,
             servers_dir: None,
             curseforge_api_key: None,
+            curseforge_enabled: true,
             horizon_path: None,
             gc_preset: None,
             custom_gc_flags: Vec::new(),

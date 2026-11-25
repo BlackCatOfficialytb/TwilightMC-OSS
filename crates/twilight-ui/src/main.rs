@@ -15,11 +15,13 @@ mod launch;
 mod modpack;
 mod modrinth;
 mod mods;
+mod net;
 mod prefs;
 mod servers;
 mod shortcut;
 mod storage;
 mod twpack;
+mod update;
 mod versions;
 mod worlds;
 
@@ -316,6 +318,13 @@ fn main() {
             prefs::set_gc_prefs,
             prefs::get_curseforge_api_key,
             prefs::set_curseforge_api_key,
+            prefs::get_locale_config,
+            prefs::set_locale_config,
+            prefs::get_curseforge_enabled,
+            prefs::set_curseforge_enabled,
+            prefs::get_update_channel,
+            prefs::set_update_channel,
+            update::check_for_updates,
             prefs::get_horizon_prefs,
             prefs::set_horizon_prefs,
             horizon::detect_horizon,

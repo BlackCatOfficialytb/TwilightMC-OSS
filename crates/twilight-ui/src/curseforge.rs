@@ -9,6 +9,7 @@ use tauri::AppHandle;
 use twilight_downloader::{DownloadRequest, ParallelDownloader};
 
 use crate::accounts::{load_settings, settings_path};
+use crate::devmode::redact_secret;
 use crate::instances::{instances_root, validate_instance_id};
 use crate::modpack::{CF_API_BASE, curse_file_name};
 use crate::mods::mods_dir;
@@ -163,6 +164,26 @@ pub(crate) fn curseforge_error_message(status: reqwest::StatusCode, body: &str) 
     }
 }
 
+/// Reads the explicit CurseForge toggle from a serialized settings object.
+/// Files written before the toggle existed are treated as enabled so an
+/// existing API key keeps working; an explicit `false` always wins.
+pub(crate) fn curseforge_enabled_in(settings: &serde_json::Value) -> bool {
+    settings
+        .get("curseforge_enabled")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true)
+}
+
+/// Loads the key and the enabled toggle together so callers can skip every
+/// network call when CurseForge is disabled in Settings.
+pub(crate) async fn curseforge_settings(app: &AppHandle) -> Result<(String, bool), String> {
+    let settings = load_settings(&settings_path(app).await?).await;
+    let value = serde_json::to_value(&settings).map_err(|e| e.to_string())?;
+    let enabled = curseforge_enabled_in(&value);
+    let key = settings.curseforge_api_key.unwrap_or_default();
+    Ok((key, enabled))
+}
+
 /// Searches CurseForge projects (gameId 432) for one game version + loader
 /// using the personal API key from Settings. `class_id` selects the project
 /// class: 6 = mods, 12 = resource packs, 6552 = shaders. Keyless users stay on
@@ -175,10 +196,10 @@ pub async fn search_curseforge_mods(
     loader: String,
     class_id: Option<u32>,
 ) -> Result<Vec<CurseSearchResult>, String> {
-    let key = load_settings(&settings_path(&app).await?)
-        .await
-        .curseforge_api_key
-        .unwrap_or_default();
+    let (key, enabled) = curseforge_settings(&app).await?;
+    if !enabled {
+        return Err("CurseForge is disabled in Settings".to_owned());
+    }
     search_curseforge_mods_core(
         CF_API_BASE,
         key.trim(),
@@ -223,21 +244,36 @@ pub(crate) async fn search_curseforge_mods_core(
         params.push(("gameVersion", game_version.trim().to_owned()));
     }
     let url = reqwest::Url::parse_with_params(format!("{api_base}/mods/search").as_str(), &params)
-        .map_err(|e| e.to_string())?;
-    let resp = reqwest::Client::new()
-        .get(url)
-        .header("x-api-key", api_key)
-        .header(reqwest::header::ACCEPT, "application/json")
-        .header(reqwest::header::USER_AGENT, crate::modrinth::client_ua())
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| redact_secret(&e.to_string(), api_key))?;
+    let client = reqwest::Client::new();
+    // 429/503 are transient; retry_request caps the budget and the delay.
+    let request_client = &client;
+    let request_url = &url;
+    let resp = crate::net::retry_request(crate::net::MAX_ATTEMPTS, || async move {
+        request_client
+            .get(request_url.clone())
+            .header("x-api-key", api_key)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .header(reqwest::header::USER_AGENT, crate::modrinth::client_ua())
+            .send()
+            .await
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| redact_secret(&e, api_key))?;
     let status = resp.status();
-    let body = resp.text().await.map_err(|e| e.to_string())?;
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| redact_secret(&e.to_string(), api_key))?;
     if !status.is_success() {
-        return Err(curseforge_error_message(status, &body));
+        return Err(redact_secret(
+            &curseforge_error_message(status, &body),
+            api_key,
+        ));
     }
-    let raw: serde_json::Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    let raw: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| redact_secret(&e.to_string(), api_key))?;
     Ok(parse_search_hits(&raw))
 }
 
@@ -337,6 +373,14 @@ mod tests {
     /// the canned body, forwards the raw request through a channel (header
     /// assertions), 404 otherwise.
     fn loopback_api(body: String) -> (String, std::sync::mpsc::Receiver<String>) {
+        loopback_api_status(200, body)
+    }
+
+    /// Same stand-in with an arbitrary status, used for auth-error tests.
+    fn loopback_api_status(
+        status: u16,
+        body: String,
+    ) -> (String, std::sync::mpsc::Receiver<String>) {
         use std::io::{Read, Write};
         use std::net::TcpListener;
 
@@ -357,7 +401,7 @@ mod tests {
                     .next()
                     .unwrap_or_default();
                 let (status, body) = if path == "/v1/mods/search" {
-                    (200, body.clone())
+                    (status, body.clone())
                 } else {
                     (404, "{\"error\":\"not_found\"}".to_owned())
                 };
@@ -476,5 +520,39 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("no CurseForge API key"));
+    }
+
+    #[tokio::test]
+    async fn api_key_is_redacted_from_401_error_details() {
+        const KEY: &str = "cf-super-secret-key-42";
+        let (api, rx) =
+            loopback_api_status(401, format!(r#"{{"error":"invalid key {KEY} rejected"}}"#));
+        let err = search_curseforge_mods_core(&api, KEY, "jei", "1.21.4", "fabric", None)
+            .await
+            .unwrap_err();
+        assert!(err.contains("HTTP 401"), "{err}");
+        assert!(err.contains("********"), "{err}");
+        assert!(!err.contains(KEY), "raw key leaked into error: {err}");
+        // 401 is non-retryable: exactly one request reached the loopback API
+        let request = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        assert!(request.contains(&format!("x-api-key: {KEY}")));
+        assert!(
+            rx.recv_timeout(std::time::Duration::from_millis(100))
+                .is_err(),
+            "401 must not be retried"
+        );
+    }
+
+    #[test]
+    fn explicit_disable_wins_and_legacy_settings_stay_enabled() {
+        assert!(!curseforge_enabled_in(&serde_json::json!({
+            "curseforge_enabled": false
+        })));
+        assert!(curseforge_enabled_in(&serde_json::json!({
+            "curseforge_enabled": true
+        })));
+        assert!(curseforge_enabled_in(&serde_json::json!({
+            "curseforge_api_key": "legacy-key"
+        })));
     }
 }

@@ -7,6 +7,7 @@
 import { FluentBundle, FluentResource, type FluentVariable } from '@fluent/bundle';
 import enUSSource from '../../../../../locales/en-US/main.ftl?raw';
 import viVNSource from '../../../../../locales/vi-VN/main.ftl?raw';
+import { tauriInvoke } from './tauri';
 
 export const SUPPORTED_LOCALES = [
   { id: 'en-US', label: 'language-en-US' },
@@ -73,6 +74,51 @@ export function getLocale(): Locale {
   return activeLocale;
 }
 
+/**
+ * Restores the locale persisted in `settings.json`. Best-effort: a missing
+ * bridge or a rejected read never throws; an unsupported stored value falls
+ * back to the browser language.
+ */
+export async function initLocale(): Promise<void> {
+  let stored: unknown;
+  try {
+    stored = await tauriInvoke<string>('get_locale_config');
+  } catch {
+    // no bridge (plain web preview): fall through to browser detection
+  }
+  if (isLocale(stored)) {
+    // settings.json wins. When it holds the fallback and there is no explicit
+    // user choice in localStorage, negotiate from the browser/OS language
+    // (vi -> vi-VN, everything else -> en-US) before first paint settles.
+    if (stored === FALLBACK_LOCALE) {
+      let mirrored: string | null = null;
+      try {
+        mirrored = localStorage.getItem(STORAGE_KEY);
+      } catch {
+        // localStorage unavailable (privacy mode)
+      }
+      if (!isLocale(mirrored)) {
+        try {
+          const base = (navigator.language.split('-')[0] ?? '').toLowerCase();
+          activeLocale = base === 'vi' ? 'vi-VN' : FALLBACK_LOCALE;
+        } catch {
+          activeLocale = FALLBACK_LOCALE;
+        }
+        return;
+      }
+    }
+    activeLocale = stored;
+    return;
+  }
+  // Unsupported/absent stored value: use the navigator language base tag.
+  try {
+    const base = (navigator.language.split('-')[0] ?? '').toLowerCase();
+    activeLocale = base === 'vi' ? 'vi-VN' : FALLBACK_LOCALE;
+  } catch {
+    activeLocale = FALLBACK_LOCALE;
+  }
+}
+
 /** Switch the UI language immediately and remember it for the next launch. */
 export function setLocale(locale: Locale): void {
   if (!isLocale(locale)) return;
@@ -82,6 +128,9 @@ export function setLocale(locale: Locale): void {
   } catch {
     // Persistence is best-effort; the switch still applies for this session.
   }
+  void tauriInvoke('set_locale_config', { locale }).catch(() => {
+    // no bridge / rejected write: the switch still applies for this session.
+  });
 }
 
 function formatWith(bundle: FluentBundle, id: string, args?: MessageArgs): string | null {

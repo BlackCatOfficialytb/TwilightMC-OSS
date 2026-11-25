@@ -588,13 +588,11 @@ pub async fn import_instance_archive(
             let (id, dir) = prepare_instance(&root, &chosen).inspect_err(|_| {
                 let _ = std::fs::remove_dir_all(root.join(slugify(&chosen)));
             })?;
-            let key = crate::accounts::load_settings(&crate::accounts::settings_path(&app).await?)
-                .await
-                .curseforge_api_key
-                .unwrap_or_default();
+            let (key, enabled) = crate::curseforge::curseforge_settings(&app).await?;
+            let effective_key = crate::modpack::effective_curseforge_key(&key, enabled);
             let report = match modpack::import_curseforge_pack_core(
                 &dir.join("minecraft"),
-                key.trim(),
+                effective_key,
                 &bytes,
                 None,
             )

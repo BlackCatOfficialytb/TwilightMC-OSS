@@ -39,6 +39,129 @@ fn loader_candidates(loader: &str) -> Vec<String> {
     }
 }
 
+/// Loader families that can run on an instance using `loader`. Quilt runs
+/// Fabric jars through QFAPI; Legacy Fabric falls back to plain Fabric.
+fn active_loader_tags(loader: &str) -> HashSet<String> {
+    loader_candidates(loader)
+        .into_iter()
+        .map(|tag| tag.to_ascii_lowercase())
+        .collect()
+}
+
+/// Forge and NeoForge share a library ecosystem for dependency purposes, as
+/// do Quilt/Fabric/Legacy Fabric. Used only to recognise foreign-loader deps.
+fn loader_family_group(tag: &str) -> &str {
+    match tag {
+        "forge" | "neoforge" => "forge",
+        "fabric" | "legacy-fabric" | "quilt" => "fabric",
+        other => other,
+    }
+}
+
+fn same_loader_family(a: &str, b: &str) -> bool {
+    loader_family_group(a) == loader_family_group(b)
+}
+
+fn version_loader_tags(entry: &serde_json::Value) -> HashSet<String> {
+    entry
+        .get("loaders")
+        .and_then(serde_json::Value::as_array)
+        .map(|tags| {
+            tags.iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(|tag| tag.trim().to_ascii_lowercase())
+                .filter(|tag| !tag.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn loader_label(tag: &str) -> String {
+    match tag {
+        "neoforge" => "NeoForge".to_owned(),
+        "legacy-fabric" => "Legacy Fabric".to_owned(),
+        _ => {
+            let mut chars = tag.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        }
+    }
+}
+
+/// Best-effort check for the Modrinth "unified jar" trap: multi-loader jars
+/// list every loader's required deps in one flat array (e.g. Zoomify's
+/// KotlinLangForge on Fabric). When a dep has no build for the active loader
+/// but only for the *other* families the parent version also targets, it is a
+/// foreign-loader dep: skip it instead of failing the whole batch. Returns
+/// the advisory text when the skip is justified, `None` otherwise (>= an
+/// explicitly unknown loader or any genuine active-loader dep stays strict).
+async fn cross_loader_dep_note(
+    client: &reqwest::Client,
+    api_base: &str,
+    dep_id: &str,
+    game_version: &str,
+    loader: &str,
+    parent_entry: &serde_json::Value,
+) -> Result<Option<String>, String> {
+    let active = active_loader_tags(loader);
+    if active.is_empty() || active.iter().any(|tag| tag.is_empty()) {
+        return Ok(None);
+    }
+    let parent_loaders = version_loader_tags(parent_entry);
+    let other_families: Vec<&String> = parent_loaders
+        .iter()
+        .filter(|parent| !active.iter().any(|tag| same_loader_family(tag, parent)))
+        .collect();
+    if other_families.is_empty() {
+        return Ok(None); // parent only targets the active loader: stay strict
+    }
+
+    // Unfiltered by loader (still pinned to the game version): the dep's own
+    // builds tell us which families it actually ships for.
+    let resp = client
+        .get(versions_url(api_base, dep_id, game_version, "")?)
+        .header(reqwest::header::USER_AGENT, client_ua())
+        .send()
+        .await
+        .and_then(reqwest::Response::error_for_status);
+    let Ok(resp) = resp else {
+        return Ok(None); // no evidence: let the normal compatibility error speak
+    };
+    let raw = resp.json::<serde_json::Value>().await;
+    let Ok(serde_json::Value::Array(versions)) = raw else {
+        return Ok(None); // no evidence: let the normal compatibility error speak
+    };
+    let mut dep_loaders = HashSet::new();
+    for version in &versions {
+        dep_loaders.extend(version_loader_tags(version));
+    }
+    if dep_loaders.is_empty()
+        || dep_loaders
+            .iter()
+            .any(|dep| active.iter().any(|tag| same_loader_family(tag, dep)))
+        || !dep_loaders.iter().all(|dep| {
+            other_families
+                .iter()
+                .any(|tag| same_loader_family(tag, dep))
+        })
+    {
+        return Ok(None);
+    }
+
+    let title = fetch_project_title(client, api_base, dep_id)
+        .await
+        .unwrap_or_else(|_| dep_id.to_owned());
+    let mut families: Vec<String> = dep_loaders.iter().map(|tag| loader_label(tag)).collect();
+    families.sort();
+    families.dedup();
+    Ok(Some(format!(
+        "Skipped {title} ({}-only dependency on multi-loader jar)",
+        families.join("/")
+    )))
+}
+
 /// Dependency substitution for compatibility layers: a Fabric mod's
 /// `fabric-api` requirement is rewired to `qfapi` on Quilt and to
 /// `legacy-fabric-api` on Legacy Fabric, so neither instance ends up with the
@@ -450,6 +573,17 @@ async fn install_project_with_deps(
         .unwrap_or_default();
     let mut installed = Vec::new();
     for dep in deps {
+        // A unified jar lists every loader's deps in one flat array. Skip a
+        // dep that only ships for the parent's other loader families.
+        if fetch_compatible_version(client, api_base, &dep, game_version, loader)
+            .await?
+            .is_none()
+            && cross_loader_dep_note(client, api_base, &dep, game_version, loader, &entry)
+                .await?
+                .is_some()
+        {
+            continue;
+        }
         // boxed: async recursion needs indirection to be sized
         installed.extend(
             Box::pin(install_project_with_deps(
@@ -611,6 +745,8 @@ pub struct ModDownloadPreview {
     pub required_by: Vec<String>,
     /// A file with this name already sits in the instance mods dir.
     pub installed: bool,
+    /// Non-blocking notes, e.g. a foreign-loader dep skipped from a unified jar.
+    pub advisories: Vec<String>,
 }
 
 /// Lowercased file names already in the mods dir (installed highlighting).
@@ -798,7 +934,20 @@ async fn preview_project_with_deps(
                 .collect()
         })
         .unwrap_or_default();
+    let mut advisories: Vec<String> = Vec::new();
     for dep in deps {
+        // Unified-jar trap: a required dep may only exist for the parent's
+        // other loader families (KotlinLangForge on Fabric). Skip it with a
+        // non-blocking advisory instead of aborting the whole review queue.
+        if fetch_compatible_version(client, api_base, &dep, game_version, loader)
+            .await?
+            .is_none()
+            && let Some(note) =
+                cross_loader_dep_note(client, api_base, &dep, game_version, loader, &entry).await?
+        {
+            advisories.push(note);
+            continue;
+        }
         // boxed: async recursion needs indirection to be sized
         Box::pin(preview_project_with_deps(
             client,
@@ -843,6 +992,7 @@ async fn preview_project_with_deps(
         size,
         required_by: parent.map(|p| vec![p.to_owned()]).unwrap_or_default(),
         installed,
+        advisories,
     });
     Ok(())
 }
@@ -1566,5 +1716,188 @@ mod tests {
         assert!(err.contains("found for Minecraft 1.21.4 (fabric)"));
         assert!(err.contains("required by Parent Mod (parent)"));
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Canned version JSON with explicit loader tags (unified-jar fixtures).
+    fn version_json_with_loaders(base: &str, jar: &str, deps: &str, loaders: &str) -> String {
+        format!(
+            r#"[{{"version_number":"1.0.0","loaders":{loaders},"files":[{{"filename":"{jar}","primary":true,"url":"{base}/jar/{jar}"}}],"dependencies":{deps}}}]"#
+        )
+    }
+
+    /// Query-aware loopback: filters `/version` arrays by the `loaders` query
+    /// param, so a loader-pinned fetch returns `[]` while the unfiltered
+    /// diagnostic fetch still sees the foreign-loader builds.
+    fn loopback_versions_api(
+        routes: impl FnOnce(&str) -> Vec<(&'static str, u16, String)>,
+    ) -> String {
+        use std::collections::HashMap;
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let map: HashMap<String, (u16, String)> = routes(&base)
+            .into_iter()
+            .map(|(path, status, body)| (path.to_owned(), (status, body)))
+            .collect();
+        let server_base = base.clone();
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut buf = [0u8; 8192];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]);
+                let target = req.split_whitespace().nth(1).unwrap_or_default().to_owned();
+                let path = target.split('?').next().unwrap_or_default().to_owned();
+                let (status, mut body) = map
+                    .get(&path)
+                    .cloned()
+                    .unwrap_or_else(|| (404, "{\"error\":\"not_found\"}".to_owned()));
+                if status == 200
+                    && let Ok(url) = reqwest::Url::parse(&format!("{server_base}{target}"))
+                {
+                    let wanted_loaders: Vec<String> = url
+                        .query_pairs()
+                        .find(|(key, _)| key == "loaders")
+                        .and_then(|(_, value)| serde_json::from_str(&value).ok())
+                        .unwrap_or_default();
+                    if !wanted_loaders.is_empty()
+                        && let Ok(serde_json::Value::Array(mut versions)) =
+                            serde_json::from_str::<serde_json::Value>(&body)
+                    {
+                        versions.retain(|version| {
+                            version
+                                .get("loaders")
+                                .and_then(|v| v.as_array())
+                                .map(|tags| {
+                                    tags.iter().filter_map(|tag| tag.as_str()).any(|tag| {
+                                        wanted_loaders
+                                            .iter()
+                                            .any(|wanted| wanted.eq_ignore_ascii_case(tag))
+                                    })
+                                })
+                                .unwrap_or(true)
+                        });
+                        body = serde_json::to_string(&versions).unwrap_or(body);
+                    }
+                }
+                let resp = format!(
+                    "HTTP/1.1 {status} TW\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            }
+        });
+        format!("{base}/v2")
+    }
+
+    #[tokio::test]
+    async fn unified_jar_skips_foreign_loader_dependency_with_advisory() {
+        let api = loopback_versions_api(|base| {
+            vec![
+                (
+                    "/v2/project/zoomify/version",
+                    200,
+                    version_json_with_loaders(
+                        base,
+                        "zoomify.jar",
+                        r#"[{"project_id":"kotlin","dependency_type":"required"}]"#,
+                        r#"["fabric","neoforge"]"#,
+                    ),
+                ),
+                (
+                    "/v2/project/kotlin/version",
+                    200,
+                    version_json_with_loaders(base, "kotlin.jar", "[]", r#"["forge","neoforge"]"#),
+                ),
+                (
+                    "/v2/project/kotlin",
+                    200,
+                    r#"{"title":"KotlinLangForge"}"#.to_owned(),
+                ),
+            ]
+        });
+        let client = reqwest::Client::new();
+        let mut rows = Vec::new();
+        let mut index = std::collections::HashMap::new();
+        let mut in_progress = HashSet::new();
+        let existing = HashSet::new();
+
+        preview_project_with_deps(
+            &client,
+            &api,
+            "zoomify",
+            Some("Zoomify"),
+            None,
+            "26.3",
+            "fabric",
+            None,
+            &mut rows,
+            &mut index,
+            &mut in_progress,
+            &existing,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].project_id, "zoomify");
+        assert!(
+            rows[0]
+                .advisories
+                .iter()
+                .any(|note| note.contains("Skipped KotlinLangForge"))
+        );
+        assert!(rows[0].advisories[0].contains("NeoForge"));
+    }
+
+    #[tokio::test]
+    async fn fabric_only_parent_missing_fabric_dependency_still_fails() {
+        let api = loopback_api(|base| {
+            vec![
+                (
+                    "/v2/project/fabricparent/version",
+                    200,
+                    version_json_with_loaders(
+                        base,
+                        "fabricparent.jar",
+                        r#"[{"project_id":"missing","dependency_type":"required"}]"#,
+                        r#"["fabric"]"#,
+                    ),
+                ),
+                ("/v2/project/missing/version", 200, "[]".to_owned()),
+                (
+                    "/v2/project/missing",
+                    200,
+                    r#"{"title":"Missing Mod"}"#.to_owned(),
+                ),
+            ]
+        });
+        let client = reqwest::Client::new();
+        let mut rows = Vec::new();
+        let mut index = std::collections::HashMap::new();
+        let mut in_progress = HashSet::new();
+        let existing = HashSet::new();
+
+        let err = preview_project_with_deps(
+            &client,
+            &api,
+            "fabricparent",
+            Some("FabricParent"),
+            None,
+            "26.3",
+            "fabric",
+            None,
+            &mut rows,
+            &mut index,
+            &mut in_progress,
+            &existing,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err.contains("No compatible version of Missing Mod (missing)"));
+        assert!(err.contains("found for Minecraft 26.3 (fabric)"));
+        assert!(err.contains("required by FabricParent"));
     }
 }

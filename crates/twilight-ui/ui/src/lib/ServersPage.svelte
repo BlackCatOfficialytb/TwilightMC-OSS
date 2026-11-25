@@ -163,9 +163,9 @@
 
 {#if managing && selected}
   <!-- ===== full-page control panel ===== -->
-  <div class="flex min-h-0 flex-1 flex-col">
+  <div class="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
     <!-- header bar -->
-    <div class="flex items-center gap-2.5 border-b border-(--border) pb-3">
+    <div class="flex shrink-0 items-center gap-2.5 border-b border-(--border) pb-3">
       <button
         class="rounded border border-(--border) px-2 py-1.5 text-[12px] text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)"
         onclick={closePanel}
@@ -242,8 +242,8 @@
     </div>
 
     <!-- rail + tab content -->
-    <div class="flex min-h-0 flex-1 pt-3">
-      <nav class="flex w-44 shrink-0 flex-col gap-0.5 pr-3" aria-label={t('servers-title')}>
+    <div class="flex min-h-0 flex-1 overflow-hidden pt-3">
+      <nav class="flex min-h-0 w-44 shrink-0 flex-col gap-0.5 overflow-y-auto pr-3" aria-label={t('servers-title')}>
         {#each TABS as tab (tab.id)}
           <button
             class="rounded px-2.5 py-2 text-left text-[12.5px] transition-colors {activeTab === tab.id
@@ -256,7 +256,7 @@
         {/each}
       </nav>
 
-      <div class="flex min-h-0 min-w-0 flex-1 flex-col border-l border-(--border)">
+      <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto border-l border-(--border)">
         {#if activeTab === 'console'}
           <ServerConsoleTab server={selected} logs={selectedLogs} connect={selectedConnect} />
         {:else if activeTab === 'files'}
@@ -275,8 +275,8 @@
   </div>
 {:else}
   <!-- ===== overview ===== -->
-  <div class="flex min-h-0 flex-1 flex-col overflow-y-auto">
-    <div class="flex items-center justify-between">
+  <div class="flex h-full min-h-0 flex-1 flex-col overflow-y-auto">
+    <div class="flex shrink-0 items-center justify-between">
       <h2 class="text-lg font-semibold">{t('servers-title')}</h2>
       <button
         class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"

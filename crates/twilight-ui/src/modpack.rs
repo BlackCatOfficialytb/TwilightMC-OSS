@@ -12,7 +12,7 @@ use twilight_modrinth::{Mrpack, extract_archive};
 
 use twilight_cli::ModpackArgs;
 
-use crate::accounts::{load_settings, settings_path};
+use crate::devmode::redact_secret;
 use crate::instance::resolved_instances_root;
 use crate::instances::{self, InstanceMeta, instances_root, slugify, write_meta};
 use crate::storage::shared_root;
@@ -336,6 +336,13 @@ pub struct CurseImportReport {
 
 pub(crate) const CF_API_BASE: &str = "https://api.curseforge.com/v1";
 
+/// A disabled CurseForge toggle forces the keyless safe-mode path even when a
+/// key is still stored in Settings: the import lists the files as skipped and
+/// never contacts the API.
+pub(crate) fn effective_curseforge_key(api_key: &str, enabled: bool) -> &str {
+    if enabled { api_key.trim() } else { "" }
+}
+
 /// Resolves the instance `minecraft` dir a CurseForge pack extracts into.
 async fn game_dir_for(app: &AppHandle, instance_id: &str) -> Result<PathBuf, String> {
     instances::validate_instance_id(instance_id)?;
@@ -387,25 +394,39 @@ pub(crate) fn curse_file_name(file_name: &str, url: &str) -> String {
 /// (fetch failed or no usable URL — the import itself stays successful).
 async fn fetch_curse_file(
     client: &reqwest::Client,
+    api_base: &str,
     api_key: &str,
     project_id: u64,
     file_id: u64,
     mods_dir: &Path,
 ) -> Result<Option<String>, String> {
-    let url = format!("{CF_API_BASE}/mods/{project_id}/files/{file_id}");
-    let Ok(meta) = client
-        .get(&url)
-        .header("x-api-key", api_key)
-        .header(reqwest::header::ACCEPT, "application/json")
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-    else {
-        return Ok(None);
-    };
-    let Ok(data) = meta.json::<serde_json::Value>().await else {
-        return Ok(None);
-    };
+    let url = format!("{api_base}/mods/{project_id}/files/{file_id}");
+    let request_url = &url;
+    let metadata = crate::net::retry_request(crate::net::MAX_ATTEMPTS, || async move {
+        client
+            .get(request_url)
+            .header("x-api-key", api_key)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .send()
+            .await
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| redact_secret(&e, api_key))?;
+    let status = metadata.status();
+    if !status.is_success() {
+        let body = metadata.text().await.unwrap_or_default();
+        return Err(redact_secret(
+            &crate::curseforge::curseforge_error_message(status, &body),
+            api_key,
+        ));
+    }
+    let data = metadata.json::<serde_json::Value>().await.map_err(|e| {
+        redact_secret(
+            &format!("cannot parse CurseForge file metadata: {e}"),
+            api_key,
+        )
+    })?;
     let download_url = data
         .pointer("/data/downloadUrl")
         .and_then(serde_json::Value::as_str)
@@ -448,12 +469,10 @@ pub async fn import_curseforge_pack(
 ) -> Result<CurseImportReport, String> {
     let bytes = std::fs::read(&zip_path).map_err(|e| format!("cannot read {zip_path}: {e}"))?;
     let game_dir = game_dir_for(&app, &instance_id).await?;
-    let api_key = load_settings(&settings_path(&app).await?)
-        .await
-        .curseforge_api_key
-        .unwrap_or_default();
+    let (key, enabled) = crate::curseforge::curseforge_settings(&app).await?;
+    let api_key = effective_curseforge_key(&key, enabled);
     let cas_root = crate::mods::cas_root_if_enabled(&app).await?;
-    import_curseforge_pack_core(&game_dir, api_key.trim(), &bytes, cas_root.as_deref()).await
+    import_curseforge_pack_core(&game_dir, api_key, &bytes, cas_root.as_deref()).await
 }
 
 /// Returns the single top-level wrapper folder an archive nests its files in
@@ -554,6 +573,7 @@ pub(crate) async fn import_curseforge_pack_core(
         for file in &listed {
             match fetch_curse_file(
                 &client,
+                CF_API_BASE,
                 api_key.trim(),
                 file.project_id,
                 file.file_id,
@@ -753,6 +773,49 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// Loopback CurseForge file-metadata endpoint answering every request with
+    /// the same status/body (no CDN download is reached in these tests).
+    fn loopback_cf_file(status: u16, body: String) -> String {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut buf = [0u8; 2048];
+                let _ = stream.read(&mut buf);
+                let response = format!(
+                    "HTTP/1.1 {status} TW\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        base
+    }
+
+    #[test]
+    fn disabled_toggle_forces_the_keyless_import_path() {
+        assert_eq!(effective_curseforge_key("  cf-key  ", true), "cf-key");
+        assert_eq!(effective_curseforge_key("  cf-key  ", false), "");
+    }
+
+    #[tokio::test]
+    async fn file_metadata_error_redacts_the_api_key() {
+        const KEY: &str = "cf-import-secret-99";
+        let api = loopback_cf_file(401, format!(r#"{{"error":"rejected key {KEY}"}}"#));
+        let client = reqwest::Client::new();
+        let dir = scratch("redact");
+        let err = fetch_curse_file(&client, &api, KEY, 42, 7, &dir)
+            .await
+            .unwrap_err();
+        assert!(err.contains("HTTP 401"), "{err}");
+        assert!(err.contains("********"), "{err}");
+        assert!(!err.contains(KEY), "raw key leaked into error: {err}");
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[tokio::test]
