@@ -533,7 +533,9 @@ settings-api-desc = Optional keys for third-party APIs. The launcher works fully
 settings-cf-key = CurseForge API key
 settings-cf-configured = (configured)
 settings-cf-not-set = (not set)
-settings-cf-desc = Used by the in-app CurseForge mod browser and to auto-download mods from imported CurseForge packs. Your key is yours — paste it here, it is saved locally and never bundled with the launcher.
+settings-cf-desc = Used by the in-app CurseForge mod browser and to auto-download mods from imported CurseForge packs. Your key is yours - paste it here, it is saved locally and never bundled with the launcher.
+settings-cf-enabled = Enable CurseForge integration
+settings-cf-enabled-hint = Turns off every CurseForge API call. Keyless imports and Modrinth downloads keep working.
 settings-cf-get-key = Get your CurseForge API key at console.curseforge.com
 settings-cf-placeholder-saved = •••••••••••• (saved — paste a new key to replace)
 settings-cf-placeholder = Paste your CurseForge API key
@@ -890,6 +892,7 @@ review-size = Size
 review-required-by = required by { $mods }
 review-already-installed = already installed
 review-selection = your selection
+review-advisory = Skipped: { $note }
 review-empty = The queue is empty.
 review-downloading =
     Downloading { $count } { $count ->
@@ -1209,6 +1212,17 @@ about-host = Host { $os } / { $arch }
 about-updates-title = Updates
 about-updates-desc = Updates are always your choice: TwilightMC never polls a server in the background or installs anything without your click.
 about-updates-deferred = A manual, channel-aware "Check for Updates" button is on the pre-Beta roadmap. Until then, use the releases page to review tags and checksums.
+about-update-channel = Update channel
+about-update-check = Check for Updates
+about-update-checking = Checking GitHub Releases…
+about-update-current = Current version: { $version }
+about-update-latest = Latest on { $channel }: { $tag }
+about-update-newer = A newer release is available.
+about-update-current-ok = You are up to date on this channel.
+about-update-open = Open Release Page
+about-update-notes = Release notes
+about-update-error = Update check failed: { $error }
+about-update-checksums = Verify checksums.sha256 before running any downloaded build.
 about-channels-title = Channel overview
 about-channel-stable = Stable
 about-channel-stable-desc = Fully supported releases; bug fixes land only on the latest Stable minor.
@@ -1230,3 +1244,35 @@ about-security-desc = Binaries are unsigned. Verify downloads against checksums.
 about-license-desc = Multi-tier licensing: utility crates (including twilight-cas) are Apache-2.0; the launcher and app crates are AGPL-3.0-or-later.
 about-credits-desc = Credits: Prism Launcher, FreesmLauncher, Modrinth, Horizon, Catppuccin and Twitter Twemoji (CC-BY 4.0); thanks to cheryy_on_top and mimoji for the Blind/Deaf accessibility inspiration.
 about-credits-discord = Sabatank Discord
+
+## Java auto-download (Adoptium)
+
+settings-java-autodownload-title = Auto-Download Java (Adoptium)
+settings-java-autodownload-desc = Install a Temurin JRE (JDK fallback) from Adoptium into the configured Java Runtimes folder. The published SHA-256 checksum is verified before the archive is unpacked.
+java-download-major = Java major
+java-download-action = Download & Install
+java-download-working = Downloading Java { $major }…
+java-download-done = Installed Java { $major }: { $path }
+java-download-error = Download failed: { $error }
+
+## Crash report (opt-in, anonymized)
+
+settings-crash-title = Anonymized crash reports
+settings-crash-desc = Off by default. Nothing is ever collected or sent in the background: a crash opens a preview of the scrubbed report and you decide whether to copy it, open an issue or send it.
+settings-crash-enabled = Enable sending (still requires an explicit click)
+settings-crash-prompt = Show the crash preview after a game crash
+settings-crash-endpoint = Custom crash-report endpoint (optional)
+settings-crash-endpoint-hint = Leave blank for copy-only: the launcher never makes a network request on its own.
+settings-crash-saved = Crash report settings saved.
+crash-title = Crash report (anonymized)
+crash-warning = Review every line below. Nothing is sent unless you click Send.
+crash-no-endpoint = No endpoint configured — copy the report and open a GitHub issue instead.
+crash-disable = Do not ask again
+crash-copy = Copy Anonymized Report
+crash-copied = Copied to clipboard.
+crash-issues = Open GitHub Issues
+crash-send = Send Anonymized Report
+crash-sending = Sending…
+crash-sent = Report sent.
+crash-error = Could not send report: { $error }
+crash-close = Close
