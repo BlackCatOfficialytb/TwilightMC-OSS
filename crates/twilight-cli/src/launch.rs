@@ -151,6 +151,16 @@ async fn resolve_java(
     })
 }
 
+/// Maps a resolved Java selection to the GC resolver's major argument. `0` is
+/// the explicit "unknown" sentinel (the probe failed), never a fake version.
+fn java_major_for_gc(java: &JavaSelection) -> i32 {
+    java.version
+        .as_ref()
+        .map(|version| version.major)
+        .filter(|major| *major > 0)
+        .unwrap_or(0)
+}
+
 /// Validates the `--loader` token case-insensitively (`None` = vanilla only).
 fn parse_loader_token(loader: Option<&str>) -> Result<Option<ModLoader>, CliError> {
     let Some(token) = loader else {
@@ -727,6 +737,23 @@ pub async fn run_launch_with(
         .to_vec();
     let java = resolve_java(cfg.java.clone(), &required_majors).await?;
 
+    // GC flags must be chosen for the Java that will actually spawn, not for a
+    // settings-only override that may be unset. `0` is the unknown sentinel.
+    let java_major = java_major_for_gc(&java);
+    let (gc_flags, gc_notice) = twilight_launch::resolve_gc_flags(
+        cfg.gc.preset,
+        java_major,
+        cfg.gc.max_memory_mib,
+        &cfg.gc.custom_flags,
+        &cfg.gc.extra_args,
+    );
+    if let Some(notice) = gc_notice {
+        println!("{notice}");
+        if let Some(sink) = &sink {
+            let _ = sink.send(LaunchEvent::Stdout(notice)).await;
+        }
+    }
+
     // ---- authlib-injector: Ely.by (first-class) and custom Yggdrasil
     //      accounts launch through the agent jar, auto-fetched + SHA-256
     //      verified into <shared>/libraries; Ely.by always targets its
@@ -786,6 +813,7 @@ pub async fn run_launch_with(
         )?;
         let mut plan = plan;
         plan.jvm_args.extend(cfg.jvm_args.clone());
+        plan.jvm_args.extend(gc_flags);
         inject_authlib(&mut plan, &authlib_jar);
         let diag = build_diagnostics(
             &account,
@@ -992,6 +1020,7 @@ pub async fn run_launch_with(
     )?;
     let mut plan = plan;
     plan.jvm_args.extend(cfg.jvm_args);
+    plan.jvm_args.extend(gc_flags);
     inject_authlib(&mut plan, &authlib_jar);
     if let Some(sink) = &sink {
         let _ = sink
@@ -1120,6 +1149,7 @@ mod tests {
             horizon: None,
             horizon_session: None,
             jvm_args: Vec::new(),
+            gc: twilight_launch::GcSettings::default(),
             account: None,
             server: None,
             world: None,
@@ -1820,5 +1850,46 @@ mod tests {
             paths.work_dir,
             PathBuf::from("I").join("my-world").join("minecraft")
         );
+    }
+
+    fn selection(major: Option<i32>) -> JavaSelection {
+        JavaSelection {
+            executable: PathBuf::from("/jvm/bin/java"),
+            version: major.map(|major| JavaVersion {
+                major,
+                full: format!("{major}.0.0"),
+            }),
+        }
+    }
+
+    #[test]
+    fn resolved_java_majors_are_forwarded_to_gc_resolution() {
+        for major in [8, 17, 21, 25] {
+            let java = selection(Some(major));
+            assert_eq!(java_major_for_gc(&java), major);
+            assert_ne!(
+                java_major_for_gc(&java),
+                0,
+                "valid Java {major} must never reach the GC resolver as unknown"
+            );
+        }
+    }
+
+    #[test]
+    fn failed_java_probe_uses_the_safe_unknown_fallback() {
+        let java = selection(None);
+        assert_eq!(java_major_for_gc(&java), 0);
+
+        let (flags, notice) = twilight_launch::resolve_gc_flags(
+            twilight_launch::GcPreset::GenerationalZgc,
+            java_major_for_gc(&java),
+            8192,
+            &[],
+            "",
+        );
+        assert!(flags.iter().any(|flag| flag == "-XX:+UseG1GC"));
+        let notice = notice.expect("unknown Java must explain the fallback");
+        assert!(!notice.contains("Java 0"), "{notice}");
+        assert!(notice.to_ascii_lowercase().contains("unknown"), "{notice}");
     }
 }

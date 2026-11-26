@@ -21,6 +21,16 @@ pub enum GcPreset {
     Custom,
 }
 
+/// GC knobs forwarded from the desktop UI into the launch pipeline. Resolved
+/// only after the pipeline knows which Java executable it will actually spawn.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct GcSettings {
+    pub preset: GcPreset,
+    pub max_memory_mib: u32,
+    pub custom_flags: Vec<String>,
+    pub extra_args: String,
+}
+
 impl GcPreset {
     pub fn from_str_loose(value: &str) -> Self {
         match value.trim().to_ascii_lowercase().as_str() {
@@ -85,6 +95,14 @@ pub fn resolve_gc_flags(
     match preset {
         GcPreset::Default => (Vec::new(), None),
         GcPreset::Auto => {
+            // `0` means the probe never resolved a major. Guessing a modern
+            // JVM here would risk emitting flags the real runtime rejects.
+            if java_major <= 0 {
+                return (
+                    aikar_g1_flags(),
+                    Some("Java version is unknown; using Aikar G1GC.".to_owned()),
+                );
+            }
             let chosen = if java_major < 17 {
                 GcPreset::AikarG1
             } else if max_mem_mib < 4096 {
@@ -101,6 +119,14 @@ pub fn resolve_gc_flags(
             (flags, notice)
         }
         GcPreset::GenerationalZgc => {
+            if java_major <= 0 {
+                let notice = Some(
+                    "Java version is unknown; Generational ZGC cannot be selected. \
+                     Fell back to Aikar G1GC."
+                        .to_owned(),
+                );
+                return (aikar_g1_flags(), notice);
+            }
             if java_major < 15 {
                 let notice = Some(format!(
                     "Generational ZGC is unavailable on Java {java_major}; fell back to Aikar G1GC."
@@ -117,6 +143,14 @@ pub fn resolve_gc_flags(
             (flags, None)
         }
         GcPreset::Shenandoah => {
+            if java_major <= 0 {
+                let notice = Some(
+                    "Java version is unknown; Shenandoah GC cannot be selected. \
+                     Fell back to Aikar G1GC."
+                        .to_owned(),
+                );
+                return (aikar_g1_flags(), notice);
+            }
             if java_major < 15 {
                 let notice = Some(format!(
                     "Shenandoah GC is unavailable on Java {java_major}; fell back to Aikar G1GC."
@@ -244,5 +278,48 @@ mod tests {
     fn fallback_notice_reported() {
         let (_, notice) = resolve_gc_flags(GcPreset::GenerationalZgc, 8, 8192, &[], "");
         assert!(notice.is_some());
+    }
+
+    #[test]
+    fn unknown_major_falls_back_without_reporting_java_zero() {
+        for preset in [
+            GcPreset::GenerationalZgc,
+            GcPreset::Shenandoah,
+            GcPreset::Auto,
+        ] {
+            let (flags, notice) = resolve_gc_flags(preset, 0, 8192, &[], "");
+            assert!(
+                flags.iter().any(|f| f == "-XX:+UseG1GC"),
+                "unknown major must fall back to G1GC for {preset:?}"
+            );
+            let notice = notice.expect("unknown major must explain the fallback");
+            assert!(
+                !notice.contains("Java 0"),
+                "unknown major leaked a fake Java 0 notice: {notice}"
+            );
+            assert!(
+                notice.to_ascii_lowercase().contains("unknown"),
+                "notice should say the version is unknown: {notice}"
+            );
+        }
+    }
+
+    #[test]
+    fn valid_majors_never_use_the_unknown_notice() {
+        for major in [8, 17, 21, 25] {
+            for preset in [
+                GcPreset::GenerationalZgc,
+                GcPreset::Shenandoah,
+                GcPreset::Auto,
+            ] {
+                let (_, notice) = resolve_gc_flags(preset, major, 8192, &[], "");
+                if let Some(notice) = notice {
+                    assert!(
+                        !notice.to_ascii_lowercase().contains("unknown"),
+                        "Java {major} wrongly treated as unknown for {preset:?}: {notice}"
+                    );
+                }
+            }
+        }
     }
 }

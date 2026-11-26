@@ -358,6 +358,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn version_sources_match_the_crate_version() {
+        let version = env!("CARGO_PKG_VERSION");
+        // The header badge, About page and console identity line all read this
+        // command; keep every packaged manifest on the same milestone.
+        assert_eq!(get_version(), version);
+
+        let tauri: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
+        assert_eq!(tauri["version"], version);
+
+        let package: serde_json::Value =
+            serde_json::from_str(include_str!("../ui/package.json")).expect("ui/package.json");
+        assert_eq!(package["version"], version);
+    }
+
+    #[test]
     fn http_urls_validate_and_foreign_schemes_reject() {
         assert!(validate_http_url("https://account.ely.by/oauth2/v1?x=1&y=2").is_ok());
         assert!(validate_http_url("http://localhost:1234/?code=abc").is_ok());

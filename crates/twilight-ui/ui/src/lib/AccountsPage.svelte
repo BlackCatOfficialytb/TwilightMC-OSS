@@ -46,10 +46,10 @@
   }
 </script>
 
-<div class="flex h-full min-h-0 flex-col overflow-hidden">
+<div class="flex h-full min-h-0 overflow-hidden">
   <!-- left navigation rail -->
   <nav
-    class="flex min-h-0 w-56 shrink-0 flex-col overflow-y-auto border-r border-(--border) bg-(--bg-subtle) p-3"
+    class="flex h-full min-h-0 w-56 shrink-0 flex-col overflow-y-auto border-r border-(--border) bg-(--bg-subtle) p-3"
     aria-label={t('accounts-sections-aria')}
   >
     <button

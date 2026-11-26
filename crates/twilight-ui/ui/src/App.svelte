@@ -1013,7 +1013,16 @@
       </div>
     {/if}
 
-    <main class="min-h-0 min-w-0 flex-1 overflow-y-auto p-6">
+    <!-- full-page views own their scroll containers: an outer scroller here
+         would add a second scrollbar (and detach the rail from the top) -->
+    <main
+      class="min-h-0 min-w-0 flex-1 p-6 {currentView === 'accounts' ||
+      currentView === 'edit' ||
+      active === 'settings' ||
+      active === 'worlds'
+        ? 'overflow-hidden'
+        : 'overflow-y-auto'}"
+    >
       {#if currentView === 'accounts'}
         <!-- dedicated accounts page: shows in both launcher and client modes -->
         <AccountsPage onback={() => (active = 'instances')} onrefresh={refreshAccounts} />

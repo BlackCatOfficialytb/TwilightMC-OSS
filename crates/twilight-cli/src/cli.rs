@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 use twilight_auth::Account;
+use twilight_launch::GcSettings;
 
 use crate::error::CliError;
 
@@ -122,6 +123,9 @@ pub struct LaunchConfig {
     pub horizon_session: Option<PathBuf>,
     /// Extra JVM arguments appended after the manifest's own (`-Xms`/`-Xmx`).
     pub jvm_args: Vec<String>,
+    /// GC preset/custom flags. Resolved by the pipeline once the actual Java
+    /// executable is selected, so the major is never guessed as `0`.
+    pub gc: GcSettings,
     /// Quick-play: join this server address right after the game starts.
     pub server: Option<String>,
     /// Quick-play: launch straight into this singleplayer world folder
@@ -158,6 +162,7 @@ impl LaunchArgs {
             horizon: self.horizon.clone(),
             horizon_session: self.horizon_session.clone(),
             jvm_args: Vec::new(),
+            gc: GcSettings::default(),
             account: None,
             server: self.server.clone(),
             world: None,
