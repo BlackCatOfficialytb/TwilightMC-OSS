@@ -17,6 +17,8 @@
   import Twemoji from './lib/Twemoji.svelte';
   import AlertDialog from './lib/AlertDialog.svelte';
   import BareBonesGateModal from './lib/BareBonesGateModal.svelte';
+  import CrashReportModal from './lib/CrashReportModal.svelte';
+  import JavaDownloadModal from './lib/JavaDownloadModal.svelte';
   import ToastContainer from './lib/ToastContainer.svelte';
   import { toast, promptAlert } from './lib/alerts.svelte.js';
   import { topOverlay } from './lib/overlays.js';
@@ -169,6 +171,47 @@
 
   // ---- BareBones gate (Cleanroom launches blocked by the pre-flight check) ----
   let barebonesFor = $state(null);
+
+  // ---- Java recovery: missing compatible major -> Adoptium one-click install ----
+  let javaRecovery = $state(null); // { instanceId, majors }
+
+  // ---- Crash review: non-zero exit; sending only on an explicit click ----
+  let crashReport = $state(null); // { report, canSend, config }
+  let crashPromptDisabled = $state(false);
+
+  async function offerCrashReport(instanceId, exitCode) {
+    if (crashPromptDisabled || exitCode === 0 || !Number.isFinite(exitCode)) return;
+    try {
+      const config = await api('get_crash_report_config');
+      if (!config.promptEnabled) return;
+      const prepared = await api('prepare_crash_report', {
+        instanceId,
+        exitCode,
+      });
+      crashReport = {
+        report: prepared.report,
+        canSend: Boolean(config.enabled && config.endpoint),
+        config,
+      };
+    } catch (e) {
+      // A preview failure must never crash the launcher shell.
+      console.warn('[crash] preview unavailable:', e);
+    }
+  }
+
+  async function offerJavaDownload(errorText, instanceId) {
+    const text = String(errorText);
+    if (!text.includes('no compatible Java runtime found')) return false;
+    const match = text.match(/\[([0-9,\s]+)\]/);
+    const majors = match
+      ? match[1]
+          .split(',')
+          .map((part) => Number(part.trim()))
+          .filter((major) => [8, 17, 21, 25].includes(major))
+      : [];
+    javaRecovery = { instanceId, majors: majors.length ? majors : [21] };
+    return true;
+  }
 
   // ---- settings page state (full-page view on the `settings` nav route) ----
   let storage = $state(null);
@@ -344,6 +387,7 @@
       logLine({ stream: 'stdout', line: t('console-exit-code', { code }) });
       await loadInstances();
       setStatus('status-ready');
+      await offerCrashReport(id, Number(code));
     } catch (e) {
       // every backend failure surfaces here: bright red in the auto-opened
       // drawer, never a silent no-op
@@ -353,7 +397,7 @@
         // the mandatory Cleanroom gate: offer the install flows in a dialog
         // instead of a bare toast
         barebonesFor = id;
-      } else {
+      } else if (!(await offerJavaDownload(e, id))) {
         toast(t('toast-launch-failed', { error: String(e) }), 'error');
       }
       setStatus('status-launch-failed');
@@ -1026,6 +1070,7 @@
           {gameRunning}
           onback={() => (active = 'instances')}
           onscanjava={scanJava}
+          ondownloadjava={(major) => (javaRecovery = { instanceId: null, majors: [major] })}
           onsaveprefs={savePrefs}
           onaddjava={addCustomJava}
           onapplyjava={applyJavaRuntime}
@@ -1379,6 +1424,46 @@
       onlaunch={(iid) => {
         barebonesFor = null;
         launchInstance(iid);
+      }}
+    />
+  {/if}
+  {#if javaRecovery}
+    <JavaDownloadModal
+      majors={javaRecovery.majors}
+      onclose={() => (javaRecovery = null)}
+      oninstalled={async () => {
+        const instanceId = javaRecovery?.instanceId ?? null;
+        await scanJava();
+        await loadPrefs();
+        if (instanceId) {
+          // Recovery flow: close the dialog and relaunch the instance.
+          javaRecovery = null;
+          launchInstance(instanceId);
+        } else {
+          // Settings flow: keep the dialog open so the install path stays
+          // visible; the user closes it explicitly.
+          setStatus('status-ready');
+        }
+      }}
+    />
+  {/if}
+  {#if crashReport}
+    <CrashReportModal
+      report={crashReport.report}
+      canSend={crashReport.canSend}
+      onclose={() => (crashReport = null)}
+      ondisable={async () => {
+        crashPromptDisabled = true;
+        const config = crashReport.config;
+        try {
+          await api('set_crash_report_config', {
+            enabled: config.enabled,
+            endpoint: config.endpoint,
+            promptEnabled: false,
+          });
+        } catch (e) {
+          console.warn('[crash] could not persist dialog preference:', e);
+        }
       }}
     />
   {/if}

@@ -1,12 +1,19 @@
 //! System Java runtime management: JVM discovery across PATH/env/OS roots,
 //! fast version detection and manifest compatibility matching.
 
+mod adoptium;
 mod discovery;
 mod error;
 mod gc;
 mod matcher;
+#[cfg(test)]
+mod test_server;
 mod version;
 
+pub use adoptium::{
+    ADOPTIUM_API_BASE, AdoptiumAsset, adoptium_asset_url, fetch_adoptium_asset,
+    install_adoptium_java, map_os_arch, parse_assets,
+};
 pub use discovery::{
     candidate_jvm_roots, discover_java, jvm_home_from_executable, parse_reg_java_home_output,
     scan_roots,

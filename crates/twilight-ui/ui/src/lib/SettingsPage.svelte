@@ -53,6 +53,7 @@
     gameRunning = false,
     onback,
     onscanjava,
+    ondownloadjava,
     onsaveprefs,
     onaddjava,
     onapplyjava,
@@ -65,6 +66,7 @@
 
   // ---- custom java picker ----
   let addedJava = $state([]);
+  let adoptiumMajor = $state(21);
   let javaPickMsg = $state('');
   let javaPickError = $state('');
   let javaBusy = $state(false);
@@ -286,6 +288,37 @@
       updateError = String(e);
     } finally {
       updateBusy = false;
+    }
+  }
+
+  // ---- Opt-in anonymized crash reports (ask-only, no background telemetry) ----
+  let crashConfig = $state({ enabled: false, endpoint: '', promptEnabled: true });
+  let crashConfigLoaded = $state(false);
+  let crashConfigMsg = $state('');
+  let crashConfigError = $state('');
+
+  async function refreshCrashConfig() {
+    try {
+      crashConfig = await tauriInvoke('get_crash_report_config');
+      crashConfigLoaded = true;
+    } catch (e) {
+      crashConfigError = String(e);
+    }
+  }
+  refreshCrashConfig();
+
+  async function saveCrashConfig() {
+    crashConfigMsg = '';
+    crashConfigError = '';
+    try {
+      await tauriInvoke('set_crash_report_config', {
+        enabled: crashConfig.enabled,
+        endpoint: crashConfig.endpoint,
+        promptEnabled: crashConfig.promptEnabled,
+      });
+      crashConfigMsg = t('settings-crash-saved');
+    } catch (e) {
+      crashConfigError = String(e);
     }
   }
 
@@ -1032,6 +1065,32 @@
           </ul>
         {/if}
 
+        <!-- Auto-download: Temurin JRE/JDK from Adoptium into the Java folder -->
+        <div class="mt-6 rounded border border-(--border) bg-(--bg-subtle) p-4">
+          <div class="text-[12px] font-medium">{t('settings-java-autodownload-title')}</div>
+          <p class="mt-0.5 text-[11px] text-(--text-muted)">
+            {t('settings-java-autodownload-desc')}
+          </p>
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <select
+              id="adoptium-major-select"
+              class="h-8 rounded border border-(--border) bg-(--bg-canvas) px-2 text-[12px] outline-none focus:border-(--accent)"
+              bind:value={adoptiumMajor}
+              aria-label={t('java-download-major')}
+            >
+              {#each [8, 17, 21, 25] as major}
+                <option value={major}>Java {major}</option>
+              {/each}
+            </select>
+            <button
+              class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
+              onclick={() => ondownloadjava?.(adoptiumMajor)}
+            >
+              {t('java-download-action')}
+            </button>
+          </div>
+        </div>
+
         <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('settings-memory-title')}</h3>
         <div class="mt-3 flex items-center gap-3">
           <span class="w-12 font-mono text-[12px] text-(--text-muted)">-Xms</span>
@@ -1615,6 +1674,58 @@
             ↗ {t('settings-releases')}
           </button>
         </div>
+
+        <!-- Crash reporting: strictly opt-in, preview shown before any send -->
+        <h3 class="mt-6 text-[12px] font-semibold uppercase tracking-wide text-(--text-muted)">
+          {t('settings-crash-title')}
+        </h3>
+        {#if crashConfigLoaded}
+          <div class="mt-2 rounded border border-(--border) bg-(--bg-subtle) p-4 text-[12px] leading-relaxed">
+            <p class="text-(--text-muted)">{t('settings-crash-desc')}</p>
+            <label class="mt-3 flex items-center gap-2" for="crash-enabled-toggle">
+              <input
+                id="crash-enabled-toggle"
+                type="checkbox"
+                class="h-4 w-4 accent-(--accent)"
+                bind:checked={crashConfig.enabled}
+              />
+              <span>{t('settings-crash-enabled')}</span>
+            </label>
+            <label class="mt-3 flex items-center gap-2" for="crash-prompt-toggle">
+              <input
+                id="crash-prompt-toggle"
+                type="checkbox"
+                class="h-4 w-4 accent-(--accent)"
+                bind:checked={crashConfig.promptEnabled}
+              />
+              <span>{t('settings-crash-prompt')}</span>
+            </label>
+            <label class="mt-3 block" for="crash-endpoint-input">
+              <span class="text-[11px] text-(--text-muted)">{t('settings-crash-endpoint')}</span>
+              <input
+                id="crash-endpoint-input"
+                type="url"
+                class="mt-1 h-9 w-full rounded border border-(--border) bg-(--bg-canvas) px-2 font-mono text-[11px] outline-none placeholder:text-(--text-muted) focus:border-(--accent)"
+                placeholder="https://…"
+                bind:value={crashConfig.endpoint}
+                spellcheck="false"
+              />
+            </label>
+            <p class="mt-1 text-[11px] text-(--text-muted)">{t('settings-crash-endpoint-hint')}</p>
+            <button
+              class="mt-3 rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
+              onclick={saveCrashConfig}
+            >
+              {t('common-save')}
+            </button>
+            {#if crashConfigMsg}
+              <p class="mt-2 text-[11px] text-green-500">{crashConfigMsg}</p>
+            {/if}
+            {#if crashConfigError}
+              <p role="alert" class="mt-2 text-[11px] text-rose-400">{crashConfigError}</p>
+            {/if}
+          </div>
+        {/if}
 
         <!-- Channel taxonomy -->
         <h3 class="mt-6 text-[12px] font-semibold uppercase tracking-wide text-(--text-muted)">

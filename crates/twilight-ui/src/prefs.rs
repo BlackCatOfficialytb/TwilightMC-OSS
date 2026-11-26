@@ -195,6 +195,53 @@ pub async fn set_update_channel(app: AppHandle, channel: String) -> Result<(), S
     save_settings(&settings_path(&app).await?, &settings).await
 }
 
+/// Crash-report preferences exposed to Settings. The endpoint is not secret
+/// (it is configured by the user), but no request is ever made from this
+/// module: sending only happens on an explicit click in the preview dialog.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CrashReportConfig {
+    pub enabled: bool,
+    pub endpoint: String,
+    pub prompt_enabled: bool,
+}
+
+#[tauri::command]
+pub async fn get_crash_report_config(app: AppHandle) -> Result<CrashReportConfig, String> {
+    let settings = load_settings(&settings_path(&app).await?).await;
+    Ok(CrashReportConfig {
+        enabled: settings.crash_reporter_enabled,
+        endpoint: settings.crash_endpoint.unwrap_or_default(),
+        prompt_enabled: settings.crash_prompt_enabled,
+    })
+}
+
+#[tauri::command]
+pub async fn set_crash_report_config(
+    app: AppHandle,
+    enabled: bool,
+    endpoint: String,
+    prompt_enabled: bool,
+) -> Result<(), String> {
+    let endpoint = endpoint.trim().to_owned();
+    if !endpoint.is_empty() {
+        let url =
+            reqwest::Url::parse(&endpoint).map_err(|e| format!("invalid endpoint URL: {e}"))?;
+        if !matches!(url.scheme(), "http" | "https") {
+            return Err("crash endpoint must use http:// or https://".into());
+        }
+    }
+    let mut settings = load_settings(&settings_path(&app).await?).await;
+    settings.crash_reporter_enabled = enabled;
+    settings.crash_endpoint = if endpoint.is_empty() {
+        None
+    } else {
+        Some(endpoint)
+    };
+    settings.crash_prompt_enabled = prompt_enabled;
+    save_settings(&settings_path(&app).await?, &settings).await
+}
+
 #[tauri::command]
 pub async fn get_mode_config(app: AppHandle) -> Result<String, String> {
     let settings = load_settings(&settings_path(&app).await?).await;

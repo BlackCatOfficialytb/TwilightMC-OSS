@@ -224,6 +224,32 @@ pub(crate) async fn install_pack(
         .await
         .map_err(|e| e.to_string())?;
 
+    // Provenance: only jars the pack manifest points at the Modrinth CDN are
+    // verified public artifacts; anything else stays an unnamed local mod.
+    for file in &index.files {
+        let Some(name) = file.path.strip_prefix("mods/") else {
+            continue;
+        };
+        if name.is_empty() || name.contains('/') || !name.to_ascii_lowercase().ends_with(".jar") {
+            continue;
+        }
+        let Some((project_id, version)) = file
+            .downloads
+            .first()
+            .and_then(|url| crate::provenance::modrinth_ids_from_url(url))
+        else {
+            continue;
+        };
+        let _ = crate::provenance::record_public_mod(
+            &instance_dir,
+            name,
+            &project_id,
+            None,
+            version.as_deref(),
+            "modrinth",
+        );
+    }
+
     // grid metadata: without it the scan skips the directory entirely
     let meta = meta_from_index(&index, &chosen, &loader, &loader_version);
     write_meta(&instance_dir, &meta).await?;
@@ -581,7 +607,19 @@ pub(crate) async fn import_curseforge_pack_core(
             )
             .await
             {
-                Ok(Some(name)) => downloaded.push(name),
+                Ok(Some(name)) => {
+                    // The API resolved this file on the public CDN: record its
+                    // public identity so the crash scrubber may name it.
+                    let _ = crate::provenance::record_public_mod(
+                        game_dir.parent().unwrap_or(game_dir),
+                        &name,
+                        &file.project_id.to_string(),
+                        None,
+                        Some(&file.file_id.to_string()),
+                        "curseforge",
+                    );
+                    downloaded.push(name);
+                }
                 Ok(None) | Err(_) => {
                     skipped += 1;
                     missing_mods.push(skipped_entry(file));

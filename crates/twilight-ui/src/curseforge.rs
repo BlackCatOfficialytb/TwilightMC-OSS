@@ -317,6 +317,15 @@ pub async fn install_curseforge_mod(
     if let Some(cas_root) = crate::mods::cas_root_if_enabled(&app).await? {
         crate::mods::cas_dedupe_dest(&cas_root, &dest).await?;
     }
+    // CDN host was pinned above: this jar is a public CurseForge artifact.
+    let _ = crate::provenance::record_public_mod(
+        &root.join(&instance_id),
+        &name,
+        &name,
+        None,
+        None,
+        "curseforge",
+    );
     Ok(name)
 }
 

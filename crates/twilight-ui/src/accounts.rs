@@ -93,6 +93,16 @@ pub(crate) struct Settings {
     /// existing settings files keep the previous behavior.
     #[serde(default = "default_true")]
     pub(crate) curseforge_enabled: bool,
+    /// Opt-in anonymized crash reporter. Strictly off: nothing is ever sent
+    /// silently, the user must review and click Send in the preview dialog.
+    #[serde(default)]
+    pub(crate) crash_reporter_enabled: bool,
+    /// Optional endpoint for anonymized reports; blank = copy/GitHub only.
+    #[serde(default)]
+    pub(crate) crash_endpoint: Option<String>,
+    /// Whether a non-zero game exit opens the review dialog.
+    #[serde(default = "default_true")]
+    pub(crate) crash_prompt_enabled: bool,
     /// Horizon (native Rust engine) binary; empty = Horizon instances refuse
     /// to launch with a "set it in Settings" message. Never bundled.
     #[serde(default)]
@@ -179,6 +189,9 @@ impl Default for Settings {
             servers_dir: None,
             curseforge_api_key: None,
             curseforge_enabled: true,
+            crash_reporter_enabled: false,
+            crash_endpoint: None,
+            crash_prompt_enabled: true,
             horizon_path: None,
             gc_preset: None,
             custom_gc_flags: Vec::new(),

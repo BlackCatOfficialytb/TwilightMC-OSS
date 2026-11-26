@@ -3,6 +3,7 @@
 
 mod accounts;
 mod cas;
+mod crash_report;
 mod curseforge;
 mod devmode;
 mod export;
@@ -17,6 +18,8 @@ mod modrinth;
 mod mods;
 mod net;
 mod prefs;
+mod provenance;
+mod scrubber;
 mod servers;
 mod shortcut;
 mod storage;
@@ -208,6 +211,7 @@ fn main() {
             accounts::set_account_textures,
             java::discover_java_installations,
             java::probe_java_path,
+            java::download_adoptium_java,
             versions::fetch_vanilla_versions,
             versions::fetch_loader_versions,
             servers::list_servers,
@@ -324,6 +328,10 @@ fn main() {
             prefs::set_curseforge_enabled,
             prefs::get_update_channel,
             prefs::set_update_channel,
+            prefs::get_crash_report_config,
+            prefs::set_crash_report_config,
+            crash_report::prepare_crash_report,
+            crash_report::send_crash_report,
             update::check_for_updates,
             prefs::get_horizon_prefs,
             prefs::set_horizon_prefs,

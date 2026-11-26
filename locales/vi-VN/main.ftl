@@ -1205,3 +1205,35 @@ about-security-desc = Tệp thực thi chưa được ký. Hãy đối chiếu t
 about-license-desc = Giấy phép đa tầng: các crate tiện ích (gồm twilight-cas) dùng Apache-2.0; các crate launcher và ứng dụng dùng AGPL-3.0-or-later.
 about-credits-desc = Ghi công: Prism Launcher, FreesmLauncher, Modrinth, Horizon, Catppuccin và Twitter Twemoji (CC-BY 4.0); cảm ơn cheryy_on_top và mimoji vì cảm hứng hỗ trợ tiếp cận Blind/Deaf.
 about-credits-discord = Discord Sabatank
+
+## Java auto-download (Adoptium)
+
+settings-java-autodownload-title = Tự tải Java (Adoptium)
+settings-java-autodownload-desc = Cài đặt JRE Temurin (dự phòng JDK) từ Adoptium vào thư mục Java Runtimes đã cấu hình. Mã SHA-256 công bố được xác minh trước khi giải nén.
+java-download-major = Phiên bản Java chính
+java-download-action = Tải và cài đặt
+java-download-working = Đang tải Java { $major }…
+java-download-done = Đã cài Java { $major }: { $path }
+java-download-error = Tải thất bại: { $error }
+
+## Crash report (opt-in, anonymized)
+
+settings-crash-title = Báo cáo lỗi ẩn danh
+settings-crash-desc = Mặc định tắt. Không bao giờ thu thập hay gửi dữ liệu ngầm: khi game lỗi, một bản xem trước đã được làm sạch sẽ hiện ra và bạn quyết định sao chép, mở issue hay gửi đi.
+settings-crash-enabled = Bật gửi (vẫn cần một lần nhấn xác nhận)
+settings-crash-prompt = Hiện bản xem trước khi game bị lỗi
+settings-crash-endpoint = Điểm nhận báo cáo tùy chỉnh (không bắt buộc)
+settings-crash-endpoint-hint = Để trống để chỉ sao chép: trình khởi chạy không tự gửi yêu cầu mạng nào.
+settings-crash-saved = Đã lưu cài đặt báo cáo lỗi.
+crash-title = Báo cáo lỗi (đã ẩn danh)
+crash-warning = Hãy xem lại từng dòng bên dưới. Không có gì được gửi đi trừ khi bạn nhấn Gửi.
+crash-no-endpoint = Chưa cấu hình điểm nhận — hãy sao chép báo cáo và mở issue GitHub.
+crash-disable = Không hỏi lại
+crash-copy = Sao chép báo cáo ẩn danh
+crash-copied = Đã sao chép vào bảng nhớ tạm.
+crash-issues = Mở GitHub Issues
+crash-send = Gửi báo cáo ẩn danh
+crash-sending = Đang gửi…
+crash-sent = Đã gửi báo cáo.
+crash-error = Gửi báo cáo thất bại: { $error }
+crash-close = Đóng

@@ -622,7 +622,21 @@ async fn install_project_with_deps(
     if let Some(cas_root) = cas_root {
         crate::mods::cas_dedupe_dest(cas_root, &dest).await?;
     }
-    installed.push(filename);
+    installed.push(filename.clone());
+    // Provenance: only CDN-verified public artifacts get a record. The
+    // crash scrubber uses this file to decide which mod names may be shared.
+    // `mods_dir` is `<instance>/minecraft/mods`, so two levels up is the
+    // instance directory that holds provenance and launch metadata.
+    if let Some(instance_dir) = mods_dir.parent().and_then(Path::parent) {
+        let _ = crate::provenance::record_public_mod(
+            instance_dir,
+            &filename,
+            project_id,
+            None,
+            entry.get("version_number").and_then(|v| v.as_str()),
+            "modrinth",
+        );
+    }
     Ok(installed)
 }
 
@@ -1196,6 +1210,23 @@ pub async fn install_modrinth_batch(
         for file in &downloaded {
             crate::mods::cas_dedupe_dest(cas_root, &file.dest).await?;
         }
+    }
+    for req in &reqs {
+        let name = req
+            .dest
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        let (project_id, version) = crate::provenance::modrinth_ids_from_url(&req.url)
+            .unwrap_or_else(|| (name.to_owned(), None));
+        let _ = crate::provenance::record_public_mod(
+            &root.join(&instance_id),
+            name,
+            &project_id,
+            None,
+            version.as_deref(),
+            "modrinth",
+        );
     }
     Ok(downloaded
         .into_iter()
