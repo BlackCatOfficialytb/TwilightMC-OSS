@@ -1,0 +1,38 @@
+name: mirror-tangled
+
+on:
+  push:
+    branches: [main, beta, release]
+    tags: ['alpha-*', 'beta-*', 'v*', 'twilight-cas-*']
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-tangled
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mirror repository to Tangled
+        env:
+          TANGLED_SSH_KEY: ${{ secrets.TANGLED_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$TANGLED_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -t ed25519 tangled.org >> ~/.ssh/known_hosts 2>/dev/null
+
+          git clone --mirror "https://github.com/${{ github.repository }}.git" repo.git
+          cd repo.git
+          git remote add tangled "git@tangled.org:quanvm0501.tngl.sh/TwilightMC-OSS"
+          # Chỉ đẩy nhánh và tag thật (né refs/pull/* của GitHub và dùng --force để rolling tag snapshot không bị kẹt)
+          git push --force tangled "refs/heads/*:refs/heads/*"
+          git push --force tangled "refs/tags/*:refs/tags/*"
