@@ -565,14 +565,13 @@ async fn run(
 ) -> Result<i32, String> {
     // Prism/Freesm-style diagnostic header: the console drawer starts with the
     // launcher identity line, exactly like "Prism Launcher 8.0 (official)".
+    // This is the single authoritative emission; the pipeline's header never
+    // repeats it.
     let _ = app.emit(
         "launch-log",
         LaunchLine {
             stream: "stdout",
-            line: format!(
-                "TwilightMC Bolide version: alpha-v{} (official)",
-                env!("CARGO_PKG_VERSION")
-            ),
+            line: twilight_launch::VERSION_BANNER.to_owned(),
         },
     );
     // the grid scans the resolved root (instances_dir override -> Prism
@@ -601,6 +600,10 @@ async fn run(
     if settings.min_memory_mb > 0 {
         jvm_args.push(format!("-Xms{}M", settings.min_memory_mb));
     }
+    // Per-instance JVM arguments (instance.json `jvm_args` or Prism's
+    // instance.cfg `JvmArgs=`). Global extra args flow through GcSettings so
+    // they are applied after the selected Java is known.
+    jvm_args.extend(meta.jvm_args.iter().cloned());
 
     // Garbage collector flags are resolved by the launch pipeline once it has
     // selected the actual Java executable (the UI may not have an override).
@@ -613,37 +616,24 @@ async fn run(
 
     // App Developer Mode: debuggers never leak into a normal profile. The
     // settings are checked again here at launch time, not just in the UI.
+    // Advisories are forwarded to the pipeline and printed *after* the
+    // diagnostic header, so the console stays banner -> header -> notices.
     let dev_flags = java_dev_flags(&settings);
+    let mut advisories = Vec::new();
     if settings.dev_mode {
-        let _ = app.emit(
-            "launch-log",
-            LaunchLine {
-                stream: "stderr",
-                line: "[DEV] Unsupported / Developer Mode: debug flags are for development \
-                       only and may corrupt worlds or break saves."
-                    .to_owned(),
-            },
+        advisories.push(
+            "[DEV] Unsupported / Developer Mode: debug flags are for development \
+             only and may corrupt worlds or break saves."
+                .to_owned(),
         );
         if settings.jdwp_enabled {
-            let _ = app.emit(
-                "launch-log",
-                LaunchLine {
-                    stream: "stdout",
-                    line: format!(
-                        "[DEV] JDWP Debugger listening on port {}",
-                        settings.jdwp_port
-                    ),
-                },
-            );
+            advisories.push(format!(
+                "[DEV] JDWP Debugger listening on port {}",
+                settings.jdwp_port
+            ));
         }
         if settings.mixin_debug {
-            let _ = app.emit(
-                "launch-log",
-                LaunchLine {
-                    stream: "stdout",
-                    line: "[DEV] Mixin debug export and verbose logging enabled".to_owned(),
-                },
-            );
+            advisories.push("[DEV] Mixin debug export and verbose logging enabled".to_owned());
         }
         jvm_args.extend(dev_flags.iter().cloned());
     }
@@ -792,6 +782,7 @@ async fn run(
         horizon: None,
         horizon_session: None,
         jvm_args,
+        advisories,
         gc,
         account,
         server,

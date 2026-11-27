@@ -146,6 +146,7 @@ fn meta_from_index(
         last_played: 0,
         total_time_played: 0,
         icon_key: None,
+        jvm_args: Vec::new(),
     }
 }
 

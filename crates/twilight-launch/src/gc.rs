@@ -82,15 +82,11 @@ pub fn aikar_g1_flags() -> Vec<String> {
     .collect()
 }
 
-/// Resolve a preset into concrete JVM flags for the given Java major version and
-/// allocated max memory. Returns `(flags, fallback_notice)` where the notice is
-/// `Some` when the requested preset was unsupported and we substituted G1GC.
-pub fn resolve_gc_flags(
+fn resolve_preset_flags(
     preset: GcPreset,
     java_major: i32,
     max_mem_mib: u32,
     custom_flags: &[String],
-    extra_args: &str,
 ) -> (Vec<String>, Option<String>) {
     match preset {
         GcPreset::Default => (Vec::new(), None),
@@ -113,7 +109,7 @@ pub fn resolve_gc_flags(
                 GcPreset::Shenandoah
             };
             let (flags, notice) =
-                resolve_gc_flags(chosen, java_major, max_mem_mib, custom_flags, extra_args);
+                resolve_preset_flags(chosen, java_major, max_mem_mib, custom_flags);
             // Auto never reports a fallback notice of its own; the inner one
             // (if any) is still surfaced so users learn why G1GC was picked.
             (flags, notice)
@@ -164,14 +160,26 @@ pub fn resolve_gc_flags(
             (flags, None)
         }
         GcPreset::AikarG1 => (aikar_g1_flags(), None),
-        GcPreset::Custom => {
-            let mut flags: Vec<String> = custom_flags.to_vec();
-            for token in extra_args.split_whitespace() {
-                flags.push(token.to_string());
-            }
-            (flags, None)
-        }
+        GcPreset::Custom => (custom_flags.to_vec(), None),
     }
+}
+
+/// Resolve a preset into concrete JVM flags for the given Java major version and
+/// allocated max memory. `extra_args` is the user's free-form JVM argument
+/// string and is appended for **every** preset (not just `Custom`), so a
+/// setting like `-XX:+test` always reaches the spawned command line.
+/// Returns `(flags, fallback_notice)` where the notice is `Some` when the
+/// requested preset was unsupported and we substituted G1GC.
+pub fn resolve_gc_flags(
+    preset: GcPreset,
+    java_major: i32,
+    max_mem_mib: u32,
+    custom_flags: &[String],
+    extra_args: &str,
+) -> (Vec<String>, Option<String>) {
+    let (mut flags, notice) = resolve_preset_flags(preset, java_major, max_mem_mib, custom_flags);
+    flags.extend(crate::args::split_jvm_args(extra_args));
+    (flags, notice)
 }
 
 /// Convenience: assemble the full JVM arg list by appending resolved GC flags.
@@ -272,6 +280,36 @@ mod tests {
         let (flags, notice) = resolve_gc_flags(GcPreset::Default, 21, 8192, &[], "");
         assert!(flags.is_empty());
         assert!(notice.is_none());
+    }
+
+    #[test]
+    fn extra_jvm_args_apply_to_every_preset() {
+        for preset in [
+            GcPreset::Default,
+            GcPreset::Auto,
+            GcPreset::GenerationalZgc,
+            GcPreset::Shenandoah,
+            GcPreset::AikarG1,
+            GcPreset::Custom,
+        ] {
+            let (flags, _) = resolve_gc_flags(preset, 21, 8192, &[], "-XX:+test");
+            assert!(
+                flags.iter().any(|flag| flag == "-XX:+test"),
+                "extra JVM arg dropped for {preset:?}: {flags:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn extra_jvm_args_preserve_quoted_values() {
+        let (flags, _) = resolve_gc_flags(
+            GcPreset::Default,
+            21,
+            8192,
+            &[],
+            r#"-XX:+test "-Dfoo=bar baz""#,
+        );
+        assert_eq!(flags, vec!["-XX:+test", "-Dfoo=bar baz"]);
     }
 
     #[test]

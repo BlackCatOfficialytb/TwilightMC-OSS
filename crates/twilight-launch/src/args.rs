@@ -166,6 +166,50 @@ pub fn game_arguments(
         .collect()
 }
 
+/// Splits a user-supplied JVM argument string on whitespace while preserving
+/// quoted values (`"-Dfoo=bar baz" -XX:+UseG1GC` -> two args).
+pub fn split_jvm_args(raw: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for ch in raw.chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && quote != Some('\'') {
+            escaped = true;
+            continue;
+        }
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            } else {
+                current.push(ch);
+            }
+            continue;
+        }
+        match ch {
+            '"' | '\'' => quote = Some(ch),
+            c if c.is_whitespace() => {
+                if !current.is_empty() {
+                    out.push(std::mem::take(&mut current));
+                }
+            }
+            c => current.push(c),
+        }
+    }
+    if escaped {
+        current.push('\\');
+    }
+    if !current.is_empty() {
+        out.push(current);
+    }
+    out
+}
+
 /// Builds the JVM-side argument vector; injects the authlib-injector agent
 /// when a custom Yggdrasil server is configured (`twilight_auth`).
 pub fn jvm_arguments(
@@ -221,6 +265,19 @@ mod tests {
             replace_tokens_in("no tokens at all", &v),
             "no tokens at all"
         );
+    }
+
+    #[test]
+    fn split_jvm_args_keeps_quoted_values_together() {
+        assert_eq!(
+            split_jvm_args(r#"-XX:+test "-Dfoo=bar baz" -Xmx2G"#),
+            vec!["-XX:+test", "-Dfoo=bar baz", "-Xmx2G"]
+        );
+        assert_eq!(
+            split_jvm_args("  -XX:+UseG1GC\t-Dname='two words'  "),
+            vec!["-XX:+UseG1GC", "-Dname=two words"]
+        );
+        assert!(split_jvm_args("   ").is_empty());
     }
 
     #[test]

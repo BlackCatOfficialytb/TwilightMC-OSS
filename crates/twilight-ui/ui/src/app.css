@@ -32,6 +32,7 @@
 /* ---- theme grounds (canvas < surface < subtle: elevation by value) ---- */
 .dark,
 :root {
+  color-scheme: dark;
   --bg-1: #0b0f19;
   --bg-2: #111827;
   --bg-3: #182234;
@@ -44,6 +45,7 @@
 }
 
 .light {
+  color-scheme: light;
   --bg-1: #f1f5f9;
   --bg-2: #ffffff;
   --bg-3: #f8fafc;
@@ -212,4 +214,18 @@ html.preset-high-contrast {
 html.preset-high-contrast :focus-visible {
   outline: 3px solid #ffee00;
   outline-offset: 1px;
+}
+
+/* Native form controls inherit the theme. `color-scheme` on .dark/.light
+   makes the OS popup chrome readable; explicit colors keep the control and
+   its options on our tokens instead of platform light defaults. */
+select,
+option,
+optgroup {
+  background-color: var(--bg-3);
+  color: var(--fg-1);
+}
+
+select:disabled {
+  opacity: 0.6;
 }

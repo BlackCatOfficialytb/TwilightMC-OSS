@@ -78,6 +78,7 @@ pub async fn export_instance_twpack(
         last_played: 0,
         total_time_played: 0,
         icon_key: None,
+        jvm_args: Vec::new(),
     });
     let mut manifest = PackManifest::new(
         if meta.name.trim().is_empty() {
@@ -188,6 +189,7 @@ pub async fn install_twpack(
         last_played: 0,
         total_time_played: 0,
         icon_key: None,
+        jvm_args: Vec::new(),
     };
     write_meta(&instance_dir, &meta).await?;
     Ok(id)

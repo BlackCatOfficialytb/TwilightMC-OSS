@@ -15,13 +15,14 @@ mod security;
 
 pub use args::{
     GameOptions, ProfileVars, QuickPlay, Vars, game_arguments, inject_account_vars, jvm_arguments,
-    replace_tokens_in,
+    replace_tokens_in, split_jvm_args,
 };
 pub use classpath::{active_paths, classpath_string, profile_classpath, separator};
 pub use dev::{DevDebugOptions, dev_jvm_args, jdwp_arg};
 pub use diagnostics::{
-    DiagnosticInfo, Hardware, SERVICE_HOSTS, VERSION_LABEL, auth_mode_name, collect_hardware,
-    header_lines, mask_access_token, render, resolve_service_hosts,
+    DiagnosticInfo, Hardware, SERVICE_HOSTS, VERSION_BANNER, VERSION_LABEL, auth_mode_name,
+    collect_hardware, header_lines, mask_access_token, pre_spawn_lines, render,
+    resolve_service_hosts,
 };
 pub use error::LaunchError;
 pub use gate::{

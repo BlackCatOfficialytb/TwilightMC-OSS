@@ -11,8 +11,9 @@ mod test_server;
 mod version;
 
 pub use adoptium::{
-    ADOPTIUM_API_BASE, AdoptiumAsset, adoptium_asset_url, fetch_adoptium_asset,
-    install_adoptium_java, map_os_arch, parse_assets,
+    ADOPTIUM_API_BASE, ADOPTIUM_GITHUB_RELEASES_ATOM, AdoptiumAsset, AtomRelease,
+    adoptium_asset_url, atom_asset_filename, fetch_adoptium_asset, fetch_adoptium_asset_with_atom,
+    install_adoptium_java, map_os_arch, parse_assets, parse_atom_feed,
 };
 pub use discovery::{
     candidate_jvm_roots, discover_java, jvm_home_from_executable, parse_reg_java_home_output,

@@ -664,6 +664,11 @@ pub async fn run_launch_with(
     cfg: LaunchConfig,
     sink: Option<mpsc::Sender<LaunchEvent>>,
 ) -> Result<i32, CliError> {
+    // Standalone CLI: print the identity line before any network work. The
+    // desktop host emits the same line itself, so it is never duplicated.
+    if sink.is_none() {
+        println!("{}", twilight_launch::VERSION_BANNER);
+    }
     let account = cfg
         .account
         .clone()
@@ -827,7 +832,7 @@ pub async fn run_launch_with(
             dns,
             hardware,
         );
-        println!("{}", twilight_launch::render(&diag));
+        println!("{}", twilight_launch::header_lines(&diag).join("\n"));
         println!(
             "{}",
             dry_run_report(
@@ -1019,6 +1024,7 @@ pub async fn run_launch_with(
         &game_options,
     )?;
     let mut plan = plan;
+    let advisories = cfg.advisories.clone();
     plan.jvm_args.extend(cfg.jvm_args);
     plan.jvm_args.extend(gc_flags);
     inject_authlib(&mut plan, &authlib_jar);
@@ -1032,19 +1038,25 @@ pub async fn run_launch_with(
         while let Some(event) = rx.recv().await {
             match event {
                 LaunchEvent::Started(pid) => {
-                    println!("Minecraft process ID: {pid}");
+                    if sink.is_none() {
+                        println!("Minecraft process ID: {pid}");
+                    }
                     if let Some(sink) = &sink {
                         let _ = sink.send(LaunchEvent::Started(pid)).await;
                     }
                 }
                 LaunchEvent::Stdout(line) => {
-                    println!("{line}");
+                    if sink.is_none() {
+                        println!("{line}");
+                    }
                     if let Some(sink) = &sink {
                         let _ = sink.send(LaunchEvent::Stdout(line)).await;
                     }
                 }
                 LaunchEvent::Stderr(line) => {
-                    eprintln!("{line}");
+                    if sink.is_none() {
+                        eprintln!("{line}");
+                    }
                     if let Some(sink) = &sink {
                         let _ = sink.send(LaunchEvent::Stderr(line)).await;
                     }
@@ -1055,20 +1067,17 @@ pub async fn run_launch_with(
             }
         }
     });
-    // ---- Minecraft2Shell (CVE-2026-10701) advisory: version/platform range
-    //      plus whether this launch verified the patched FreeType native.
+    // ---- console order: diagnostic header first, then the pre-spawn
+    //      advisories, then the pid/output from the spawn pump.
     let advisory = twilight_launch::assess_minecraft2shell(
         &manifest.id,
         &ctx,
         manifest.is_fresh(),
         freetype_verified,
     );
-    for line in advisory.advisory_lines() {
-        let _ = tx.send(LaunchEvent::Stdout(line)).await;
-    }
-    for line in &freetype_refreshed {
-        let _ = tx.send(LaunchEvent::Stdout(line.clone())).await;
-    }
+    let mut pre_spawn = advisories;
+    pre_spawn.extend(advisory.advisory_lines());
+    pre_spawn.extend(freetype_refreshed.iter().cloned());
     // ---- diagnostics header straight through the same pump, so CLI stdout
     //      and the GUI console drawer print the identical block
     let diag = build_diagnostics(
@@ -1083,7 +1092,7 @@ pub async fn run_launch_with(
         dns,
         hardware,
     );
-    for line in twilight_launch::header_lines(&diag) {
+    for line in twilight_launch::pre_spawn_lines(&diag, &pre_spawn) {
         let _ = tx.send(LaunchEvent::Stdout(line)).await;
     }
     let status = twilight_launch::run(plan, tx).await?;
@@ -1149,6 +1158,7 @@ mod tests {
             horizon: None,
             horizon_session: None,
             jvm_args: Vec::new(),
+            advisories: Vec::new(),
             gc: twilight_launch::GcSettings::default(),
             account: None,
             server: None,
@@ -1891,5 +1901,42 @@ mod tests {
         let notice = notice.expect("unknown Java must explain the fallback");
         assert!(!notice.contains("Java 0"), "{notice}");
         assert!(notice.to_ascii_lowercase().contains("unknown"), "{notice}");
+    }
+
+    #[test]
+    fn extra_jvm_args_reach_the_modern_command_line() {
+        let version = twilight_manifest::parse_version_file(MODERN).unwrap();
+        let config = cfg();
+        let paths = resolve_paths(&config, &version);
+        let mut plan = assemble_command(
+            &java(),
+            &ctx(),
+            &version,
+            &paths,
+            &account(),
+            None,
+            &GameOptions::default(),
+        )
+        .unwrap();
+        // The Settings "Extra JVM arguments" field is forwarded through
+        // GcSettings.extra_args; Default must not drop it.
+        let (gc_flags, _) = twilight_launch::resolve_gc_flags(
+            twilight_launch::GcPreset::Default,
+            21,
+            8192,
+            &[],
+            "-XX:+test",
+        );
+        plan.jvm_args.extend(config.jvm_args);
+        plan.jvm_args.extend(gc_flags);
+        let argv: Vec<String> = twilight_launch::build_command(&plan)
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            argv.iter().any(|arg| arg == "-XX:+test"),
+            "custom JVM arg missing from spawned command: {argv:?}"
+        );
     }
 }

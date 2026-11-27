@@ -17,6 +17,10 @@ use crate::version::JavaInstallation;
 
 /// Public Adoptium API root used by the launcher UI.
 pub const ADOPTIUM_API_BASE: &str = "https://api.adoptium.net/v3";
+/// GitHub Releases Atom feed for Temurin binaries, used as a fallback when the
+/// Adoptium REST API is unavailable or returns no usable asset.
+pub const ADOPTIUM_GITHUB_RELEASES_ATOM: &str =
+    "https://github.com/adoptium/temurin{major}-binaries/releases.atom";
 
 const USER_AGENT: &str = concat!(
     "TwilightMC/",
@@ -98,6 +102,16 @@ fn json_scalar(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
     None
 }
 
+/// Adoptium's `/assets/latest/...` response wraps each binary in a release
+/// object (`{ "binary": { ... }, "release_name": ..., "version": ... }`).
+/// Older fixtures and a few mirrors expose the binary directly, so both
+/// shapes are accepted.
+fn binary_of(item: &serde_json::Value) -> &serde_json::Value {
+    item.get("binary")
+        .filter(|value| value.is_object())
+        .unwrap_or(item)
+}
+
 fn binaries_of(raw: &serde_json::Value) -> Result<Vec<&serde_json::Value>, RuntimeError> {
     let binaries = if let Some(array) = raw.as_array() {
         array
@@ -164,7 +178,8 @@ fn derive_release_name(binary: &serde_json::Value, link: &str) -> String {
 /// 64-digit hex digest are skipped.
 pub fn parse_assets(raw: &serde_json::Value) -> Result<Vec<AdoptiumAsset>, RuntimeError> {
     let mut assets = Vec::new();
-    for binary in binaries_of(raw)? {
+    for item in binaries_of(raw)? {
+        let binary = binary_of(item);
         let package = binary.get("package").filter(|v| v.is_object());
         let Some(link) = package
             .and_then(|p| json_str(p, &["link", "url", "download_url"]))
@@ -194,12 +209,12 @@ pub fn parse_assets(raw: &serde_json::Value) -> Result<Vec<AdoptiumAsset>, Runti
         if !is_sha256(&sha256) {
             continue;
         }
-        let release_name = package
-            .and_then(|p| json_str(p, &["release_name", "releaseName"]))
+        let release_name = json_str(item, &["release_name", "releaseName"])
+            .or_else(|| package.and_then(|p| json_str(p, &["release_name", "releaseName"])))
             .or_else(|| json_str(binary, &["release_name", "releaseName"]))
             .or_else(|| {
-                binary
-                    .get("version")
+                item.get("version")
+                    .or_else(|| binary.get("version"))
                     .and_then(|v| json_str(v, &["release_name"]))
             })
             .map(str::to_owned)
@@ -245,9 +260,219 @@ fn http_error(url: &str, source: reqwest::Error) -> RuntimeError {
     }
 }
 
-/// Tries `image_type=jre`, then `jdk`, and returns the first asset matching
-/// this OS, architecture and archive format.
-pub async fn fetch_adoptium_asset(
+/// The newest Temurin release advertised by the GitHub Releases Atom feed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AtomRelease {
+    /// Git tag, e.g. `jdk-21.0.9+10`.
+    pub tag: String,
+    /// Archive version component, e.g. `21.0.9_10`.
+    pub version: String,
+}
+
+/// Decodes the handful of XML entities that occur in Atom titles.
+fn decode_xml_text(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(start) = rest.find('&') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start..];
+        let Some(end) = after.find(';') else {
+            out.push_str(after);
+            return out;
+        };
+        let entity = &after[1..end];
+        match entity {
+            "amp" => out.push('&'),
+            "lt" => out.push('<'),
+            "gt" => out.push('>'),
+            "quot" => out.push('"'),
+            "apos" => out.push('\''),
+            _ if entity.starts_with("#x") || entity.starts_with("#X") => {
+                if let Ok(code) = u32::from_str_radix(&entity[2..], 16)
+                    && let Some(ch) = char::from_u32(code)
+                {
+                    out.push(ch);
+                }
+            }
+            _ if entity.starts_with('#') => {
+                if let Ok(code) = entity[1..].parse::<u32>()
+                    && let Some(ch) = char::from_u32(code)
+                {
+                    out.push(ch);
+                }
+            }
+            _ => {
+                out.push('&');
+                out.push_str(entity);
+                out.push(';');
+            }
+        }
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn xml_element_text<'a>(xml: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{tag}");
+    let start = xml.find(&open)?;
+    let after_open = &xml[start..];
+    let body_start = after_open.find('>')? + 1;
+    let body = &after_open[body_start..];
+    let close = format!("</{tag}>");
+    let end = body.find(&close)?;
+    Some(&body[..end])
+}
+
+/// Parses the newest `<entry>` from a Temurin GitHub Releases Atom feed.
+/// Pure and fixture-testable; the network layer only feeds it the response.
+pub fn parse_atom_feed(xml: &str) -> Result<AtomRelease, RuntimeError> {
+    let entry_start = xml
+        .find("<entry>")
+        .or_else(|| xml.find("<entry "))
+        .ok_or_else(|| RuntimeError::BadMetadata("Atom feed contains no <entry>".into()))?;
+    let entry = &xml[entry_start..];
+    let entry = entry
+        .find("</entry>")
+        .map(|end| &entry[..end])
+        .unwrap_or(entry);
+    let title = xml_element_text(entry, "title")
+        .ok_or_else(|| RuntimeError::BadMetadata("Atom entry has no <title>".into()))?;
+    let tag = decode_xml_text(title.trim());
+    let version = tag
+        .strip_prefix("jdk-")
+        .or_else(|| tag.strip_prefix("jre-"))
+        .filter(|version| version.contains('+'))
+        .ok_or_else(|| RuntimeError::BadMetadata(format!("unexpected Temurin release tag: {tag}")))?
+        .replace('+', "_");
+    Ok(AtomRelease { tag, version })
+}
+
+/// Builds the Temurin archive filename for the current OS/architecture.
+pub fn atom_asset_filename(
+    major: i32,
+    release: &AtomRelease,
+    image_type: &str,
+    os: &str,
+    arch: &str,
+) -> Option<String> {
+    let os = match os {
+        "windows" | "linux" | "mac" => os,
+        _ => return None,
+    };
+    let arch = match arch {
+        "x64" | "aarch64" | "x86" => arch,
+        _ => return None,
+    };
+    let package = if cfg!(windows) { "zip" } else { "tar.gz" };
+    Some(format!(
+        "OpenJDK{major}U-{image_type}_{arch}_{os}_hotspot_{}.{package}",
+        release.version
+    ))
+}
+
+fn atom_download_url(base: &str, release: &AtomRelease, filename: &str) -> String {
+    format!(
+        "{}/{}/{}",
+        base.trim_end_matches('/'),
+        release.tag.replace('+', "%2B"),
+        filename
+    )
+}
+
+/// Derives the release-download root from the feed URL so tests can point the
+/// whole Atom path at a loopback server.
+fn atom_download_base(atom_url: &str, major: i32) -> String {
+    if let Some(prefix) = atom_url.strip_suffix("releases.atom") {
+        return format!("{}releases/download", prefix);
+    }
+    format!("https://github.com/adoptium/temurin{major}-binaries/releases/download")
+}
+
+async fn fetch_adoptium_atom_asset(
+    client: &reqwest::Client,
+    atom_url: &str,
+    major: i32,
+) -> Result<AdoptiumAsset, RuntimeError> {
+    let response = client
+        .get(atom_url)
+        .header("User-Agent", USER_AGENT)
+        .header(
+            "Accept",
+            "application/atom+xml, application/xml;q=0.9, */*;q=0.8",
+        )
+        .send()
+        .await
+        .map_err(|e| http_error(atom_url, e))?;
+    if !response.status().is_success() {
+        return Err(RuntimeError::HttpStatus {
+            url: atom_url.to_owned(),
+            status: response.status().as_u16(),
+        });
+    }
+    let xml = response.text().await.map_err(|e| http_error(atom_url, e))?;
+    let release = parse_atom_feed(&xml)?;
+    let (os, arch) = map_os_arch();
+    let base = atom_download_base(atom_url, major);
+    let mut last_status: Option<(String, u16)> = None;
+    for image_type in ["jre", "jdk"] {
+        let Some(filename) = atom_asset_filename(major, &release, image_type, os, arch) else {
+            continue;
+        };
+        let archive_url = atom_download_url(&base, &release, &filename);
+        let digest_url = format!("{archive_url}.sha256.txt");
+        let response = client
+            .get(&digest_url)
+            .header("User-Agent", USER_AGENT)
+            .header("Accept", "text/plain, */*;q=0.8")
+            .send()
+            .await
+            .map_err(|e| http_error(&digest_url, e))?;
+        if !response.status().is_success() {
+            last_status = Some((digest_url, response.status().as_u16()));
+            continue;
+        }
+        let text = response
+            .text()
+            .await
+            .map_err(|e| http_error(&digest_url, e))?;
+        let sha256 = text
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_ascii_lowercase();
+        if !is_sha256(&sha256) {
+            continue;
+        }
+        return Ok(AdoptiumAsset {
+            release_name: release.tag.clone(),
+            url: archive_url,
+            sha256,
+            image_type: image_type.to_owned(),
+            package_type: if cfg!(windows) {
+                "zip".to_owned()
+            } else {
+                "tar.gz".to_owned()
+            },
+        });
+    }
+    if let Some((url, status)) = last_status {
+        return Err(RuntimeError::HttpStatus { url, status });
+    }
+    Err(RuntimeError::AssetNotFound {
+        major,
+        detail: format!(
+            "Atom release {} has no jre/jdk archive for {os}/{arch}",
+            release.tag
+        ),
+    })
+}
+
+/// REST lookup only: `image_type=jre`, then `jdk`, first archive matching this
+/// OS, architecture and package format. Keeps the concrete HTTP/JSON failure
+/// instead of collapsing it into a generic "not found".
+async fn fetch_adoptium_api_asset(
     client: &reqwest::Client,
     api_base: &str,
     major: i32,
@@ -256,12 +481,14 @@ pub async fn fetch_adoptium_asset(
     let expected_package = if cfg!(windows) { "zip" } else { "tar.gz" };
     let mut last_status: Option<(String, u16)> = None;
     let mut saw_metadata = false;
+    let mut metadata_without_asset = false;
 
     for image_type in ["jre", "jdk"] {
         let url = asset_url(api_base, major, image_type)?;
         let response = client
             .get(url.as_str())
             .header("User-Agent", USER_AGENT)
+            .header("Accept", "application/json")
             .send()
             .await
             .map_err(|e| http_error(&url, e))?;
@@ -275,7 +502,8 @@ pub async fn fetch_adoptium_asset(
 
         let filtered: Vec<serde_json::Value> = binaries_of(&raw)?
             .into_iter()
-            .filter(|binary| {
+            .filter(|item| {
+                let binary = binary_of(item);
                 let binary_os = json_str(binary, &["os", "operating_system"])
                     .unwrap_or("")
                     .to_ascii_lowercase();
@@ -295,15 +523,51 @@ pub async fn fetch_adoptium_asset(
         }) {
             return Ok(asset);
         }
+        metadata_without_asset = true;
     }
 
     if !saw_metadata && let Some((url, status)) = last_status {
         return Err(RuntimeError::HttpStatus { url, status });
     }
-    Err(RuntimeError::AssetNotFound {
-        major,
-        image_type: "jre or jdk",
-    })
+    let detail = if metadata_without_asset {
+        "metadata returned no matching jre/jdk archive".to_owned()
+    } else {
+        "no asset metadata returned".to_owned()
+    };
+    Err(RuntimeError::AssetNotFound { major, detail })
+}
+
+/// Tries the Adoptium REST API, then the official Temurin GitHub Releases Atom
+/// feed. The Atom fallback is exercised hermetically through
+/// [`fetch_adoptium_asset_with_atom`].
+pub async fn fetch_adoptium_asset(
+    client: &reqwest::Client,
+    api_base: &str,
+    major: i32,
+) -> Result<AdoptiumAsset, RuntimeError> {
+    let atom_url = ADOPTIUM_GITHUB_RELEASES_ATOM.replace("{major}", &major.to_string());
+    fetch_adoptium_asset_with_atom(client, api_base, &atom_url, major).await
+}
+
+/// Testable API + Atom fallback with an explicit feed URL.
+pub async fn fetch_adoptium_asset_with_atom(
+    client: &reqwest::Client,
+    api_base: &str,
+    atom_url: &str,
+    major: i32,
+) -> Result<AdoptiumAsset, RuntimeError> {
+    match fetch_adoptium_api_asset(client, api_base, major).await {
+        Ok(asset) => Ok(asset),
+        Err(api_error) => match fetch_adoptium_atom_asset(client, atom_url, major).await {
+            Ok(asset) => Ok(asset),
+            // A metadata-but-no-asset API result is less useful than the
+            // concrete Atom failure; hard HTTP/JSON errors stay primary.
+            Err(atom_error) => match api_error {
+                RuntimeError::AssetNotFound { .. } => Err(atom_error),
+                api_error => Err(api_error),
+            },
+        },
+    }
 }
 
 fn hex_encode(bytes: &[u8]) -> String {
@@ -872,6 +1136,140 @@ mod tests {
         assert_eq!(assets[1].package_type, "tar.gz");
 
         assert!(parse_assets(&serde_json::json!({"unexpected": 1})).is_err());
+    }
+
+    #[test]
+    fn parses_real_v3_release_wrapper_payload() {
+        // Shape served by
+        // https://api.adoptium.net/v3/assets/latest/21/hotspot?os=windows&architecture=x64&image_type=jre
+        let raw = serde_json::json!([
+            {
+                "binary": {
+                    "os": "windows",
+                    "architecture": "x64",
+                    "image_type": "jre",
+                    "package_type": "zip",
+                    "project": "jdk",
+                    "jvm_impl": "hotspot",
+                    "package": {
+                        "name": "OpenJDK21U-jre_x64_windows_hotspot_21.0.9_10.zip",
+                        "link": "https://example.test/OpenJDK21U-jre_x64_windows_hotspot_21.0.9_10.zip",
+                        "checksum": SHA,
+                        "size": 123
+                    }
+                },
+                "release_name": "jdk-21.0.9+10",
+                "version": {
+                    "major": 21,
+                    "minor": 0,
+                    "security": 9,
+                    "build": 10
+                }
+            }
+        ]);
+        let assets = parse_assets(&raw).expect("real payload parses");
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].release_name, "jdk-21.0.9+10");
+        assert_eq!(assets[0].image_type, "jre");
+        assert_eq!(assets[0].package_type, "zip");
+        assert_eq!(assets[0].sha256, SHA);
+    }
+
+    const ATOM_FIXTURE: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+  <id>tag:github.com,2008:/adoptium/temurin21-binaries/releases</id>
+  <title>Release notes from temurin21-binaries</title>
+  <entry>
+    <title>jdk-21.0.9+10</title>
+    <link rel="alternate" type="text/html" href="https://github.com/adoptium/temurin21-binaries/releases/tag/jdk-21.0.9%2B10"/>
+    <id>tag:github.com,2008:Repository/123456/jdk-21.0.9+10</id>
+    <updated>2026-01-20T12:00:00Z</updated>
+  </entry>
+  <entry>
+    <title>jdk-21.0.8+9</title>
+    <link rel="alternate" type="text/html" href="https://github.com/adoptium/temurin21-binaries/releases/tag/jdk-21.0.8%2B9"/>
+    <id>tag:github.com,2008:Repository/123456/jdk-21.0.8+9</id>
+    <updated>2025-10-20T12:00:00Z</updated>
+  </entry>
+</feed>"#;
+
+    #[test]
+    fn parses_the_temurin_github_releases_atom_feed() {
+        let release = parse_atom_feed(ATOM_FIXTURE).expect("atom fixture");
+        assert_eq!(release.tag, "jdk-21.0.9+10");
+        assert_eq!(release.version, "21.0.9_10");
+    }
+
+    #[test]
+    fn atom_asset_names_follow_the_temurin_convention() {
+        let release = AtomRelease {
+            tag: "jdk-25.0.5.1+2".to_owned(),
+            version: "25.0.5.1_2".to_owned(),
+        };
+        let (os, arch) = map_os_arch();
+        let jre = atom_asset_filename(25, &release, "jre", os, arch).expect("jre filename");
+        assert!(
+            jre.starts_with("OpenJDK25U-jre_")
+                && jre.contains(&format!("_{os}_hotspot_25.0.5.1_2.")),
+            "{jre}"
+        );
+        let jdk = atom_asset_filename(25, &release, "jdk", os, arch).expect("jdk filename");
+        assert!(jdk.contains("OpenJDK25U-jdk_"), "{jdk}");
+    }
+
+    #[tokio::test]
+    async fn atom_fallback_resolves_the_digest_when_the_api_is_empty() {
+        let atom = ATOM_FIXTURE.to_owned();
+        let (os, arch) = map_os_arch();
+        let package = if cfg!(windows) { "zip" } else { "tar.gz" };
+        let jre_name = format!("OpenJDK21U-jre_{arch}_{os}_hotspot_21.0.9_10.{package}");
+        let digest_path = format!("/releases/download/jdk-21.0.9%2B10/{jre_name}.sha256.txt");
+        let routes = HashMap::from([
+            (endpoint_path("jre"), (404, b"missing".to_vec())),
+            (endpoint_path("jdk"), (404, b"missing".to_vec())),
+            ("/releases.atom".to_owned(), (200, atom.into_bytes())),
+            (
+                digest_path,
+                (200, format!("{SHA}  {jre_name}\n").into_bytes()),
+            ),
+        ]);
+        let addr = spawn(routes).await;
+        let base = format!("http://{addr}");
+        let asset = fetch_adoptium_asset_with_atom(
+            &reqwest::Client::new(),
+            &format!("{base}/v3"),
+            &format!("{base}/releases.atom"),
+            21,
+        )
+        .await
+        .expect("atom fallback");
+        assert_eq!(asset.image_type, "jre");
+        assert_eq!(asset.sha256, SHA);
+        assert!(asset.url.ends_with(&jre_name));
+        assert!(asset.url.contains("jdk-21.0.9%2B10"));
+    }
+
+    #[tokio::test]
+    async fn api_http_status_is_not_collapsed_into_asset_not_found() {
+        let routes = HashMap::from([
+            (endpoint_path("jre"), (503, b"unavailable".to_vec())),
+            (endpoint_path("jdk"), (503, b"unavailable".to_vec())),
+            ("/releases.atom".to_owned(), (404, b"no feed".to_vec())),
+        ]);
+        let addr = spawn(routes).await;
+        let base = format!("http://{addr}");
+        let error = fetch_adoptium_asset_with_atom(
+            &reqwest::Client::new(),
+            &format!("{base}/v3"),
+            &format!("{base}/releases.atom"),
+            21,
+        )
+        .await
+        .expect_err("both endpoints fail");
+        assert!(
+            matches!(error, RuntimeError::HttpStatus { status: 503, .. }),
+            "{error:?}"
+        );
     }
 
     #[test]

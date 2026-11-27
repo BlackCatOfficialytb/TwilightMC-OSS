@@ -35,6 +35,10 @@ pub struct InstanceMeta {
     /// Prism `iconKey` resolved from the shared `icons/` directory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon_key: Option<String>,
+    /// Per-instance extra JVM arguments (`instance.json` `jvm_args` or
+    /// Prism's `instance.cfg` `JvmArgs=`). Appended to the launch command.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub jvm_args: Vec<String>,
 }
 
 /// One row of the instance grid.
@@ -139,6 +143,10 @@ fn prism_launch_meta(instance_dir: &Path) -> Option<InstanceMeta> {
         last_played: 0,
         total_time_played: 0,
         icon_key: cfg.get("iconKey").cloned().filter(|k| !k.trim().is_empty()),
+        jvm_args: cfg
+            .get("JvmArgs")
+            .map(|raw| twilight_launch::split_jvm_args(raw))
+            .unwrap_or_default(),
     })
 }
 
@@ -194,6 +202,7 @@ async fn get_instances_in(root: &Path) -> Result<Vec<InstanceRow>, String> {
             last_played: 0,
             total_time_played: 0,
             icon_key: None,
+            jvm_args: Vec::new(),
         });
         let id = path
             .file_name()
@@ -249,6 +258,7 @@ pub(crate) async fn create_instance_in(
                 last_played: 0,
                 total_time_played: 0,
                 icon_key: None,
+                jvm_args: Vec::new(),
             };
             write_meta(&dir, &meta).await?;
             meta

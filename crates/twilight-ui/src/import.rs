@@ -533,6 +533,7 @@ fn import_prism_core(
         last_played: 0,
         total_time_played: 0,
         icon_key: info.icon_key.clone(),
+        jvm_args: Vec::new(),
     };
     Ok((id, meta))
 }
@@ -616,6 +617,7 @@ pub async fn import_instance_archive(
                 last_played: 0,
                 total_time_played: 0,
                 icon_key: None,
+                jvm_args: Vec::new(),
             };
             write_meta(&dir, &meta).await?;
             (id, report.missing_mods)

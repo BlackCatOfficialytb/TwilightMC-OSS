@@ -10,8 +10,17 @@ use std::time::Duration;
 use twilight_auth::{Account, AccountType};
 
 /// Header identity line: the product version in release-tag form
-/// (`alpha-v0.4.0` — Bolide channel taxonomy, see VERSION.md).
+/// (`alpha-v0.4.0` - Bolide channel taxonomy, see VERSION.md).
 pub const VERSION_LABEL: &str = concat!("alpha-v", env!("CARGO_PKG_VERSION"));
+
+/// The one console identity line. Hosts emit it immediately at launch start;
+/// the diagnostic header never repeats it.
+pub const VERSION_BANNER: &str = concat!(
+    "TwilightMC Bolide version: ",
+    "alpha-v",
+    env!("CARGO_PKG_VERSION"),
+    " (official)"
+);
 
 /// The game-window default the launcher never overrides.
 pub const DEFAULT_WINDOW_SIZE: &str = "854 x 480";
@@ -310,11 +319,6 @@ pub async fn collect_hardware() -> Hardware {
 /// spawn pump appends the moment the child exists.
 pub fn header_lines(info: &DiagnosticInfo) -> Vec<String> {
     let mut lines = Vec::new();
-    lines.push(format!(
-        "TwilightMC Bolide version: {} (official)",
-        info.version
-    ));
-    lines.push(String::new());
     lines.push(format!("Launched instance in {} mode", info.auth_mode));
     lines.push(String::new());
     for (host, answer) in &info.dns {
@@ -391,9 +395,21 @@ pub fn header_lines(info: &DiagnosticInfo) -> Vec<String> {
     lines
 }
 
-/// The whole header as one string (CLI dry-run / stdout printing).
+/// Console order for a JVM launch: the identity banner leads (printed
+/// immediately by the host), then the diagnostic block, then pre-spawn
+/// `[DEV]`/`[SECURITY]` advisories. The spawn pump appends the PID after.
+pub fn pre_spawn_lines(info: &DiagnosticInfo, advisories: &[String]) -> Vec<String> {
+    let mut lines = header_lines(info);
+    lines.extend(advisories.iter().cloned());
+    lines
+}
+
+/// The whole header as one string, including the identity banner. Used by
+/// dry-run reports and callers that do not print the banner separately.
 pub fn render(info: &DiagnosticInfo) -> String {
-    let mut out = header_lines(info).join("\n");
+    let mut lines = vec![VERSION_BANNER.to_owned(), String::new()];
+    lines.extend(header_lines(info));
+    let mut out = lines.join("\n");
     out.push('\n');
     out
 }
@@ -455,11 +471,15 @@ mod tests {
     fn header_matches_the_prism_layout() {
         let lines = header_lines(&sample_info());
         let text = lines.join("\n");
+        // the identity banner is emitted by the host before this block; the
+        // header itself must never repeat it
         assert!(
-            text.starts_with(&format!(
-                "TwilightMC Bolide version: {VERSION_LABEL} (official)\n\nLaunched instance in offline mode\n"
-            )),
+            text.starts_with("Launched instance in offline mode\n"),
             "{text}"
+        );
+        assert!(
+            !text.contains("TwilightMC Bolide version:"),
+            "header repeated the identity banner: {text}"
         );
         // DNS answers are indented under their host lines
         assert!(
@@ -505,6 +525,34 @@ mod tests {
             text.ends_with("Java arguments:\n  -Xms512M -Xmx2048M"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn render_has_exactly_one_identity_banner() {
+        let text = render(&sample_info());
+        assert_eq!(
+            text.matches("TwilightMC Bolide version:").count(),
+            1,
+            "{text}"
+        );
+        assert!(text.starts_with(VERSION_BANNER), "{text}");
+    }
+
+    #[test]
+    fn pre_spawn_lines_put_the_header_before_advisories() {
+        let advisories = vec![
+            "[DEV] Unsupported / Developer Mode: test".to_owned(),
+            "[SECURITY] Minecraft2Shell (CVE-2026-10701): test".to_owned(),
+        ];
+        let lines = pre_spawn_lines(&sample_info(), &advisories);
+        let text = lines.join("\n");
+        let header_at = text.find("Launched instance in offline mode").unwrap();
+        let dev_at = text.find("[DEV]").unwrap();
+        let security_at = text.find("[SECURITY]").unwrap();
+        assert!(header_at < dev_at, "{text}");
+        assert!(dev_at < security_at, "{text}");
+        assert!(!text.contains("TwilightMC Bolide version:"), "{text}");
+        assert!(!text.contains("Minecraft process ID"), "{text}");
     }
 
     #[test]

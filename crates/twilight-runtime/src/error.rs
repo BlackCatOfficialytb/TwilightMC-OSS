@@ -28,11 +28,8 @@ pub enum RuntimeError {
     BadMetadata(String),
     #[error("invalid Java major version: {0}")]
     InvalidMajor(i32),
-    #[error("no {image_type} asset for Java {major} on this platform")]
-    AssetNotFound {
-        major: i32,
-        image_type: &'static str,
-    },
+    #[error("no matching Adoptium asset for Java {major} on this platform ({detail})")]
+    AssetNotFound { major: i32, detail: String },
     #[error("SHA-256 mismatch: expected {expected}, computed {computed}")]
     Sha256Mismatch { expected: String, computed: String },
     #[error("bad Java archive: {0}")]
