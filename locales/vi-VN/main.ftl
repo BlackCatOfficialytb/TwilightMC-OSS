@@ -625,6 +625,8 @@ packs-fonts-confirm =
        *[other] font files
     }: { $fonts }.
     
+    
+    
     Minecraft 1.20.5 and newer can execute code from a malicious .ttf font in a resource pack (Minecraft2Shell). Only import packs you trust.
 packs-fonts-confirm-action = Import anyway
 packs-fonts-cancelled = Import cancelled: { $name } contains fonts and was not copied.
@@ -1237,70 +1239,42 @@ crash-sent = Report sent.
 crash-error = Could not send report: { $error }
 crash-close = Close
 
-settings-dev-debug-protocol = Giao thức gỡ lỗi
+## Debug protocol (dev mode)
 
-settings-dev-debug-protocol-warning = Chỉ dành cho chế độ phát triển. Giao thức này chỉ mở chẩn đoán đã che dữ liệu nhạy cảm trên 127.0.0.1. Không bật trên máy không tin cậy hoặc mạng dùng chung.
+settings-dev-debug-protocol = Debug protocol
+settings-dev-debug-protocol-warning = Dev-only localhost debug protocol. It exposes redacted diagnostics on 127.0.0.1 only. Never enable on untrusted machines or shared networks.
+settings-dev-debug-protocol-enabled = Enable localhost debug protocol
+settings-dev-debug-protocol-port = Port
+settings-dev-debug-protocol-bind = Binds read-only HTTP to 127.0.0.1. Endpoints: /health, /state, /events?since=<seq>, /logs.
+settings-dev-debug-http-enabled = Enable HTTP debug endpoint
+settings-dev-debug-http-tls = Enable HTTPS/TLS (recommended)
+settings-dev-debug-http-bind = Binds read-only HTTP/HTTPS to 127.0.0.1. Endpoints: /health, /state, /events?since=<seq>, /logs, /instances, /config.
+settings-dev-debug-http-plain-warning = Plain HTTP mode enabled: TLS is disabled on 127.0.0.1; local loopback traffic is unencrypted.
+settings-dev-debug-no-auth-warning = Unauthenticated Debug Access: No API Key is set! Any local process or browser page on this machine may read granted debug scopes.
+settings-dev-debug-mcp-enabled = Enable MCP over HTTPS
+settings-dev-debug-mcp-port = MCP port
+settings-dev-debug-mcp-bind = Binds MCP Streamable HTTP to https://127.0.0.1:<port>/mcp (TLS required).
+settings-dev-debug-require-key = Require API key for debug endpoints
+settings-dev-debug-no-key = No API key configured
+settings-dev-debug-generate-key = Generate API Key
+settings-dev-debug-clear-key = Clear Key
+settings-dev-debug-copy-key = Copy Key
+settings-dev-debug-cert = TLS cert
+settings-dev-debug-cert-pending = generated on first TLS start
+settings-dev-debug-copy-cert = Copy Cert Path
+settings-dev-debug-scopes = Granted permission scopes
+settings-dev-debug-copy-mcp = Copy MCP Config JSON
+settings-dev-debug-skill-path = Agent skill
+settings-dev-debug-key-generated = Debug API key generated
+settings-dev-debug-copied = Copied to clipboard
+settings-dev-debug-protocol-refresh = Refresh trace
+settings-dev-debug-protocol-export = Export Debug Trace (.json)
+settings-dev-debug-protocol-empty = No debug events captured yet.
 
-settings-dev-debug-protocol-enabled = Bật giao thức gỡ lỗi localhost
+## Download progress
 
-settings-dev-debug-protocol-port = Cổng
-
-settings-dev-debug-protocol-bind = Gắn HTTP chỉ đọc vào 127.0.0.1. Điểm cuối: /health, /state, /events?since=<seq>, /logs.
-
-settings-dev-debug-protocol-refresh = Làm mới dấu vết
-
-settings-dev-debug-protocol-export = Xuất dấu vết gỡ lỗi (.json)
-
-settings-dev-debug-http-enabled = Bật điểm cuối HTTP gỡ lỗi
-
-settings-dev-debug-http-tls = Bật HTTPS/TLS (khuyến nghị)
-
-settings-dev-debug-http-bind = Gắn HTTP/HTTPS chỉ đọc vào 127.0.0.1. Điểm cuối: /health, /state, /events?since=<seq>, /logs, /instances, /config.
-
-settings-dev-debug-http-plain-warning = Đã bật chế độ HTTP thuần: TLS đã tắt trên 127.0.0.1; lưu lượng loopback cục bộ không được mã hóa.
-
-settings-dev-debug-no-auth-warning = Truy cập gỡ lỗi không xác thực: Chưa đặt API Key! Bất kỳ tiến trình cục bộ hoặc trang trình duyệt nào trên máy này cũng có thể đọc các phạm vi gỡ lỗi đã cấp.
-
-settings-dev-debug-mcp-enabled = Bật MCP qua HTTPS
-
-settings-dev-debug-mcp-port = Cổng MCP
-
-settings-dev-debug-mcp-bind = Gắn MCP Streamable HTTP tại https://127.0.0.1:<port>/mcp (bắt buộc TLS).
-
-settings-dev-debug-require-key = Yêu cầu API key cho điểm cuối gỡ lỗi
-
-settings-dev-debug-no-key = Chưa cấu hình API key
-
-settings-dev-debug-generate-key = Tạo API Key
-
-settings-dev-debug-clear-key = Xóa Key
-
-settings-dev-debug-copy-key = Sao chép Key
-
-settings-dev-debug-cert = Chứng chỉ TLS
-
-settings-dev-debug-cert-pending = được tạo khi khởi động TLS lần đầu
-
-settings-dev-debug-copy-cert = Sao chép đường dẫn chứng chỉ
-
-settings-dev-debug-scopes = Phạm vi quyền đã cấp
-
-settings-dev-debug-copy-mcp = Sao chép JSON cấu hình MCP
-
-settings-dev-debug-skill-path = Kỹ năng agent
-
-settings-dev-debug-key-generated = Đã tạo API key gỡ lỗi
-
-settings-dev-debug-copied = Đã sao chép vào clipboard
-
-settings-dev-debug-protocol-empty = Chưa có sự kiện gỡ lỗi nào.
-
-download-progress-label = Tải xuống
-
-download-progress-stage-downloading = Đang tải
-
-download-progress-stage-verifying = Đang xác minh
-
-download-progress-stage-extracting = Đang giải nén
-
-download-progress-stage-done = Hoàn tất
+download-progress-label = Download
+download-progress-stage-downloading = Downloading
+download-progress-stage-verifying = Verifying
+download-progress-stage-extracting = Extracting
+download-progress-stage-done = Done
