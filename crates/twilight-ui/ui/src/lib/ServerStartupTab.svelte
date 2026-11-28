@@ -1,4 +1,5 @@
 <script>
+  import { tauriInvoke } from './tauri';
   // Startup tab: memory, port, custom JVM flags, java runtime and the EULA
   // switch, with a computed startup-command preview. Saving is blocked while
   // the server runs — the backend enforces it too.
@@ -18,7 +19,7 @@
   let busy = $state(false);
 
   function api(cmd, args) {
-    return window.__TAURI__.core.invoke(cmd, args);
+    return tauriInvoke(cmd, args);
   }
 
   onMount(() => {

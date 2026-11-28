@@ -12,7 +12,7 @@ use twilight_modrinth::{Mrpack, extract_archive};
 
 use twilight_cli::ModpackArgs;
 
-use crate::accounts::{load_settings, settings_path};
+use crate::devmode::redact_secret;
 use crate::instance::resolved_instances_root;
 use crate::instances::{self, InstanceMeta, instances_root, slugify, write_meta};
 use crate::storage::shared_root;
@@ -146,6 +146,7 @@ fn meta_from_index(
         last_played: 0,
         total_time_played: 0,
         icon_key: None,
+        jvm_args: Vec::new(),
     }
 }
 
@@ -224,6 +225,32 @@ pub(crate) async fn install_pack(
         .await
         .map_err(|e| e.to_string())?;
 
+    // Provenance: only jars the pack manifest points at the Modrinth CDN are
+    // verified public artifacts; anything else stays an unnamed local mod.
+    for file in &index.files {
+        let Some(name) = file.path.strip_prefix("mods/") else {
+            continue;
+        };
+        if name.is_empty() || name.contains('/') || !name.to_ascii_lowercase().ends_with(".jar") {
+            continue;
+        }
+        let Some((project_id, version)) = file
+            .downloads
+            .first()
+            .and_then(|url| crate::provenance::modrinth_ids_from_url(url))
+        else {
+            continue;
+        };
+        let _ = crate::provenance::record_public_mod(
+            &instance_dir,
+            name,
+            &project_id,
+            None,
+            version.as_deref(),
+            "modrinth",
+        );
+    }
+
     // grid metadata: without it the scan skips the directory entirely
     let meta = meta_from_index(&index, &chosen, &loader, &loader_version);
     write_meta(&instance_dir, &meta).await?;
@@ -263,6 +290,9 @@ pub(crate) struct CurseManifest {
     pub(crate) overrides: String,
     #[serde(default)]
     pub(crate) minecraft: CurseMinecraft,
+    /// Cleanroom-style Java requirement, surfaced by import inspection.
+    #[serde(default)]
+    pub(crate) compatible_java_majors: Vec<i32>,
 }
 
 /// The `minecraft` block: target game version and the loaders the pack needs.
@@ -333,6 +363,13 @@ pub struct CurseImportReport {
 
 pub(crate) const CF_API_BASE: &str = "https://api.curseforge.com/v1";
 
+/// A disabled CurseForge toggle forces the keyless safe-mode path even when a
+/// key is still stored in Settings: the import lists the files as skipped and
+/// never contacts the API.
+pub(crate) fn effective_curseforge_key(api_key: &str, enabled: bool) -> &str {
+    if enabled { api_key.trim() } else { "" }
+}
+
 /// Resolves the instance `minecraft` dir a CurseForge pack extracts into.
 async fn game_dir_for(app: &AppHandle, instance_id: &str) -> Result<PathBuf, String> {
     instances::validate_instance_id(instance_id)?;
@@ -384,25 +421,39 @@ pub(crate) fn curse_file_name(file_name: &str, url: &str) -> String {
 /// (fetch failed or no usable URL — the import itself stays successful).
 async fn fetch_curse_file(
     client: &reqwest::Client,
+    api_base: &str,
     api_key: &str,
     project_id: u64,
     file_id: u64,
     mods_dir: &Path,
 ) -> Result<Option<String>, String> {
-    let url = format!("{CF_API_BASE}/mods/{project_id}/files/{file_id}");
-    let Ok(meta) = client
-        .get(&url)
-        .header("x-api-key", api_key)
-        .header(reqwest::header::ACCEPT, "application/json")
-        .send()
-        .await
-        .and_then(|r| r.error_for_status())
-    else {
-        return Ok(None);
-    };
-    let Ok(data) = meta.json::<serde_json::Value>().await else {
-        return Ok(None);
-    };
+    let url = format!("{api_base}/mods/{project_id}/files/{file_id}");
+    let request_url = &url;
+    let metadata = crate::net::retry_request(crate::net::MAX_ATTEMPTS, || async move {
+        client
+            .get(request_url)
+            .header("x-api-key", api_key)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .send()
+            .await
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| redact_secret(&e, api_key))?;
+    let status = metadata.status();
+    if !status.is_success() {
+        let body = metadata.text().await.unwrap_or_default();
+        return Err(redact_secret(
+            &crate::curseforge::curseforge_error_message(status, &body),
+            api_key,
+        ));
+    }
+    let data = metadata.json::<serde_json::Value>().await.map_err(|e| {
+        redact_secret(
+            &format!("cannot parse CurseForge file metadata: {e}"),
+            api_key,
+        )
+    })?;
     let download_url = data
         .pointer("/data/downloadUrl")
         .and_then(serde_json::Value::as_str)
@@ -445,11 +496,10 @@ pub async fn import_curseforge_pack(
 ) -> Result<CurseImportReport, String> {
     let bytes = std::fs::read(&zip_path).map_err(|e| format!("cannot read {zip_path}: {e}"))?;
     let game_dir = game_dir_for(&app, &instance_id).await?;
-    let api_key = load_settings(&settings_path(&app).await?)
-        .await
-        .curseforge_api_key
-        .unwrap_or_default();
-    import_curseforge_pack_core(&game_dir, api_key.trim(), &bytes).await
+    let (key, enabled) = crate::curseforge::curseforge_settings(&app).await?;
+    let api_key = effective_curseforge_key(&key, enabled);
+    let cas_root = crate::mods::cas_root_if_enabled(&app).await?;
+    import_curseforge_pack_core(&game_dir, api_key, &bytes, cas_root.as_deref()).await
 }
 
 /// Returns the single top-level wrapper folder an archive nests its files in
@@ -472,6 +522,7 @@ pub(crate) async fn import_curseforge_pack_core(
     game_dir: &Path,
     api_key: &str,
     bytes: &[u8],
+    cas_root: Option<&Path>,
 ) -> Result<CurseImportReport, String> {
     let entries = extract_archive(bytes).map_err(|e| e.to_string())?;
     let prefix = archive_prefix(&entries, "manifest.json");
@@ -507,6 +558,9 @@ pub(crate) async fn import_curseforge_pack_core(
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         std::fs::write(&dest, data).map_err(|e| e.to_string())?;
+        if let Some(cas_root) = cas_root {
+            crate::mods::cas_dedupe_dest(cas_root, &dest).await?;
+        }
         overrides_extracted += 1;
     }
 
@@ -546,6 +600,7 @@ pub(crate) async fn import_curseforge_pack_core(
         for file in &listed {
             match fetch_curse_file(
                 &client,
+                CF_API_BASE,
                 api_key.trim(),
                 file.project_id,
                 file.file_id,
@@ -553,7 +608,19 @@ pub(crate) async fn import_curseforge_pack_core(
             )
             .await
             {
-                Ok(Some(name)) => downloaded.push(name),
+                Ok(Some(name)) => {
+                    // The API resolved this file on the public CDN: record its
+                    // public identity so the crash scrubber may name it.
+                    let _ = crate::provenance::record_public_mod(
+                        game_dir.parent().unwrap_or(game_dir),
+                        &name,
+                        &file.project_id.to_string(),
+                        None,
+                        Some(&file.file_id.to_string()),
+                        "curseforge",
+                    );
+                    downloaded.push(name);
+                }
                 Ok(None) | Err(_) => {
                     skipped += 1;
                     missing_mods.push(skipped_entry(file));
@@ -747,6 +814,49 @@ mod tests {
         dir
     }
 
+    /// Loopback CurseForge file-metadata endpoint answering every request with
+    /// the same status/body (no CDN download is reached in these tests).
+    fn loopback_cf_file(status: u16, body: String) -> String {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for mut stream in listener.incoming().flatten() {
+                let mut buf = [0u8; 2048];
+                let _ = stream.read(&mut buf);
+                let response = format!(
+                    "HTTP/1.1 {status} TW\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        base
+    }
+
+    #[test]
+    fn disabled_toggle_forces_the_keyless_import_path() {
+        assert_eq!(effective_curseforge_key("  cf-key  ", true), "cf-key");
+        assert_eq!(effective_curseforge_key("  cf-key  ", false), "");
+    }
+
+    #[tokio::test]
+    async fn file_metadata_error_redacts_the_api_key() {
+        const KEY: &str = "cf-import-secret-99";
+        let api = loopback_cf_file(401, format!(r#"{{"error":"rejected key {KEY}"}}"#));
+        let client = reqwest::Client::new();
+        let dir = scratch("redact");
+        let err = fetch_curse_file(&client, &api, KEY, 42, 7, &dir)
+            .await
+            .unwrap_err();
+        assert!(err.contains("HTTP 401"), "{err}");
+        assert!(err.contains("********"), "{err}");
+        assert!(!err.contains(KEY), "raw key leaked into error: {err}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[tokio::test]
     async fn zero_key_import_extracts_overrides_and_earns_the_marker() {
         let manifest = br#"{"manifestType":"minecraftModpack","manifestVersion":1,
@@ -760,7 +870,7 @@ mod tests {
             ("overrides/", b""),
         ]);
         let game_dir = scratch("import");
-        let report = import_curseforge_pack_core(&game_dir, "", &zip)
+        let report = import_curseforge_pack_core(&game_dir, "", &zip, None)
             .await
             .unwrap();
         assert_eq!(report.name, "BareBones Template (Cleanroom)");
@@ -790,7 +900,7 @@ mod tests {
             ("overrides/../../worse.txt", b"more escaped"),
         ]);
         let game_dir = scratch("slip");
-        let report = import_curseforge_pack_core(&game_dir, "", &zip)
+        let report = import_curseforge_pack_core(&game_dir, "", &zip, None)
             .await
             .unwrap();
         assert_eq!(report.overrides_extracted, 1, "only the safe entry");
@@ -809,7 +919,7 @@ mod tests {
             ("overrides/config/x.cfg", b"x"),
         ]);
         let game_dir = scratch("other");
-        let report = import_curseforge_pack_core(&game_dir, "", &zip)
+        let report = import_curseforge_pack_core(&game_dir, "", &zip, None)
             .await
             .unwrap();
         assert!(!report.barebones_marker);
@@ -826,7 +936,7 @@ mod tests {
     async fn archives_without_a_manifest_are_rejected() {
         let zip = stored_zip(&[("readme.txt", b"no manifest")]);
         let game_dir = scratch("nomanifest");
-        let err = import_curseforge_pack_core(&game_dir, "", &zip)
+        let err = import_curseforge_pack_core(&game_dir, "", &zip, None)
             .await
             .unwrap_err();
         assert!(err.contains("manifest.json is missing"));

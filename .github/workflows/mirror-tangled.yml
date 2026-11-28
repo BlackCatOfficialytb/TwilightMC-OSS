@@ -1,0 +1,53 @@
+name: mirror-tangled
+
+on:
+  push:
+    branches: [main, beta, release]
+    tags: ['alpha-*', 'beta-*', 'v*', 'twilight-cas-*']
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-tangled
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mirror repository to Tangled
+        env:
+          TANGLED_SSH_KEY: ${{ secrets.TANGLED_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${TANGLED_SSH_KEY:-}" ]; then
+            echo "ERROR: Secret TANGLED_SSH_KEY is empty or missing!"
+            exit 1
+          fi
+
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$TANGLED_SSH_KEY" | tr -d '\r' > ~/.ssh/tangled_mirror
+          chmod 600 ~/.ssh/tangled_mirror
+
+          if ! ssh-keygen -y -P "" -f ~/.ssh/tangled_mirror >/dev/null 2>&1; then
+            echo "ERROR: TANGLED_SSH_KEY is invalid or encrypted with a passphrase! Regenerate with cmd /c 'ssh-keygen -t ed25519 ... -N \"\"'"
+            exit 1
+          fi
+
+          ssh-keyscan -t ed25519 tangled.org >> ~/.ssh/known_hosts 2>/dev/null
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/tangled_mirror -o IdentitiesOnly=yes"
+
+          echo "Tangled SSH probe (diagnostic, non-fatal):"
+          ssh -T -i "$HOME/.ssh/tangled_mirror" -o IdentitiesOnly=yes git@tangled.org || true
+
+          git clone --mirror "https://github.com/${{ github.repository }}.git" repo.git
+          cd repo.git
+          git remote add tangled "git@tangled.org:quanvm0501.tngl.sh/TwilightMC-OSS"
+          git push --force tangled "refs/heads/*:refs/heads/*"
+          git push --force tangled "refs/tags/*:refs/tags/*"

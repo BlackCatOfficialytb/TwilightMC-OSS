@@ -313,6 +313,47 @@ mod tests {
         let _ = tokio::fs::remove_file(&dest).await;
     }
 
+    #[tokio::test]
+    async fn stale_lwjgl_freetype_is_replaced_after_sha1_mismatch() {
+        // The vulnerable native sits in the shared library store; a fresh
+        // Mojang manifest publishes the patched artifact under a new sha1.
+        const PATCHED: &[u8] = b"patched lwjgl-freetype 3.3.3 native";
+        let routes: HashMap<String, (u16, Vec<u8>)> = HashMap::from([(
+            "lwjgl-freetype-3.3.3-natives-linux.jar".to_owned(),
+            (200u16, PATCHED.to_vec()),
+        )]);
+        let addr = spawn(routes).await;
+        let dir =
+            std::env::temp_dir().join(format!("twilight-freetype-refresh-{}", std::process::id()));
+        let dest =
+            dir.join("org/lwjgl/lwjgl-freetype/3.3.3/lwjgl-freetype-3.3.3-natives-linux.jar");
+        tokio::fs::create_dir_all(dest.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&dest, b"stale vulnerable native")
+            .await
+            .unwrap();
+
+        let req = DownloadRequest {
+            url: format!("http://{addr}/lwjgl-freetype-3.3.3-natives-linux.jar"),
+            dest: dest.clone(),
+            sha1: Some(sha(PATCHED)),
+        };
+        let files = ParallelDownloader::new(client(), 1)
+            .download_all(std::slice::from_ref(&req))
+            .await
+            .unwrap();
+
+        assert!(
+            !files[0].was_skipped,
+            "a mismatched cached jar must not be trusted"
+        );
+        assert_eq!(files[0].sha1, sha(PATCHED));
+        assert_eq!(tokio::fs::read(&dest).await.unwrap(), PATCHED);
+        assert_eq!(sha1_of_file(&dest).await.unwrap(), sha(PATCHED));
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
     fn leftover_parts(dir: &Path) -> usize {
         std::fs::read_dir(dir)
             .map(|rd| {

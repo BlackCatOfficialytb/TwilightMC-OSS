@@ -1,4 +1,5 @@
 <script>
+  import { tauriInvoke } from './tauri';
   // Yardarm direction's right context panel: the selection surface. Shows
   // the selected instance's identity, path and actions in Prism's order,
   // plus a playtime/version footer. The parent owns selection; actions
@@ -7,11 +8,13 @@
   import InstanceIconPicker from './InstanceIconPicker.svelte';
   import { iconKeyAsset } from './twemoji.js';
   import { t, formatDate, formatDuration } from './i18n.svelte.ts';
+  import { toast } from './alerts.svelte.js';
 
   let {
     instance,
     storage = null,
     gameRunning = false,
+    devMode = false,
     modsCount = null,
     groups = [],
     onlaunch,
@@ -79,7 +82,7 @@
   async function applyIconKey(key) {
     iconNotice = '';
     try {
-      await window.__TAURI__.core.invoke('set_instance_icon_key', {
+      await tauriInvoke('set_instance_icon_key', {
         instanceId: instance.id,
         iconKey: key,
       });
@@ -100,7 +103,7 @@
       filters: [{ name: t('filter-images'), extensions: ['png', 'jpg', 'jpeg', 'webp', 'ico'] }],
     });
     if (!picked) return null;
-    const path = await window.__TAURI__.core.invoke('set_instance_icon', {
+    const path = await tauriInvoke('set_instance_icon', {
       instanceId: instance.id,
       imagePath: String(picked),
     });
@@ -112,6 +115,28 @@
   function instancePath() {
     if (!storage) return instance.id;
     return [storage.instances_dir.replace(/\\/g, '/'), instance.id].join('/');
+  }
+
+  async function copyValue(value, message) {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast(t(message), 'success');
+    } catch (e) {
+      toast(String(e), 'error');
+    }
+  }
+
+  async function copyRawLaunchCommand(unredacted = false) {
+    if (unredacted && !window.confirm(t('dev-unredacted-warning'))) return;
+    try {
+      const command = await tauriInvoke('get_raw_launch_command', {
+        instanceId: instance.id,
+        unredacted,
+      });
+      await copyValue(command, unredacted ? 'dev-copied-command-unredacted' : 'dev-copied-command');
+    } catch (e) {
+      toast(String(e), 'error');
+    }
   }
 
   // i18n-ready: the whole sentence is one Fluent template with Intl-formatted
@@ -316,6 +341,38 @@
     >
       <LauncherIcon name="copy" size={13} /> {t('action-copy')}
     </button>
+    {#if devMode}
+      <div class="mt-1 border-t border-(--border) pt-1">
+        <p class="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-(--text-muted)">
+          {t('dev-actions-title')}
+        </p>
+        <button
+          class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+          onclick={copyRawLaunchCommand}
+        >
+          <LauncherIcon name="copy" size={13} /> {t('dev-copy-command')}
+        </button>
+        <button
+          class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+          title={t('dev-unredacted-warning')}
+          onclick={() => copyRawLaunchCommand(true)}
+        >
+          <LauncherIcon name="copy" size={13} /> {t('dev-copy-command-unredacted')}
+        </button>
+        <button
+          class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+          onclick={() => copyValue(instance.id, 'dev-copied-id')}
+        >
+          <LauncherIcon name="copy" size={13} /> {t('dev-copy-id')}
+        </button>
+        <button
+          class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-(--text-muted) hover:bg-(--bg-subtle) hover:text-(--text-main)"
+          onclick={() => copyValue(instancePath(), 'dev-copied-path')}
+        >
+          <LauncherIcon name="folder" size={13} /> {t('dev-copy-path')}
+        </button>
+      </div>
+    {/if}
     <button
       class="flex w-full items-center gap-1.5 rounded px-3 py-2 text-[12px] text-rose-400 hover:bg-rose-500/10"
       onclick={ondelete}

@@ -2,7 +2,7 @@
 name = "twilight-pack"
 version.workspace = true
 edition.workspace = true
-license.workspace = true
+license = "Apache-2.0"
 description = "TwilightMC .twpack instance format (7z) with CLI-first, pure-Rust fallback"
 
 [dependencies]

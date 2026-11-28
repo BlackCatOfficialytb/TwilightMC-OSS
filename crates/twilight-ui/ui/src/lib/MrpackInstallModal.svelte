@@ -1,4 +1,5 @@
 <script>
+  import { tauriInvoke } from './tauri';
   // Global .mrpack drop target: shows the pack's identity (name, summary,
   // target version, loader, file counts) and installs it into a new managed
   // instance named by the input. The parent owns grid refresh + selection.
@@ -28,7 +29,7 @@
   onMount(async () => {
     const closer = pushOverlay(() => onclose?.());
     try {
-      info = await window.__TAURI__.core.invoke('inspect_modpack', { pathOrUrl: path });
+      info = await tauriInvoke('inspect_modpack', { pathOrUrl: path });
       name = info.name;
     } catch (e) {
       inspectError = String(e);
@@ -41,7 +42,7 @@
     busy = true;
     error = '';
     try {
-      const id = await window.__TAURI__.core.invoke('install_mrpack', {
+      const id = await tauriInvoke('install_mrpack', {
         pathOrUrl: path,
         instanceName: name.trim(),
       });

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 
 use twilight_auth::Account;
+use twilight_launch::GcSettings;
 
 use crate::error::CliError;
 
@@ -83,9 +84,16 @@ pub struct LaunchArgs {
     #[arg(long, value_name = "FILE", env = "TWILIGHTMC_JAVA")]
     pub java: Option<PathBuf>,
     /// Mod loader composited onto the launch (`fabric`, `quilt`, `forge`,
-    /// `neoforge`; case-insensitive).
+    /// `neoforge`; `horizon` starts the native Rust engine instead of a JVM).
     #[arg(long, value_name = "LOADER", env = "TWILIGHTMC_LOADER")]
     pub loader: Option<String>,
+    /// Native Horizon client binary; omitted = discovered on PATH / beside us.
+    #[arg(long, value_name = "FILE", env = "TWILIGHTMC_HORIZON")]
+    pub horizon: Option<PathBuf>,
+    /// Read-once Horizon session JSON file instead of handing the token over
+    /// on stdin (the game deletes the file).
+    #[arg(long, value_name = "FILE", env = "TWILIGHTMC_HORIZON_SESSION")]
+    pub horizon_session: Option<PathBuf>,
     /// Pinned loader version; empty/omitted resolves the latest stable release
     /// (`forge`/`neoforge`: the index's recommended build for this game version).
     #[arg(long, value_name = "VERSION", env = "TWILIGHTMC_LOADER_VERSION")]
@@ -109,8 +117,18 @@ pub struct LaunchConfig {
     pub java: Option<PathBuf>,
     pub loader: Option<String>,
     pub loader_version: Option<String>,
+    /// Explicit `horizon-client` binary for the native engine path.
+    pub horizon: Option<PathBuf>,
+    /// Read-once session JSON for the native engine path.
+    pub horizon_session: Option<PathBuf>,
     /// Extra JVM arguments appended after the manifest's own (`-Xms`/`-Xmx`).
     pub jvm_args: Vec<String>,
+    /// Console advisories emitted after the diagnostic header and before the
+    /// game process starts (`[DEV]` notices from the desktop host).
+    pub advisories: Vec<String>,
+    /// GC preset/custom flags. Resolved by the pipeline once the actual Java
+    /// executable is selected, so the major is never guessed as `0`.
+    pub gc: GcSettings,
     /// Quick-play: join this server address right after the game starts.
     pub server: Option<String>,
     /// Quick-play: launch straight into this singleplayer world folder
@@ -144,7 +162,11 @@ impl LaunchArgs {
             java: self.java.clone(),
             loader: self.loader.clone(),
             loader_version: self.loader_version.clone(),
+            horizon: self.horizon.clone(),
+            horizon_session: self.horizon_session.clone(),
             jvm_args: Vec::new(),
+            advisories: Vec::new(),
+            gc: GcSettings::default(),
             account: None,
             server: self.server.clone(),
             world: None,
@@ -170,6 +192,35 @@ mod tests {
             Command::Launch(args) => args,
             other => panic!("wrong subcommand: {other:?}"),
         }
+    }
+
+    #[test]
+    fn horizon_engine_flags_parse_straight_through() {
+        let Command::Launch(args) = parse(&[
+            "twilight",
+            "launch",
+            "26.3",
+            "--loader",
+            "horizon",
+            "--horizon",
+            r"D:\h\horizon-client.exe",
+            "--horizon-session",
+            r"D:\h\session.json",
+        ]) else {
+            panic!("expected launch subcommand");
+        };
+        assert_eq!(args.loader.as_deref(), Some("horizon"));
+        assert_eq!(
+            args.horizon.as_deref(),
+            Some(Path::new(r"D:\h\horizon-client.exe"))
+        );
+        assert_eq!(
+            args.horizon_session.as_deref(),
+            Some(Path::new(r"D:\h\session.json"))
+        );
+        let cfg = args.to_config().unwrap();
+        assert_eq!(cfg.horizon, args.horizon);
+        assert_eq!(cfg.horizon_session, args.horizon_session);
     }
 
     #[test]

@@ -50,6 +50,7 @@ Automated coding agents (including OpenClaw, NanoClaw, Cursor Agent, Devin, etc.
   - Introducing new external dependencies (`Cargo.toml`) without prior human approval in a linked issue.
   - Architectural rewrites or broad refactorings across multiple crates.
   - Modifying files inside `upstream/` submodules.
+- Any development happens through the launcher, never via `upstream/` submodule contents directly.
 * **Allowed without prior approval:**
   - Bug fixes directly addressing an existing, linked issue.
   - Security and vulnerability patches.
@@ -80,7 +81,7 @@ TwilightMC/
 │   ├── twilight-launch/     # JVM argument builder & process spawner
 │   ├── twilight-auth/       # Offline & Custom Yggdrasil authentication
 │   └── twilight-horizon/    # Clean asset pipeline for Horizon Rust engine
-└── upstream/                # Submodules for reference only (Prism, Freesm, modrinth-code)
+└── upstream/                # Reference submodules (Prism, Freesm, modrinth-code, horizon)
 ```
 
 ### Strict Coding Rules:
@@ -90,7 +91,11 @@ TwilightMC/
    - Use standard Rust types (`String`, `Vec`, `HashMap`, `bytes::Bytes`).
    - Use `tokio` for async runtimes and `tokio::sync::mpsc` for message passing.
 2. **Submodule Isolation:**
-   - Code inside `upstream/prism`, `upstream/freesm`, and `upstream/modrinth-code` is strictly for **clean-room reverse-engineering and architectural reference**.
+   - Code inside `upstream/prism`, `upstream/freesm`, `upstream/modrinth-code` and
+     `upstream/horizon` is strictly for **clean-room reverse-engineering and
+     architectural reference**; only the `twilight-horizon` crate consumes
+     `upstream/horizon` as a read-only tool dependency, and the submodule
+     itself is never modified, compiled directly or linked into other crates.
    - Do **not** compile, alter, or link upstream C++ code directly into TwilightMC crates.
 3. **Robust Error Handling:**
    - Define domain-specific errors using `thiserror` in each crate.

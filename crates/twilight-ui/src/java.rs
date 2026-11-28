@@ -64,6 +64,40 @@ pub async fn probe_java_path(path: String) -> Result<JavaRuntime, String> {
     })
 }
 
+/// Downloads a Temurin JRE (JDK fallback) from Adoptium into the configured
+/// "Java Runtimes" folder, probes it, registers it as a custom runtime and
+/// selects it. Strictly user-triggered: no install happens without a click.
+#[tauri::command]
+pub async fn download_adoptium_java(
+    app: tauri::AppHandle,
+    major: i32,
+) -> Result<JavaRuntime, String> {
+    if !matches!(major, 8 | 17 | 21 | 25) {
+        return Err(format!(
+            "unsupported Java major {major}; expected 8, 17, 21 or 25"
+        ));
+    }
+    let root = std::path::PathBuf::from(crate::storage::get_storage(app.clone()).await?.java_dir);
+    let client = reqwest::Client::new();
+    let installed = twilight_runtime::install_adoptium_java(
+        &client,
+        twilight_runtime::ADOPTIUM_API_BASE,
+        &root,
+        major,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    let executable = installed.executable.display().to_string();
+    crate::prefs::add_custom_java(app.clone(), executable.clone()).await?;
+    crate::prefs::apply_java_runtime(app, Some(executable.clone())).await?;
+    Ok(JavaRuntime {
+        major: installed.version.major,
+        version: installed.version.full,
+        home: installed.jvm_home.display().to_string(),
+        executable,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

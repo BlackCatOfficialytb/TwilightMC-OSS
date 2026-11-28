@@ -10,7 +10,7 @@ use twilight_auth::{
     ElybyDevicePoll, ElybyToken, MicrosoftAuth, generate_offline_uuid,
 };
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub(crate) struct Settings {
     #[serde(default)]
     pub(crate) active_account: Option<String>,
@@ -41,6 +41,12 @@ pub(crate) struct Settings {
     /// `light` / `dark`; falls back to the OS preference.
     #[serde(default)]
     pub(crate) theme: Option<String>,
+    /// UI language: `en-US` / `vi-VN`; `None` = detect on startup.
+    #[serde(default)]
+    pub(crate) locale: Option<String>,
+    /// Update stream: `bolide` / `star` / `stable` / `snapshot`.
+    #[serde(default = "default_update_channel")]
+    pub(crate) update_channel: Option<String>,
     /// Overridable Microsoft OAuth application id (device flow); empty =
     /// the default public client id.
     #[serde(default)]
@@ -83,6 +89,20 @@ pub(crate) struct Settings {
     /// FOSS flow (Modrinth core mods + manual zip import, no key needed).
     #[serde(default)]
     pub(crate) curseforge_api_key: Option<String>,
+    /// Whether CurseForge integration is enabled; defaults to **true** so
+    /// existing settings files keep the previous behavior.
+    #[serde(default = "default_true")]
+    pub(crate) curseforge_enabled: bool,
+    /// Opt-in anonymized crash reporter. Strictly off: nothing is ever sent
+    /// silently, the user must review and click Send in the preview dialog.
+    #[serde(default)]
+    pub(crate) crash_reporter_enabled: bool,
+    /// Optional endpoint for anonymized reports; blank = copy/GitHub only.
+    #[serde(default)]
+    pub(crate) crash_endpoint: Option<String>,
+    /// Whether a non-zero game exit opens the review dialog.
+    #[serde(default = "default_true")]
+    pub(crate) crash_prompt_enabled: bool,
     /// Horizon (native Rust engine) binary; empty = Horizon instances refuse
     /// to launch with a "set it in Settings" message. Never bundled.
     #[serde(default)]
@@ -98,6 +118,94 @@ pub(crate) struct Settings {
     /// GC flags.
     #[serde(default)]
     pub(crate) extra_jvm_args: Option<String>,
+    /// Zero-copy linking: installed mods are hardlinks into the global CAS
+    /// (with symlink/junction/copy fallback) instead of duplicated jars.
+    /// Defaults to **true** for both existing and new settings files.
+    #[serde(default = "default_true")]
+    pub(crate) use_cas_links: bool,
+    /// App Developer Mode: unlocks diagnostics and debugging tools.
+    #[serde(default)]
+    pub(crate) dev_mode: bool,
+    /// Horizon developer install: sets
+    /// `HORIZON_LAUNCHER_DEVELOPER_OFFLINE=1` (Dev Mode only).
+    #[serde(default)]
+    pub(crate) horizon_dev_offline: bool,
+    /// Horizon developer install: passes `--developer-single-player`
+    /// (Dev Mode only).
+    #[serde(default)]
+    pub(crate) horizon_dev_single_player: bool,
+    /// Allows a Horizon binary outside the launcher-managed release store
+    /// (local build / unsigned artifact) while Dev Mode is active.
+    #[serde(default)]
+    pub(crate) horizon_allow_unsigned_local: bool,
+    /// Add a JDWP socket to every JVM game launch (Dev Mode only).
+    #[serde(default)]
+    pub(crate) jdwp_enabled: bool,
+    /// Port for the JDWP socket; 0 lets the JVM choose a free port.
+    #[serde(default = "default_jdwp_port")]
+    pub(crate) jdwp_port: u16,
+    /// Export and verbose Sphinx Mixin debug dumps (Dev Mode only).
+    #[serde(default)]
+    pub(crate) mixin_debug: bool,
+}
+
+fn default_jdwp_port() -> u16 {
+    5005
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_update_channel() -> Option<String> {
+    Some("bolide".to_owned())
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            active_account: None,
+            shared_dir: None,
+            instances_dir: None,
+            java_path: None,
+            custom_java_paths: Vec::new(),
+            selected_java_path: None,
+            min_memory_mb: 0,
+            max_memory_mb: 0,
+            theme: None,
+            locale: None,
+            update_channel: default_update_channel(),
+            msa_client_id: None,
+            elyby_client_id: None,
+            mode: None,
+            versions_dir: None,
+            mods_dir: None,
+            icons_dir: None,
+            java_dir: None,
+            skins_dir: None,
+            blind_mode: false,
+            deaf_mode: false,
+            downloads_dir: None,
+            servers_dir: None,
+            curseforge_api_key: None,
+            curseforge_enabled: true,
+            crash_reporter_enabled: false,
+            crash_endpoint: None,
+            crash_prompt_enabled: true,
+            horizon_path: None,
+            gc_preset: None,
+            custom_gc_flags: Vec::new(),
+            extra_jvm_args: None,
+            use_cas_links: true,
+            dev_mode: false,
+            horizon_dev_offline: false,
+            horizon_dev_single_player: false,
+            horizon_allow_unsigned_local: false,
+            jdwp_enabled: false,
+            jdwp_port: default_jdwp_port(),
+            mixin_debug: false,
+        }
+    }
 }
 
 async fn app_dir(app: &AppHandle) -> Result<PathBuf, String> {

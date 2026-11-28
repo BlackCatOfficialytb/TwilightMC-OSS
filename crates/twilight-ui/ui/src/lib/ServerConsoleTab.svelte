@@ -1,4 +1,5 @@
 <script>
+  import { tauriInvoke } from './tauri';
   // Terminal / Console tab: live metric cards with SVG sparklines (polled
   // every 2s while mounted), the colorized console output and the sticky
   // stdin input with Up/Down command history, plus the address & Minekube
@@ -22,7 +23,7 @@
   const MAX_POINTS = 60;
 
   function api(cmd, args) {
-    return window.__TAURI__.core.invoke(cmd, args);
+    return tauriInvoke(cmd, args);
   }
 
   async function poll() {

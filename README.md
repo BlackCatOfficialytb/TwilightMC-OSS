@@ -8,12 +8,15 @@
 [![Language: Rust 2024](https://img.shields.io/badge/Rust-2024%20Edition-black?logo=rust&logoColor=white&style=flat-square)](https://www.rust-lang.org/)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Chat-5865F2?logo=discord&logoColor=white&style=flat-square)](https://dsc.gg/blackcatofficial)
 
-**TwilightMC** is a clean-room, Rust-bred Minecraft launcher: a Prism Launcher–style
-core rebuilt from scratch in pure Rust — Mojang manifest pipelines, metadata
-failover mirrors, parallel SHA-1-verified downloads, JVM discovery and offline
-profiles — shipped as a dependency-free CLI binary named `twilight` plus the
-`twilight-ui` Tauri v2 desktop GUI, with first-class Fabric/Quilt loader
-compositing and Modrinth `.mrpack` installation.
+**TwilightMC** is a clean-room, Rust-bred Minecraft launcher **and server
+manager**: a Prism Launcher–style core rebuilt from scratch in pure Rust —
+Mojang manifest pipelines, metadata failover mirrors, parallel SHA-1-verified
+downloads, JVM discovery and offline profiles — shipped as a dependency-free
+CLI binary named `twilight` plus the `twilight-ui` Tauri v2 desktop GUI. It
+composites Fabric, Quilt, Forge, NeoForge, Legacy Fabric and CleanroomMC
+instances, installs Modrinth `.mrpack` and Prism/CurseForge packs, runs a
+native Horizon engine path over a uv-style zero-copy CAS, and creates and
+manages Minecraft servers (including PumpkinMC/SteelMC and Minekube Connect).
 
 No Mojang assets or launcher code is bundled or copied: everything here is
 original work (see [CONTRIBUTING.md](CONTRIBUTING.md)).
@@ -28,20 +31,48 @@ original work (see [CONTRIBUTING.md](CONTRIBUTING.md)).
   (classic `assets/virtual/<id>` exports included), extracts natives with the
   platform 7-Zip CLI, assembles the JVM command line and spawns the game with
   output streamed back to the console.
-- **Loader compositing** — `--loader fabric|quilt` (case-insensitive,
-  `--loader-version` optional) resolves the Fabric (meta v2) or Quilt (meta v3)
-  profile into a composite launch: the Knot launcher main class takes over,
-  loader libraries join the shared store and lead the classpath, and the
-  vanilla client jar stays last. `--dry-run` shows the exact plan first.
-- **Modrinth `.mrpack` installation** — `twilight modpack install` reads an
-  `.mrpack` archive from a path or `http(s)://` URL, parses the strict
-  `modrinth.index.json` (format 1), skips server-unwanted files, stages every
-  client download, extracts `overrides/` safely (zip-slip guarded) and stages
-  the loader libraries implied by the index dependencies. A pack claiming both
-  fabric-loader and quilt-loader is rejected as ambiguous.
-- **Offline profiles with no account wizard** — deterministic offline v3 UUIDs
-  from the `--username` you give, plus Microsoft account token structures for
-  future use.
+- **Six-loader compositing** — Fabric (meta v2), Quilt (meta v3), Forge,
+  NeoForge, Legacy Fabric and CleanroomMC resolve into one composite launch:
+  the loader main class takes over, loader libraries join the shared store and
+  lead the classpath, and the vanilla client jar stays last. CleanroomMC
+  launches pass the BareBones core-mod gate, with 1-click Modrinth installs
+  for Fugue, MixinBooter and ConfigAnyTime. `--dry-run` shows the exact plan
+  first.
+- **Modrinth & universal pack import** — `twilight modpack install` reads an
+  `.mrpack` from a path or `http(s)://` URL (strict `modrinth.index.json`,
+  client-env filtering, zip-slip-guarded overrides, loader libraries). The GUI
+  adds a searchable Modrinth browser with 1-click SHA-1-verified installs,
+  global drag-and-drop for `.mrpack`/`.zip`/`.twpack`, Prism/MultiMC instance
+  import and CurseForge `manifest.json` packs (keyless imports list skipped
+  files instead of failing). `.twpack` is TwilightMC's 7z instance container
+  with a pure-Rust fallback encoder and traversal-guarded extraction.
+- **Microsoft accounts & 3D skins** — OAuth2 device-code sign-in through the
+  Xbox Live → XSTS → Minecraft Services chain, MSA refresh-token grants,
+  offline v3 UUIDs, custom Yggdrasil/Ely.by servers with sha256-verified
+  authlib-injector, plus an in-app 3D skin/cape viewer and editor.
+- **Server creator & Minekube Connect** — Vanilla, Paper, Purpur, Fabric,
+  Forge, NeoForge, Velocity, PumpkinMC (Rust) and SteelMC (Rust) servers with
+  version/build resolution, EULA and `server.properties` editors, live console
+  with command input, CPU/memory metrics, file manager, backups, startup
+  flags, AuthMe/Connect plugin installs and the Minekube Connect tunnel
+  (install/enable/disable, share-address detection, live tunnel status).
+- **Native Horizon engine** — clean-room integration with `horizon-client`
+  (`--resources/--game-dir/--home`, read-once session on stdin, prepared
+  resource schema 7 / output version 5). Releases install from Settings, and
+  Mojang assets are prepared on demand and linked from the CAS — never
+  bundled.
+- **uv-style zero-copy storage** — the Apache-2.0 `twilight-cas` crate ingests
+  blobs into a global SHA-1 store and links them with a hardlink → NTFS
+  junction → symlink → copy cascade, so instances share `libraries/`,
+  `assets/` and mods without admin privileges.
+- **Accessibility, themes & localization** — nine theme presets (Twilight,
+  Catppuccin ×4, Nord, Tokyo Night, Gruvbox ×2, High Contrast), Blind Mode
+  with Minecraft Access guidance, Deaf Mode with enforced subtitles, and a
+  complete English/Vietnamese Fluent catalogue with a live language switch.
+- **App Developer Mode** — an opt-in 7-click unlock that reveals the 🛠️
+  Developer tab: JDWP debugger attach (`address=*:5005` by default), Mixin
+  export/verbose flags, WebView DevTools, symlink/CAS diagnostics and a raw
+  config viewer. Debug flags are injected only when Developer Mode is on.
 - **Modest node requirements** — one binary, one stable Rust toolchain to
   build, and a `7z` executable on `PATH` for native-extraction days.
 
@@ -176,21 +207,24 @@ the artifact root (point it at a Prism data dir to reuse its stores).
 
 ## Workspace architecture
 
-Ten focused crates, each network-free at its core and covered by its own
-tests (loopback HTTP servers included):
+Thirteen focused crates, each covered by its own tests — network paths run
+against loopback HTTP servers, so the suite stays hermetic:
 
 | Crate | Responsibility |
 | --- | --- |
 | `twilight-manifest` | Version list / version file parsing, metadata failover mirrors, per-version Java compat and asset-index exposure. |
 | `twilight-downloader` | Parallel artifact downloads with SHA-1 verification and staging summaries. |
-| `twilight-horizon` | Asset store; virtual indexes additionally export the classic `assets/virtual/<id>` tree. |
+| `twilight-cas` | uv-style global content-addressable store with hardlink → NTFS junction → symlink → copy cascading links; Apache-2.0, self-contained and crates.io-ready (`v0.1.0`). |
+| `twilight-horizon` | Clean-room native Horizon integration: release install, prepared-resource schema 7, on-demand Mojang asset store, read-once session hand-over and `horizon-client` launch assembly. |
 | `twilight-runtime` | System JVM discovery (PATH + OS roots + `JAVA_HOME`/Windows registry) and best-JVM selection against required majors. |
-| `twilight-launch` | Classpath/argument assembly, natives extraction (7-Zip CLI), asynchronous process spawner. |
-| `twilight-auth` | Offline profile generation (deterministic v3 UUIDs) and Microsoft token structures. |
-| `twilight-modloader` | Fabric (meta v2) / Quilt (meta v3) profile resolution into composite Knot launch data. |
+| `twilight-launch` | Classpath/argument assembly, natives extraction (7-Zip CLI), asynchronous process spawner, Cleanroom BareBones gate and opt-in JDWP/Mixin debug flags. |
+| `twilight-auth` | Offline v3 UUID profiles, Microsoft OAuth2 device flow (Xbox → XSTS → Minecraft), MSA refresh and sha256-verified authlib-injector. |
+| `twilight-modloader` | Fabric, Quilt, Forge, NeoForge, Legacy Fabric and CleanroomMC profile resolution into composite launch data. |
 | `twilight-modrinth` | `.mrpack` engine: strict index parsing, env filtering, pure-Rust ZIP/DEFLATE reader (CRC-32 verified), zip-slip-safe overrides extraction, installer. |
+| `twilight-pack` | `.twpack` instance format: 7z CLI-first with a pure-Rust encoder fallback and zip-slip-guarded extraction. |
+| `twilight-server` | Server engine: nine supported softwares, artifact resolution, EULA/`server.properties` management, Minekube Connect/AuthMe assets and async process control. |
 | `twilight-cli` | clap 4 command surface, isolated `ArtifactStaging` under `<temp>/twilightmc_staging`, and the end-to-end `launch` / `modpack install` pipelines. |
-| `twilight-ui` | Tauri v2 desktop launcher interface (Svelte 5 + Tailwind v4 frontend) bridging the backend crates over IPC. |
+| `twilight-ui` | Tauri v2 desktop launcher and server manager (Svelte 5 + Tailwind v4 frontend) bridging the backend crates over IPC, with Modrinth browsing, account manager, CAS/Developer diagnostics and EN/VI localization. |
 
 ## Testing
 

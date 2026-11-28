@@ -3,15 +3,22 @@ name = "twilight-horizon"
 version.workspace = true
 edition.workspace = true
 license = "Apache-2.0"
-description = "Clean-room Horizon native-engine asset pipeline: verified vanilla asset stores and Horizon manifests, nothing Mojang-copyrighted is bundled"
+description = "Clean-room Horizon native-engine integration: prepared resources, Launch API probing, release discovery and command assembly; nothing Mojang-copyrighted is bundled"
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+reqwest = { workspace = true }
+sha1 = { workspace = true }
+sha2 = { workspace = true }
+flate2 = { workspace = true }
 
+twilight-cas = { path = "../twilight-cas" }
 twilight-downloader = { path = "../twilight-downloader" }
+twilight-manifest = { path = "../twilight-manifest" }
+twilight-modrinth = { path = "../twilight-modrinth" }
 
 [dev-dependencies]
 sha1 = { workspace = true }

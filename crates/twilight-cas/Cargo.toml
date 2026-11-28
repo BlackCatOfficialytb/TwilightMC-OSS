@@ -1,0 +1,20 @@
+[package]
+name = "twilight-cas"
+description = "Cross-platform Content-Addressable Storage (CAS) and cascading zero-copy link engine (Hardlink, NTFS Junction, Symlink, Copy fallback) inspired by uv"
+version = "0.1.0"
+edition.workspace = true
+license = "Apache-2.0"
+repository = "https://github.com/BlackCatOfficialytb/TwilightMC-OSS"
+homepage = "https://github.com/BlackCatOfficialytb/TwilightMC-OSS/tree/main/crates/twilight-cas"
+readme = "README.md"
+keywords = ["cas", "hardlink", "symlink", "deduplication", "storage"]
+categories = ["filesystem", "caching"]
+
+[dependencies]
+# Minimal tokio surface for a standalone crates.io library: async filesystem,
+# read/seek/copy helpers, and the current-thread runtime used by the tests.
+# No `path` dependencies, so the packaged manifest is self-contained.
+tokio = { version = "1", features = ["fs", "io-util", "macros", "rt"] }
+sha1 = "0.10"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"

@@ -50,6 +50,20 @@ jobs:
       release_name: ${{ steps.vars.outputs.release_name }}
     steps:
       - uses: actions/checkout@v7
+      - name: Audit upstream/horizon is read-only
+        run: |
+          # Only enforce when the submodule is initialized in this checkout.
+          if [ ! -d upstream/horizon/.git ]; then
+            echo "upstream/horizon submodule not initialized; audit skipped"
+            exit 0
+          fi
+          status=$(git -C upstream/horizon status --porcelain 2>/dev/null)
+          if [ -n "$status" ]; then
+            echo "$status"
+            echo "error: upstream/horizon must stay read-only (Mission 5)">&2
+            exit 1
+          fi
+          git diff --exit-code --stat upstream/horizon
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       # this gate compiles the whole workspace, Tauri UI crate included
@@ -323,7 +337,13 @@ jobs:
           set -e
           case "$CHANNEL" in
             snapshot) TITLE="TwilightMC Snapshot v${VERSION}-${DATE}-${COMMIT}" ;;
-            alpha)    TITLE="TwilightMC Bolide (${TAG})" ;;
+            alpha)
+              # Backported 0.0.x tags are maintenance builds, named explicitly.
+              case "$TAG" in
+                alpha-v0.0.*) TITLE="TwilightMC Bolide v${TAG#alpha-v} (Backported)" ;;
+                *)            TITLE="TwilightMC Bolide (${TAG})" ;;
+              esac
+              ;;
             beta)     TITLE="TwilightMC Star (${TAG})" ;;
             *)        TITLE="TwilightMC ${TAG}" ;;
           esac

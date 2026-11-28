@@ -6,15 +6,19 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use tokio::sync::mpsc;
 
-use twilight_auth::Account;
+use twilight_auth::{Account, AccountType};
 use twilight_downloader::{
-    AssetIndex, DownloadRequest, FREESM_META_BASE, PRISM_META_BASE, ParallelDownloader,
-    fetch_json_failover, resolve_vanilla_version, vanilla_sources,
+    AssetIndex, DownloadRequest, ParallelDownloader, fetch_json_failover, fetch_version_manifest,
+    vanilla_sources,
 };
-use twilight_horizon::AssetStore;
+use twilight_horizon::{
+    AssetStore, HorizonError, InstallRequest, LaunchOptions, client_command,
+    discover_client_binaries, ensure_resources, resources_dir, session_json,
+};
 use twilight_launch::{
     GameOptions, LaunchEvent, LaunchPlan, ProfileVars, QuickPlay, active_paths, classpath_string,
     game_arguments, inject_account_vars, jvm_arguments, replace_tokens_in, separator,
@@ -145,6 +149,16 @@ async fn resolve_java(
         executable: best.executable.clone(),
         version: Some(best.version.clone()),
     })
+}
+
+/// Maps a resolved Java selection to the GC resolver's major argument. `0` is
+/// the explicit "unknown" sentinel (the probe failed), never a fake version.
+fn java_major_for_gc(java: &JavaSelection) -> i32 {
+    java.version
+        .as_ref()
+        .map(|version| version.major)
+        .filter(|major| *major > 0)
+        .unwrap_or(0)
 }
 
 /// Validates the `--loader` token case-insensitively (`None` = vanilla only).
@@ -491,20 +505,184 @@ fn build_diagnostics(
 /// Runs the `launch` subcommand: metadata failover, JVM selection, artifact
 /// downloads, horizon assets, natives extraction, spawn. `--dry-run` stops
 /// after the (network-read-only) plan assembly, prints and exits 0.
+/// Native Horizon path: prepare the resources Horizon reads, assemble its
+/// documented command line and hand the Microsoft session over on stdin.
+async fn run_horizon_cli(cfg: &LaunchConfig, account: &Account) -> Result<i32, CliError> {
+    let binary = cfg
+        .horizon
+        .clone()
+        .or_else(|| discover_client_binaries().into_iter().next())
+        .ok_or_else(|| {
+            CliError::Horizon(HorizonError::Probe(
+                "no horizon-client binary found; pass --horizon /path/to/horizon-client".to_owned(),
+            ))
+        })?;
+    if !cfg.dry_run && !binary.is_file() {
+        return Err(CliError::Horizon(HorizonError::Probe(format!(
+            "{} does not exist",
+            binary.display()
+        ))));
+    }
+
+    let client = reqwest::Client::new();
+    // Fresh piston-meta first; the shared cache only covers offline launches.
+    let manifest = fetch_version_manifest(
+        &client,
+        &vanilla_sources(),
+        &cfg.version_or_id,
+        Some(&cfg.shared_dir.join("meta")),
+    )
+    .await?;
+    let version =
+        twilight_manifest::parse_version_file(&manifest.raw.to_string()).map_err(|source| {
+            CliError::ManifestParse {
+                id: manifest.id.clone(),
+                source,
+            }
+        })?;
+    let client_jar = version.client().ok_or_else(|| {
+        CliError::Horizon(HorizonError::MissingResourceFile(format!(
+            "{} declares no client jar download",
+            manifest.id
+        )))
+    })?;
+    let index_info = version.effective_asset_index().ok_or_else(|| {
+        CliError::Horizon(HorizonError::MissingResourceFile(format!(
+            "{} declares no asset index",
+            manifest.id
+        )))
+    })?;
+
+    // A dry run never downloads, but still shows the real paths it would use.
+    let resources = if cfg.dry_run {
+        resources_dir(&cfg.shared_dir, &manifest.id)
+    } else {
+        ensure_resources(
+            &client,
+            &InstallRequest {
+                version: &manifest.id,
+                shared_root: &cfg.shared_dir,
+                client: client_jar,
+                asset_index: &index_info,
+            },
+        )
+        .await?
+        .dir
+    };
+    let instance_dir = cfg
+        .instance_dir
+        .clone()
+        .unwrap_or_else(|| cfg.shared_dir.join("instances").join(&manifest.id));
+    let game_dir = instance_dir.join("minecraft");
+    let home = instance_dir.join("horizon");
+    if !cfg.dry_run {
+        tokio::fs::create_dir_all(&game_dir).await?;
+        tokio::fs::create_dir_all(&home).await?;
+    }
+
+    let mut options = LaunchOptions::new(&resources, &game_dir, &home);
+    options.quick_play_multiplayer = cfg.server.clone();
+    options.quick_play_singleplayer = cfg.world.clone().filter(|_| cfg.server.is_none());
+    let session = if let Some(file) = &cfg.horizon_session {
+        options.session_file = Some(file.clone());
+        None
+    } else if account.account_type == AccountType::Microsoft && !cfg.dry_run {
+        let token = account
+            .access_token
+            .as_deref()
+            .filter(|token| !token.trim().is_empty())
+            .ok_or_else(|| {
+                CliError::Horizon(HorizonError::Session(
+                    "the active Microsoft account has no Minecraft access token; sign in again"
+                        .to_owned(),
+                ))
+            })?;
+        let json = session_json(&account.username, &account.uuid.to_string(), token)?;
+        options.session_stdin = true;
+        Some(json)
+    } else if !cfg.dry_run {
+        return Err(CliError::Horizon(HorizonError::Launch(
+            "Horizon requires a Microsoft account that owns Minecraft (or --horizon-session)"
+                .to_owned(),
+        )));
+    } else {
+        None
+    };
+    let command = client_command(&binary, &options)?;
+    if cfg.dry_run {
+        println!("{}", command.display());
+        return Ok(0);
+    }
+
+    let mut process = tokio::process::Command::new(&command.program);
+    process.args(&command.args);
+    for (key, value) in &command.environment {
+        process.env(key, value);
+    }
+    for key in &command.remove_environment {
+        process.env_remove(key);
+    }
+    let mut child = process.spawn()?;
+    if let Some(session) = session {
+        use tokio::io::AsyncWriteExt;
+        let mut stdin = child.stdin.take().ok_or_else(|| {
+            CliError::Horizon(HorizonError::Session(
+                "Horizon stdin pipe unavailable".to_owned(),
+            ))
+        })?;
+        stdin.write_all(session.as_bytes()).await?;
+        drop(stdin);
+    }
+    let status = child.wait().await?;
+    Ok(status.code().unwrap_or(-1))
+}
+
 pub async fn run_launch(args: LaunchArgs) -> Result<i32, CliError> {
     run_launch_with(args.to_config()?, None).await
 }
 
 /// Launches from a fully resolved [`LaunchConfig`], forwarding every game
 /// output line into `sink` when provided (the desktop UI's console drawer).
+/// Forwards one developer-timing milestone to the desktop UI without making
+/// the CLI print anything extra.
+async fn send_phase(
+    sink: &Option<mpsc::Sender<LaunchEvent>>,
+    name: &'static str,
+    started: Instant,
+) {
+    if let Some(sink) = sink {
+        let _ = sink
+            .send(LaunchEvent::Phase(
+                name,
+                started.elapsed().as_millis() as u64,
+            ))
+            .await;
+    }
+}
+
 pub async fn run_launch_with(
     cfg: LaunchConfig,
     sink: Option<mpsc::Sender<LaunchEvent>>,
 ) -> Result<i32, CliError> {
+    // Standalone CLI: print the identity line before any network work. The
+    // desktop host emits the same line itself, so it is never duplicated.
+    if sink.is_none() {
+        println!("{}", twilight_launch::VERSION_BANNER);
+    }
     let account = cfg
         .account
         .clone()
         .unwrap_or_else(|| Account::offline(cfg.username.clone()));
+    // `horizon` is an engine, not a JVM loader: it has no Java, classpath or
+    // loader profile, so it leaves the generic pipeline before those stages.
+    if cfg
+        .loader
+        .as_deref()
+        .is_some_and(|loader| loader.eq_ignore_ascii_case("horizon"))
+    {
+        return run_horizon_cli(&cfg, &account).await;
+    }
+    let mut phase_started = Instant::now();
     let game_options = GameOptions {
         quick_play: QuickPlay {
             server_address: cfg.server.clone(),
@@ -515,24 +693,22 @@ pub async fn run_launch_with(
     };
     let client = reqwest::Client::new();
 
-    // ---- metadata first: required majors and paths depend on the manifest
-    let sources = vanilla_sources();
-    let meta = resolve_vanilla_version(&client, &sources, &cfg.version_or_id).await?;
-    let mut detail_chain = vec![meta.details_url.clone()];
-    for base in [PRISM_META_BASE, FREESM_META_BASE] {
-        let fallback = format!("{base}net.minecraft/{}.json", meta.id);
-        if !detail_chain.contains(&fallback) {
-            detail_chain.push(fallback);
-        }
-    }
-    let raw = fetch_json_failover(&client, &detail_chain).await?;
-    let version_text = raw.to_string();
-    let version = twilight_manifest::parse_version_file(&version_text).map_err(|e| {
-        CliError::ManifestParse {
-            id: meta.id.clone(),
-            source: e,
-        }
-    })?;
+    // ---- metadata first: required majors and paths depend on the manifest.
+    // Fresh piston-meta always wins; the disk cache is only an offline fallback.
+    let manifest = fetch_version_manifest(
+        &client,
+        &vanilla_sources(),
+        &cfg.version_or_id,
+        Some(&cfg.shared_dir.join("meta")),
+    )
+    .await?;
+    let version =
+        twilight_manifest::parse_version_file(&manifest.raw.to_string()).map_err(|e| {
+            CliError::ManifestParse {
+                id: manifest.id.clone(),
+                source: e,
+            }
+        })?;
     let ctx = RuntimeContext::host();
     let paths = resolve_paths(&cfg, &version);
 
@@ -544,17 +720,17 @@ pub async fn run_launch_with(
     // rejects a mismatched manifest instead of composing a broken launch
     if let Some(loader) = loader_token
         && let Some(fixed) = loader.fixed_game_version()
-        && !meta.id.trim().eq_ignore_ascii_case(fixed)
+        && !manifest.id.trim().eq_ignore_ascii_case(fixed)
     {
         return Err(CliError::LoaderGameMismatch {
             loader: loader.to_string(),
             required: fixed.to_owned(),
-            given: meta.id.clone(),
+            given: manifest.id.clone(),
         });
     }
     let loader_profile: Option<LoaderProfile> = match loader_token {
         Some(loader) => Some(
-            resolve_loader_profile(&client, loader, &meta.id, cfg.loader_version.as_deref())
+            resolve_loader_profile(&client, loader, &manifest.id, cfg.loader_version.as_deref())
                 .await?,
         ),
         None => None,
@@ -565,6 +741,23 @@ pub async fn run_launch_with(
         .unwrap_or(&version.compatible_java_majors)
         .to_vec();
     let java = resolve_java(cfg.java.clone(), &required_majors).await?;
+
+    // GC flags must be chosen for the Java that will actually spawn, not for a
+    // settings-only override that may be unset. `0` is the unknown sentinel.
+    let java_major = java_major_for_gc(&java);
+    let (gc_flags, gc_notice) = twilight_launch::resolve_gc_flags(
+        cfg.gc.preset,
+        java_major,
+        cfg.gc.max_memory_mib,
+        &cfg.gc.custom_flags,
+        &cfg.gc.extra_args,
+    );
+    if let Some(notice) = gc_notice {
+        println!("{notice}");
+        if let Some(sink) = &sink {
+            let _ = sink.send(LaunchEvent::Stdout(notice)).await;
+        }
+    }
 
     // ---- authlib-injector: Ely.by (first-class) and custom Yggdrasil
     //      accounts launch through the agent jar, auto-fetched + SHA-256
@@ -588,6 +781,8 @@ pub async fn run_launch_with(
         )),
         None => None,
     };
+    send_phase(&sink, "preflight", phase_started).await;
+    phase_started = Instant::now();
 
     // ---- pre-launch diagnostics: service DNS answers, GPU/OS/CPU/RAM and
     //      the classpath layout, collected once for both output branches
@@ -623,6 +818,7 @@ pub async fn run_launch_with(
         )?;
         let mut plan = plan;
         plan.jvm_args.extend(cfg.jvm_args.clone());
+        plan.jvm_args.extend(gc_flags);
         inject_authlib(&mut plan, &authlib_jar);
         let diag = build_diagnostics(
             &account,
@@ -636,7 +832,7 @@ pub async fn run_launch_with(
             dns,
             hardware,
         );
-        println!("{}", twilight_launch::render(&diag));
+        println!("{}", twilight_launch::header_lines(&diag).join("\n"));
         println!(
             "{}",
             dry_run_report(
@@ -725,13 +921,44 @@ pub async fn run_launch_with(
             });
         }
     }
-    downloader.download_all(&requests).await?;
+    // FreeType artifacts are security-relevant: record which requests carry a
+    // manifest SHA-1 so the advisory can distinguish verified from unknown.
+    let mut freetype_requests: Vec<(PathBuf, bool)> = requests
+        .iter()
+        .filter(|request| {
+            twilight_launch::is_lwjgl_freetype_artifact(&request.url)
+                || twilight_launch::is_lwjgl_freetype_artifact(&request.dest.to_string_lossy())
+        })
+        .map(|request| (request.dest.clone(), request.sha1.is_some()))
+        .collect();
+    let mut downloads = downloader.download_all(&requests).await?;
     // loader libraries stage into the same shared store and lead the classpath
     if let Some(profile) = &loader_profile {
-        downloader
-            .download_all(&profile.download_requests(&paths.library_root))
-            .await?;
+        let loader_requests = profile.download_requests(&paths.library_root);
+        for request in &loader_requests {
+            if twilight_launch::is_lwjgl_freetype_artifact(&request.url)
+                || twilight_launch::is_lwjgl_freetype_artifact(&request.dest.to_string_lossy())
+            {
+                freetype_requests.push((request.dest.clone(), request.sha1.is_some()));
+            }
+        }
+        downloads.extend(downloader.download_all(&loader_requests).await?);
     }
+    // A refreshed native is the expected outcome of Mojang re-publishing a
+    // patched lwjgl-freetype; make the replacement visible in the console.
+    let mut freetype_refreshed: Vec<String> = Vec::new();
+    for file in &downloads {
+        let is_freetype = freetype_requests.iter().any(|(dest, _)| dest == &file.dest);
+        if is_freetype && !file.was_skipped {
+            freetype_refreshed.push(format!(
+                "[SECURITY] refreshed lwjgl-freetype artifact {} (sha1 {}) from the fresh manifest",
+                file.dest.display(),
+                file.sha1
+            ));
+        }
+    }
+    let freetype_verified =
+        !freetype_requests.is_empty() && freetype_requests.iter().all(|(_, has_sha1)| *has_sha1);
 
     // ---- assets: horizon store; virtual indexes additionally export the
     //      classic `assets/virtual/<id>` layout the old game versions want
@@ -749,13 +976,15 @@ pub async fn run_launch_with(
             .await?;
         }
         let store = AssetStore::new(&paths.assets_root);
-        store.install(&paths.assets_id, &index, &downloader).await?;
+        store.ensure_objects(&index, &downloader).await?;
         let needs_export = index.is_virtual == Some(true) || is_virtual_assets_id(&paths.assets_id);
         if needs_export {
             let virtual_root = paths.assets_root.join("virtual").join(&paths.assets_id);
             store.export_to_resources(&index, &virtual_root).await?;
         }
     }
+    send_phase(&sink, "assets", phase_started).await;
+    phase_started = Instant::now();
 
     // ---- natives: fresh scratchpad; extraction via 7-Zip or the fallback
     twilight_launch::clean_natives_dir(&paths.natives_dir).await?;
@@ -782,6 +1011,7 @@ pub async fn run_launch_with(
     }
     let exclude_list: Vec<String> = excludes.into_iter().collect();
     twilight_launch::extract_natives(&paths.natives_dir, &native_jar_paths, &exclude_list).await?;
+    send_phase(&sink, "natives", phase_started).await;
 
     // ---- assemble and spawn, streaming game output to the console
     let plan = assemble_command(
@@ -794,33 +1024,60 @@ pub async fn run_launch_with(
         &game_options,
     )?;
     let mut plan = plan;
+    let advisories = cfg.advisories.clone();
     plan.jvm_args.extend(cfg.jvm_args);
+    plan.jvm_args.extend(gc_flags);
     inject_authlib(&mut plan, &authlib_jar);
+    if let Some(sink) = &sink {
+        let _ = sink
+            .send(LaunchEvent::Command(twilight_launch::command_line(&plan)))
+            .await;
+    }
     let (tx, mut rx) = mpsc::channel::<LaunchEvent>(512);
     let printer = tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
             match event {
                 LaunchEvent::Started(pid) => {
-                    println!("Minecraft process ID: {pid}");
+                    if sink.is_none() {
+                        println!("Minecraft process ID: {pid}");
+                    }
                     if let Some(sink) = &sink {
                         let _ = sink.send(LaunchEvent::Started(pid)).await;
                     }
                 }
                 LaunchEvent::Stdout(line) => {
-                    println!("{line}");
+                    if sink.is_none() {
+                        println!("{line}");
+                    }
                     if let Some(sink) = &sink {
                         let _ = sink.send(LaunchEvent::Stdout(line)).await;
                     }
                 }
                 LaunchEvent::Stderr(line) => {
-                    eprintln!("{line}");
+                    if sink.is_none() {
+                        eprintln!("{line}");
+                    }
                     if let Some(sink) = &sink {
                         let _ = sink.send(LaunchEvent::Stderr(line)).await;
                     }
                 }
+                // The raw command was already forwarded to the sink above;
+                // phase timings only feed the desktop Developer tab.
+                LaunchEvent::Command(_) | LaunchEvent::Phase(_, _) => {}
             }
         }
     });
+    // ---- console order: diagnostic header first, then the pre-spawn
+    //      advisories, then the pid/output from the spawn pump.
+    let advisory = twilight_launch::assess_minecraft2shell(
+        &manifest.id,
+        &ctx,
+        manifest.is_fresh(),
+        freetype_verified,
+    );
+    let mut pre_spawn = advisories;
+    pre_spawn.extend(advisory.advisory_lines());
+    pre_spawn.extend(freetype_refreshed.iter().cloned());
     // ---- diagnostics header straight through the same pump, so CLI stdout
     //      and the GUI console drawer print the identical block
     let diag = build_diagnostics(
@@ -835,7 +1092,7 @@ pub async fn run_launch_with(
         dns,
         hardware,
     );
-    for line in twilight_launch::header_lines(&diag) {
+    for line in twilight_launch::pre_spawn_lines(&diag, &pre_spawn) {
         let _ = tx.send(LaunchEvent::Stdout(line)).await;
     }
     let status = twilight_launch::run(plan, tx).await?;
@@ -898,7 +1155,11 @@ mod tests {
             java: None,
             loader: None,
             loader_version: None,
+            horizon: None,
+            horizon_session: None,
             jvm_args: Vec::new(),
+            advisories: Vec::new(),
+            gc: twilight_launch::GcSettings::default(),
             account: None,
             server: None,
             world: None,
@@ -1598,6 +1859,84 @@ mod tests {
         assert_eq!(
             paths.work_dir,
             PathBuf::from("I").join("my-world").join("minecraft")
+        );
+    }
+
+    fn selection(major: Option<i32>) -> JavaSelection {
+        JavaSelection {
+            executable: PathBuf::from("/jvm/bin/java"),
+            version: major.map(|major| JavaVersion {
+                major,
+                full: format!("{major}.0.0"),
+            }),
+        }
+    }
+
+    #[test]
+    fn resolved_java_majors_are_forwarded_to_gc_resolution() {
+        for major in [8, 17, 21, 25] {
+            let java = selection(Some(major));
+            assert_eq!(java_major_for_gc(&java), major);
+            assert_ne!(
+                java_major_for_gc(&java),
+                0,
+                "valid Java {major} must never reach the GC resolver as unknown"
+            );
+        }
+    }
+
+    #[test]
+    fn failed_java_probe_uses_the_safe_unknown_fallback() {
+        let java = selection(None);
+        assert_eq!(java_major_for_gc(&java), 0);
+
+        let (flags, notice) = twilight_launch::resolve_gc_flags(
+            twilight_launch::GcPreset::GenerationalZgc,
+            java_major_for_gc(&java),
+            8192,
+            &[],
+            "",
+        );
+        assert!(flags.iter().any(|flag| flag == "-XX:+UseG1GC"));
+        let notice = notice.expect("unknown Java must explain the fallback");
+        assert!(!notice.contains("Java 0"), "{notice}");
+        assert!(notice.to_ascii_lowercase().contains("unknown"), "{notice}");
+    }
+
+    #[test]
+    fn extra_jvm_args_reach_the_modern_command_line() {
+        let version = twilight_manifest::parse_version_file(MODERN).unwrap();
+        let config = cfg();
+        let paths = resolve_paths(&config, &version);
+        let mut plan = assemble_command(
+            &java(),
+            &ctx(),
+            &version,
+            &paths,
+            &account(),
+            None,
+            &GameOptions::default(),
+        )
+        .unwrap();
+        // The Settings "Extra JVM arguments" field is forwarded through
+        // GcSettings.extra_args; Default must not drop it.
+        let (gc_flags, _) = twilight_launch::resolve_gc_flags(
+            twilight_launch::GcPreset::Default,
+            21,
+            8192,
+            &[],
+            "-XX:+test",
+        );
+        plan.jvm_args.extend(config.jvm_args);
+        plan.jvm_args.extend(gc_flags);
+        let argv: Vec<String> = twilight_launch::build_command(&plan)
+            .as_std()
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            argv.iter().any(|arg| arg == "-XX:+test"),
+            "custom JVM arg missing from spawned command: {argv:?}"
         );
     }
 }

@@ -1,4 +1,5 @@
 <script>
+  import { tauriInvoke, tauriListen } from './lib/tauri';
   import { onMount } from 'svelte';
   import InstanceGrid from './lib/InstanceGrid.svelte';
   import EditInstancePage from './lib/EditInstancePage.svelte';
@@ -16,12 +17,14 @@
   import Twemoji from './lib/Twemoji.svelte';
   import AlertDialog from './lib/AlertDialog.svelte';
   import BareBonesGateModal from './lib/BareBonesGateModal.svelte';
+  import CrashReportModal from './lib/CrashReportModal.svelte';
+  import JavaDownloadModal from './lib/JavaDownloadModal.svelte';
   import ToastContainer from './lib/ToastContainer.svelte';
   import { toast, promptAlert } from './lib/alerts.svelte.js';
   import { topOverlay } from './lib/overlays.js';
   import { isDarkTheme, loadSavedAccent, normalizeThemeId, applyTheme } from './lib/theme';
   import { syncIconTheme } from './lib/icons';
-  import { t } from './lib/i18n.svelte.ts';
+  import { initLocale, t } from './lib/i18n.svelte.ts';
   // shared account state: one store drives the sidebar chip, the client
   // dashboard and the account manager modal
   import {
@@ -90,6 +93,25 @@
   let blindMode = $state(localStorage.getItem('twilight-blind-mode') === 'true');
   let deafMode = $state(localStorage.getItem('twilight-deaf-mode') === 'true');
 
+  // App Developer Mode: unlocked in Settings → About, persisted in settings.json.
+  let devSettings = $state({
+    devMode: false,
+    horizonDevOffline: false,
+    horizonDevSinglePlayer: false,
+    horizonAllowUnsignedLocal: false,
+    jdwpEnabled: false,
+    jdwpPort: 5005,
+    mixinDebug: false,
+  });
+  let devMode = $derived(devSettings.devMode);
+
+  $effect(() => {
+    localStorage.setItem('twilight-dev-mode', String(devSettings.devMode));
+    window.__TAURI__?.core
+      .invoke('set_dev_settings', { settings: devSettings })
+      .catch(() => {});
+  });
+
   $effect(() => {
     localStorage.setItem('twilight-blind-mode', String(blindMode));
     localStorage.setItem('twilight-deaf-mode', String(deafMode));
@@ -150,6 +172,47 @@
   // ---- BareBones gate (Cleanroom launches blocked by the pre-flight check) ----
   let barebonesFor = $state(null);
 
+  // ---- Java recovery: missing compatible major -> Adoptium one-click install ----
+  let javaRecovery = $state(null); // { instanceId, majors }
+
+  // ---- Crash review: non-zero exit; sending only on an explicit click ----
+  let crashReport = $state(null); // { report, canSend, config }
+  let crashPromptDisabled = $state(false);
+
+  async function offerCrashReport(instanceId, exitCode) {
+    if (crashPromptDisabled || exitCode === 0 || !Number.isFinite(exitCode)) return;
+    try {
+      const config = await api('get_crash_report_config');
+      if (!config.promptEnabled) return;
+      const prepared = await api('prepare_crash_report', {
+        instanceId,
+        exitCode,
+      });
+      crashReport = {
+        report: prepared.report,
+        canSend: Boolean(config.enabled && config.endpoint),
+        config,
+      };
+    } catch (e) {
+      // A preview failure must never crash the launcher shell.
+      console.warn('[crash] preview unavailable:', e);
+    }
+  }
+
+  async function offerJavaDownload(errorText, instanceId) {
+    const text = String(errorText);
+    if (!text.includes('no compatible Java runtime found')) return false;
+    const match = text.match(/\[([0-9,\s]+)\]/);
+    const majors = match
+      ? match[1]
+          .split(',')
+          .map((part) => Number(part.trim()))
+          .filter((major) => [8, 17, 21, 25].includes(major))
+      : [];
+    javaRecovery = { instanceId, majors: majors.length ? majors : [21] };
+    return true;
+  }
+
   // ---- settings page state (full-page view on the `settings` nav route) ----
   let storage = $state(null);
   let storageBusy = $state(false);
@@ -165,7 +228,7 @@
   let javaMsg = $state('');
 
   async function api(cmd, args) {
-    return window.__TAURI__.core.invoke(cmd, args);
+    return tauriInvoke(cmd, args);
   }
 
   // ---- theme / chrome ----
@@ -324,6 +387,7 @@
       logLine({ stream: 'stdout', line: t('console-exit-code', { code }) });
       await loadInstances();
       setStatus('status-ready');
+      await offerCrashReport(id, Number(code));
     } catch (e) {
       // every backend failure surfaces here: bright red in the auto-opened
       // drawer, never a silent no-op
@@ -333,7 +397,7 @@
         // the mandatory Cleanroom gate: offer the install flows in a dialog
         // instead of a bare toast
         barebonesFor = id;
-      } else {
+      } else if (!(await offerJavaDownload(e, id))) {
         toast(t('toast-launch-failed', { error: String(e) }), 'error');
       }
       setStatus('status-launch-failed');
@@ -570,6 +634,20 @@
       } catch {
         // plain web build
       }
+      try {
+        const dev = await api('get_dev_settings');
+        devSettings = {
+          devMode: dev.devMode ?? false,
+          horizonDevOffline: dev.horizonDevOffline ?? false,
+          horizonDevSinglePlayer: dev.horizonDevSinglePlayer ?? false,
+          horizonAllowUnsignedLocal: dev.horizonAllowUnsignedLocal ?? false,
+          jdwpEnabled: dev.jdwpEnabled ?? false,
+          jdwpPort: dev.jdwpPort ?? 5005,
+          mixinDebug: dev.mixinDebug ?? false,
+        };
+      } catch {
+        // plain web build: developer tools stay off
+      }
       // lazy, once: the first Settings visit may kick off the disk scan, but
       // the page renders instantly and later visits reuse the cached list
       if (!javaScanned && runtimes.length === 0) void scanJava();
@@ -726,6 +804,9 @@
     };
     window.addEventListener('keydown', onKey);
     (async () => {
+      // restore the persisted language in the background; local first paint
+      // already has a valid locale from detectLocale()
+      void initLocale();
       try {
         version = await api('get_version');
       } catch {
@@ -733,10 +814,10 @@
       }
       try {
         unlisteners.push(
-          await window.__TAURI__.event.listen('launch-log', (e) => logLine(e.payload)),
+          await tauriListen('launch-log', (e) => logLine(e.payload)),
         );
         unlisteners.push(
-          await window.__TAURI__.event.listen('tauri://drag-drop', (e) => {
+          await tauriListen('tauri://drag-drop', (e) => {
             const path = e.payload?.paths?.[0];
             if (!path) return;
             const lower = path.toLowerCase();
@@ -856,6 +937,18 @@
       {/if}
     </button>
 
+    {#if devMode}
+      <div
+        class="mt-2 flex items-center justify-center gap-1 rounded border border-(--accent)/50 bg-(--accent)/10 px-2 py-1 text-[10px] text-(--accent)"
+        title={t('dev-mode-active')}
+      >
+        <span aria-hidden="true">🛠</span>
+        {#if sidebarExpanded}
+          <span class="truncate">{t('dev-mode-badge')}</span>
+        {/if}
+      </div>
+    {/if}
+
     <!-- collapse (expanded) / expand-on-hover (compact) trigger at the logo edge -->
     <button
       class="absolute top-1.5 -right-3 z-20 flex h-6 w-6 items-center justify-center rounded-full border border-(--border) bg-(--bg-surface) text-[9px] text-(--text-muted) transition-opacity duration-100 hover:text-(--text-main) {sidebarExpanded
@@ -870,7 +963,7 @@
   </nav>
 
   <!-- ==================== RIGHT COLUMN ==================== -->
-  <div class="flex min-w-0 flex-1 flex-col">
+  <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
     <header class="flex h-11 shrink-0 items-center justify-between border-b border-(--border) bg-(--bg-subtle) px-4">
       <div class="flex min-w-0 items-center gap-2.5">
         {#if currentView === 'edit'}
@@ -902,10 +995,34 @@
           </div>
         {/if}
       </div>
+      {#if devMode}
+        <span class="shrink-0 rounded bg-(--accent)/15 px-1.5 py-0.5 text-[10px] font-medium text-(--accent)">
+          {t('dev-mode-active')}
+        </span>
+      {/if}
       <span class="text-xs text-(--text-muted)" aria-live="polite">{statusText}</span>
     </header>
 
-    <main class="min-w-0 flex-1 overflow-y-auto p-6">
+    {#if devMode}
+      <div
+        role="alert"
+        class="flex shrink-0 items-center gap-2 border-b border-amber-500/40 bg-amber-500/10 px-4 py-1.5 text-[11.5px] leading-snug text-amber-500"
+      >
+        <span aria-hidden="true">⚠</span>
+        <span>{t('dev-warning-banner')}</span>
+      </div>
+    {/if}
+
+    <!-- full-page views own their scroll containers: an outer scroller here
+         would add a second scrollbar (and detach the rail from the top) -->
+    <main
+      class="min-h-0 min-w-0 flex-1 p-6 {currentView === 'accounts' ||
+      currentView === 'edit' ||
+      active === 'settings' ||
+      active === 'worlds'
+        ? 'overflow-hidden'
+        : 'overflow-y-auto'}"
+    >
       {#if currentView === 'accounts'}
         <!-- dedicated accounts page: shows in both launcher and client modes -->
         <AccountsPage onback={() => (active = 'instances')} onrefresh={refreshAccounts} />
@@ -931,6 +1048,7 @@
           {storage}
           {blindMode}
           {deafMode}
+          {devMode}
           bind:section={editSection}
           onback={() => (editFor = null)}
           onopenconsole={() => (drawerOpen = true)}
@@ -943,6 +1061,7 @@
           bind:theme
           bind:blindMode
           bind:deafMode
+          bind:devSettings
           {storage}
           {runtimes}
           {scanning}
@@ -960,6 +1079,7 @@
           {gameRunning}
           onback={() => (active = 'instances')}
           onscanjava={scanJava}
+          ondownloadjava={(major) => (javaRecovery = { instanceId: null, majors: [major] })}
           onsaveprefs={savePrefs}
           onaddjava={addCustomJava}
           onapplyjava={applyJavaRuntime}
@@ -1122,6 +1242,7 @@
       instance={selectedInst}
       {storage}
       {gameRunning}
+      {devMode}
       modsCount={ctxMods}
       groups={groupList}
       onlaunch={() => launchInstance(selectedInst.id)}
@@ -1312,6 +1433,46 @@
       onlaunch={(iid) => {
         barebonesFor = null;
         launchInstance(iid);
+      }}
+    />
+  {/if}
+  {#if javaRecovery}
+    <JavaDownloadModal
+      majors={javaRecovery.majors}
+      onclose={() => (javaRecovery = null)}
+      oninstalled={async () => {
+        const instanceId = javaRecovery?.instanceId ?? null;
+        await scanJava();
+        await loadPrefs();
+        if (instanceId) {
+          // Recovery flow: close the dialog and relaunch the instance.
+          javaRecovery = null;
+          launchInstance(instanceId);
+        } else {
+          // Settings flow: keep the dialog open so the install path stays
+          // visible; the user closes it explicitly.
+          setStatus('status-ready');
+        }
+      }}
+    />
+  {/if}
+  {#if crashReport}
+    <CrashReportModal
+      report={crashReport.report}
+      canSend={crashReport.canSend}
+      onclose={() => (crashReport = null)}
+      ondisable={async () => {
+        crashPromptDisabled = true;
+        const config = crashReport.config;
+        try {
+          await api('set_crash_report_config', {
+            enabled: config.enabled,
+            endpoint: config.endpoint,
+            promptEnabled: false,
+          });
+        } catch (e) {
+          console.warn('[crash] could not persist dialog preference:', e);
+        }
       }}
     />
   {/if}

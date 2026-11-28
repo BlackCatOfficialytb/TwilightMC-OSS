@@ -25,6 +25,13 @@ pub struct InstanceImportInfo {
     pub game_version: String,
     pub loader: String,
     pub loader_version: String,
+    /// Java majors declared by `mmc-pack.json` / `manifest.json`, newest last.
+    /// Horizon itself needs no JVM; the wizard surfaces this for Java loaders.
+    #[serde(default)]
+    pub compatible_java_majors: Vec<i32>,
+    /// Newest declared major, for a Horizon import that must pick one Java.
+    #[serde(default)]
+    pub preferred_java_major: Option<i32>,
     pub icon_key: Option<String>,
     pub file_count: usize,
     pub override_count: usize,
@@ -43,6 +50,54 @@ pub struct InstanceImportOutcome {
     pub format: String,
     pub missing_mods: Vec<CurseMissingMod>,
     pub warnings: Vec<String>,
+}
+
+/// Finds every Java major a pack declares, wherever it is nested: Prism puts
+/// `compatibleJavaMajors` on a component, Cleanroom on the manifest. Java 8 is
+/// the oldest Minecraft/Java edition TwilightMC supports.
+pub(crate) fn java_majors(value: &serde_json::Value) -> Vec<i32> {
+    fn walk(value: &serde_json::Value, found: &mut Vec<i32>) {
+        match value {
+            serde_json::Value::Object(map) => {
+                for (key, child) in map {
+                    if key == "compatibleJavaMajors" {
+                        if let Some(list) = child.as_array() {
+                            for major in list {
+                                if let Some(major) = major.as_i64().filter(|major| *major >= 8) {
+                                    found.push(major as i32);
+                                }
+                            }
+                        }
+                    } else if (key == "javaVersion" || key == "java")
+                        && let Some(major) = child
+                            .get("majorVersion")
+                            .and_then(serde_json::Value::as_i64)
+                            .filter(|major| *major >= 8)
+                    {
+                        found.push(major as i32);
+                    }
+                    walk(child, found);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    walk(item, found);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    walk(value, &mut found);
+    found.sort_unstable();
+    found.dedup();
+    found
+}
+
+/// The newest compatible major, when a pack declares any (`horizon` imports
+/// use this to pick the newest Java even though the engine itself is native).
+pub(crate) fn newest_java_major(majors: &[i32]) -> Option<i32> {
+    majors.iter().copied().max()
 }
 
 /// Locates the single top-level wrapper folder that holds `marker`, if any.
@@ -239,6 +294,8 @@ fn prism_info(entries: &Entries, prefix: &str, size: u64) -> Result<InstanceImpo
     let pack: serde_json::Value =
         serde_json::from_slice(pack_raw).map_err(|e| format!("malformed mmc-pack.json: {e}"))?;
     let (game_version, loader) = parse_mmc_pack(&pack);
+    let compatible_java_majors = java_majors(&pack);
+    let preferred_java_major = newest_java_major(&compatible_java_majors);
     let (loader, loader_version) = match loader {
         Some((token, version)) => (token, version),
         None => (String::new(), String::new()),
@@ -270,6 +327,8 @@ fn prism_info(entries: &Entries, prefix: &str, size: u64) -> Result<InstanceImpo
         game_version: game_version.unwrap_or_default(),
         loader,
         loader_version,
+        compatible_java_majors,
+        preferred_java_major,
         icon_key: prism_icon_key(cfg.get("iconKey").map(String::as_str)),
         file_count,
         override_count: 0,
@@ -287,6 +346,8 @@ fn curse_info(
     size: u64,
 ) -> Result<InstanceImportInfo, String> {
     let (loader, loader_version) = curse_loader(manifest);
+    let compatible_java_majors = manifest.compatible_java_majors.clone();
+    let preferred_java_major = newest_java_major(&compatible_java_majors);
     let overrides = if manifest.overrides.trim().is_empty() {
         "overrides".to_owned()
     } else {
@@ -317,6 +378,8 @@ fn curse_info(
         game_version: manifest.minecraft.version.clone(),
         loader,
         loader_version,
+        compatible_java_majors,
+        preferred_java_major,
         icon_key: None,
         file_count: manifest.files.len(),
         override_count,
@@ -366,6 +429,8 @@ pub(crate) async fn inspect_instance_import_core(
                 game_version: info.game_version,
                 loader: info.loader,
                 loader_version: info.loader_version,
+                compatible_java_majors: Vec::new(),
+                preferred_java_major: None,
                 icon_key: None,
                 file_count: info.file_count,
                 override_count: info.override_count,
@@ -383,6 +448,8 @@ pub(crate) async fn inspect_instance_import_core(
                 game_version: info.game_version,
                 loader: info.loader.unwrap_or_default(),
                 loader_version: info.loader_version.unwrap_or_default(),
+                compatible_java_majors: Vec::new(),
+                preferred_java_major: None,
                 icon_key: None,
                 file_count: info.file_count,
                 override_count: 0,
@@ -466,6 +533,7 @@ fn import_prism_core(
         last_played: 0,
         total_time_played: 0,
         icon_key: info.icon_key.clone(),
+        jvm_args: Vec::new(),
     };
     Ok((id, meta))
 }
@@ -521,14 +589,13 @@ pub async fn import_instance_archive(
             let (id, dir) = prepare_instance(&root, &chosen).inspect_err(|_| {
                 let _ = std::fs::remove_dir_all(root.join(slugify(&chosen)));
             })?;
-            let key = crate::accounts::load_settings(&crate::accounts::settings_path(&app).await?)
-                .await
-                .curseforge_api_key
-                .unwrap_or_default();
+            let (key, enabled) = crate::curseforge::curseforge_settings(&app).await?;
+            let effective_key = crate::modpack::effective_curseforge_key(&key, enabled);
             let report = match modpack::import_curseforge_pack_core(
                 &dir.join("minecraft"),
-                key.trim(),
+                effective_key,
                 &bytes,
+                None,
             )
             .await
             {
@@ -550,6 +617,7 @@ pub async fn import_instance_archive(
                 last_played: 0,
                 total_time_played: 0,
                 icon_key: None,
+                jvm_args: Vec::new(),
             };
             write_meta(&dir, &meta).await?;
             (id, report.missing_mods)
@@ -585,6 +653,21 @@ pub async fn import_instance_archive(
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn java_majors_are_read_from_nested_mmc_components() {
+        let pack: serde_json::Value = serde_json::from_str(
+            r#"{"components":[
+                {"uid":"net.minecraft","compatibleJavaMajors":[8,21]},
+                {"uid":"org.graalvm","javaVersion":{"majorVersion":25}}
+            ]}"#,
+        )
+        .unwrap();
+        let majors = java_majors(&pack);
+        assert_eq!(majors, vec![8, 21, 25]);
+        assert_eq!(newest_java_major(&majors), Some(25));
+        assert_eq!(newest_java_major(&[]), None);
+    }
 
     fn crc32_of(data: &[u8]) -> u32 {
         let mut crc: u32 = 0xFFFF_FFFF;
@@ -736,6 +819,7 @@ mod tests {
             &root.join(&id).join("minecraft"),
             "",
             &zip,
+            None,
         ))
         .unwrap();
         assert_eq!(report.missing_mods.len(), 1);

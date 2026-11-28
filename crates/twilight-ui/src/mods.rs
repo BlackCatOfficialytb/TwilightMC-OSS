@@ -9,7 +9,55 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::AppHandle;
 
+use crate::accounts::{load_settings, settings_path};
 use crate::instances::{FileEntry, instances_root, list_dir_files, validate_instance_id};
+use crate::storage::shared_root;
+
+/// The shared CAS root when the user enabled zero-copy linking
+/// (`use_cas_links`), else `None`.
+pub(crate) async fn cas_root_if_enabled(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    let settings = load_settings(&settings_path(app).await?).await;
+    if !settings.use_cas_links {
+        return Ok(None);
+    }
+    Ok(Some(shared_root(app).await?.join("cas")))
+}
+
+/// Deduplicates an existing file: ingests it into the CAS and atomically
+/// replaces `dest` with a hardlink/symlink (best-effort copy fallback).
+/// Safe when the blob is already present — the result is the same either way.
+pub(crate) async fn cas_dedupe_dest(cas_root: &Path, dest: &Path) -> Result<(), String> {
+    let Some(meta) = tokio::fs::metadata(dest).await.ok().filter(|m| m.is_file()) else {
+        return Ok(()); // nothing to dedupe
+    };
+    if meta.len() == 0 {
+        return Ok(());
+    }
+    let ingest = twilight_cas::ingest_file(cas_root, dest)
+        .await
+        .map_err(|e| e.to_string())?;
+    let blob = twilight_cas::blob_path(cas_root, &ingest.hash);
+    if !tokio::fs::try_exists(&blob)
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        return Ok(());
+    }
+    if tokio::fs::try_exists(dest)
+        .await
+        .map_err(|e| e.to_string())?
+    {
+        tokio::fs::remove_file(dest)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    if twilight_cas::link_or_copy(&blob, dest).await.is_err() {
+        tokio::fs::copy(&blob, dest)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 
 /// One installed mod file. `filename` is the exact on-disk name (with its
 /// state suffix) that the toggle/delete IPC round-trips unchanged; the table
@@ -194,9 +242,23 @@ pub async fn import_mod(
     if dest.exists() {
         return Err(format!("mod {file_name} already exists"));
     }
-    tokio::fs::copy(&src, &dest)
-        .await
-        .map_err(|e| e.to_string())?;
+    if let Some(cas_root) = cas_root_if_enabled(&app).await? {
+        // ingest into CAS first, then install the jar as a hardlink — the
+        // source copy never duplicates into the mods dir.
+        let ingest = twilight_cas::ingest_file(&cas_root, &src)
+            .await
+            .map_err(|e| e.to_string())?;
+        let blob = twilight_cas::blob_path(&cas_root, &ingest.hash);
+        if twilight_cas::link_or_copy(&blob, &dest).await.is_err() {
+            tokio::fs::copy(&src, &dest)
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    } else {
+        tokio::fs::copy(&src, &dest)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -272,14 +334,69 @@ pub async fn delete_pack(
         .map_err(|e| e.to_string())
 }
 
-/// Copies an external pack archive into the packs dir.
+/// Result of importing one pack archive.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackImportOutcome {
+    /// True when the archive was copied into the instance.
+    pub imported: bool,
+    /// True when the archive contains `.ttf` (or `assets/*/font/` `.ttc`/`.otf`).
+    pub contains_truetype_fonts: bool,
+    /// Matching archive entry names, in central-directory order.
+    pub font_entries: Vec<String>,
+    /// True when the UI must ask the user before this pack is copied.
+    pub requires_confirmation: bool,
+}
+
+impl PackImportOutcome {
+    fn from_scan(imported: bool, scan: twilight_modrinth::ResourcePackFontScan) -> Self {
+        Self {
+            imported,
+            contains_truetype_fonts: scan.contains_truetype_fonts,
+            font_entries: scan.font_entries,
+            requires_confirmation: false,
+        }
+    }
+
+    fn needs_confirmation(scan: twilight_modrinth::ResourcePackFontScan) -> Self {
+        Self {
+            imported: false,
+            contains_truetype_fonts: scan.contains_truetype_fonts,
+            font_entries: scan.font_entries,
+            requires_confirmation: true,
+        }
+    }
+}
+
+/// A font-bearing pack needs explicit confirmation only for resource packs on
+/// `>= 1.20.5`, the versions that load fonts through the vulnerable FreeType
+/// path. Shader packs never reach the font renderer.
+fn pack_font_confirmation_required(
+    instance_version: &str,
+    project_type: &str,
+    scan: &twilight_modrinth::ResourcePackFontScan,
+) -> bool {
+    scan.contains_truetype_fonts
+        && project_type == "resourcepack"
+        && twilight_launch::requires_resource_pack_font_confirmation(instance_version)
+}
+
+/// Copies an external pack archive into the packs dir after inspecting its ZIP
+/// entries for FreeType fonts (`Minecraft2Shell`, CVE-2026-10701).
+///
+/// The first call with a font-bearing archive returns
+/// `requires_confirmation: true` without copying. The UI then asks the user and
+/// re-invokes with `confirm_fonts: true`; the archive is read and scanned again
+/// immediately before writing, so the bytes that land in the instance are the
+/// exact bytes that passed the check.
 #[tauri::command]
 pub async fn import_pack(
     app: AppHandle,
     instance_id: String,
     project_type: String,
     file_path: String,
-) -> Result<(), String> {
+    confirm_fonts: Option<bool>,
+) -> Result<PackImportOutcome, String> {
     validate_instance_id(&instance_id)?;
     let src = PathBuf::from(&file_path);
     if !src.is_file() {
@@ -289,16 +406,38 @@ pub async fn import_pack(
         return Err("invalid pack file name".into());
     };
     validate_pack_filename(&file_name)?;
-    let dest = packs_dir(&instances_root(&app).await?, &instance_id, &project_type)
-        .await?
-        .join(&file_name);
+    let root = instances_root(&app).await?;
+    let meta = crate::instances::read_launch_meta(&root.join(&instance_id)).await?;
+    let pack_dir = root
+        .join(&instance_id)
+        .join("minecraft")
+        .join(packs_dir_name(&project_type)?);
+    let dest = pack_dir.join(&file_name);
     if dest.exists() {
         return Err(format!("pack {file_name} already exists"));
     }
-    tokio::fs::copy(&src, &dest)
+
+    // First read: tell the UI whether this archive needs confirmation. On the
+    // confirmed retry this same read re-inspects the source immediately before
+    // the copy, so a swapped file is scanned again rather than trusted.
+    let bytes = tokio::fs::read(&src)
+        .await
+        .map_err(|e| format!("cannot read {file_name}: {e}"))?;
+    let scan = twilight_modrinth::scan_resource_pack_fonts(&bytes)
+        .map_err(|e| format!("cannot inspect {file_name}: {e}"))?;
+    if pack_font_confirmation_required(&meta.version, &project_type, &scan)
+        && !confirm_fonts.unwrap_or(false)
+    {
+        return Ok(PackImportOutcome::needs_confirmation(scan));
+    }
+    tokio::fs::create_dir_all(&pack_dir)
         .await
         .map_err(|e| e.to_string())?;
-    Ok(())
+    // Write the exact buffer that was scanned, never re-open the source here.
+    tokio::fs::write(&dest, &bytes)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(PackImportOutcome::from_scan(true, scan))
 }
 
 #[cfg(test)]
@@ -384,5 +523,49 @@ mod tests {
         assert!(toggle_mod_in(&mods, "sub\\dir.jar", false).await.is_err());
         assert!(toggle_mod_in(&mods, "not-a-mod.txt", true).await.is_err());
         assert!(delete_mod_in(&mods, "..\\escape.jar").await.is_err());
+    }
+
+    fn font_scan() -> twilight_modrinth::ResourcePackFontScan {
+        twilight_modrinth::ResourcePackFontScan {
+            contains_truetype_fonts: true,
+            font_entries: vec!["assets/minecraft/font/custom.ttf".to_owned()],
+        }
+    }
+
+    #[test]
+    fn font_confirmation_only_applies_to_modern_resource_packs() {
+        assert!(pack_font_confirmation_required(
+            "1.21.4",
+            "resourcepack",
+            &font_scan()
+        ));
+        assert!(!pack_font_confirmation_required(
+            "1.20.4",
+            "resourcepack",
+            &font_scan()
+        ));
+        assert!(!pack_font_confirmation_required(
+            "1.21.4",
+            "shader",
+            &font_scan()
+        ));
+        assert!(!pack_font_confirmation_required(
+            "1.21.4",
+            "resourcepack",
+            &twilight_modrinth::ResourcePackFontScan::default()
+        ));
+    }
+
+    #[test]
+    fn pack_import_outcomes_surface_font_names_and_confirmation() {
+        let blocked = PackImportOutcome::needs_confirmation(font_scan());
+        assert!(!blocked.imported);
+        assert!(blocked.requires_confirmation);
+        assert!(blocked.contains_truetype_fonts);
+        assert_eq!(blocked.font_entries, ["assets/minecraft/font/custom.ttf"]);
+
+        let imported = PackImportOutcome::from_scan(true, font_scan());
+        assert!(imported.imported);
+        assert!(!imported.requires_confirmation);
     }
 }

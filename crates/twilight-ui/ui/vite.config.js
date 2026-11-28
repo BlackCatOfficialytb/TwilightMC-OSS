@@ -5,6 +5,10 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   plugins: [svelte(), tailwindcss()],
   build: {
+    // The Developer Mode panel (diagnostics + debugger controls) pushes the
+    // shell just over the default 500 kB; Three.js is already split out, and
+    // 600 kB keeps the zero-warning build gate honest without hiding errors.
+    chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
         // skinview3d is dynamically imported by SkinViewer3D; splitting the

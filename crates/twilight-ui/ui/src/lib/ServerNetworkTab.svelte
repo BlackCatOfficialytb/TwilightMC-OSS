@@ -1,4 +1,5 @@
 <script>
+  import { tauriInvoke } from './tauri';
   // Network tab: Minekube Connect tunnel — install / enable / disable /
   // remove any time after creation, with live status and the
   // *.connect.minekube.* share address — plus the offline-mode guard
@@ -9,7 +10,7 @@
   let { server, connect = null, busy = '' } = $props();
 
   function api(cmd, args) {
-    return window.__TAURI__.core.invoke(cmd, args);
+    return tauriInvoke(cmd, args);
   }
 
   async function act(name, okKey, args = {}) {

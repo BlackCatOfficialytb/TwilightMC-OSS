@@ -26,10 +26,15 @@ pub struct LaunchPlan {
 /// Line-oriented output pump target.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LaunchEvent {
+    /// The exact JVM command assembled for this launch (Developer Mode uses
+    /// it for "Copy Raw Launch Command"). Never printed in normal consoles.
+    Command(String),
     /// Emitted once, right after a successful spawn: engine child pid.
     Started(u32),
     Stdout(String),
     Stderr(String),
+    /// Pipeline stage duration in milliseconds (Developer Mode diagnostics).
+    Phase(&'static str, u64),
 }
 
 /// Builds a tokio `Command` (for inspection in tests and `run`).
@@ -48,6 +53,31 @@ pub fn build_command(plan: &LaunchPlan) -> Command {
     cmd
 }
 
+/// Renders a launch plan as the exact command line a shell would run. Paths
+/// containing spaces are quoted; the game directory is shown for context.
+pub fn command_line(plan: &LaunchPlan) -> String {
+    fn quote(value: &str) -> String {
+        if value.contains([' ', '\t', '"']) {
+            format!("\"{}\"", value.replace('"', "\\\""))
+        } else {
+            value.to_owned()
+        }
+    }
+    let mut parts = vec![quote(&plan.java_executable.to_string_lossy())];
+    parts.extend(plan.jvm_args.iter().map(|arg| quote(arg)));
+    if !plan.classpath.is_empty() {
+        parts.push("-cp".to_owned());
+        parts.push(quote(&plan.classpath));
+    }
+    parts.push(quote(&plan.main_class));
+    parts.extend(plan.game_args.iter().map(|arg| quote(arg)));
+    format!(
+        "cd {} && {}",
+        quote(&plan.work_dir.to_string_lossy()),
+        parts.join(" ")
+    )
+}
+
 /// Spawns the game, streams stdout/stderr lines through `events`, then returns
 /// the exit status. Pump tasks outlive `wait` only until both pipes close.
 pub async fn run(
@@ -58,15 +88,20 @@ pub async fn run(
     cmd.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+    let spawn_started = std::time::Instant::now();
     let mut child = cmd.spawn().map_err(|e| LaunchError::Spawn {
         executable: plan.java_executable.display().to_string(),
         source: e,
     })?;
+    let spawn_ms = spawn_started.elapsed().as_millis() as u64;
 
     // expose the child pid so hosts (desktop UI) can kill the process tree
     if let Some(pid) = child.id() {
         let _ = events.send(LaunchEvent::Started(pid)).await;
     }
+    // Timing follows the pid: existing consumers expect `Started` to lead the
+    // stream, while diagnostics still get the exact spawn duration.
+    let _ = events.send(LaunchEvent::Phase("spawn", spawn_ms)).await;
 
     let stdout = child.stdout.take().map(BufReader::new);
     let stderr = child.stderr.take().map(BufReader::new);
@@ -134,6 +169,11 @@ mod tests {
         );
         assert!(out.contains(&LaunchEvent::Stdout("twilight-out".into())));
         assert!(out.contains(&LaunchEvent::Stderr("twilight-err".into())));
+        assert!(
+            out.iter()
+                .any(|event| matches!(event, LaunchEvent::Phase("spawn", _))),
+            "spawn timing must be reported after the pid"
+        );
     }
 
     #[test]

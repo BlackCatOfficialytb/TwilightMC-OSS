@@ -73,6 +73,49 @@ pub fn zip_entry_names(bytes: &[u8]) -> Result<Vec<String>, ModrinthError> {
     Ok(entries.into_iter().map(|entry| entry.name).collect())
 }
 
+/// Fonts inside a resource pack that Minecraft's FreeType renderer can parse.
+/// `.ttf` files are detected anywhere (the vulnerable TrueType hinting path);
+/// `.ttc`/`.otf` count only inside `assets/<namespace>/font/`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ResourcePackFontScan {
+    pub contains_truetype_fonts: bool,
+    /// Matching archive entry names, in central-directory order.
+    pub font_entries: Vec<String>,
+}
+
+/// True when `name` is a TrueType/OpenType font entry that Minecraft would
+/// hand to its font renderer. Entry names are ZIP paths, so matching is
+/// case-insensitive and treats a stray backslash as a separator.
+pub fn is_resource_pack_font_entry(name: &str) -> bool {
+    let lower = name.replace('\\', "/").to_ascii_lowercase();
+    if lower.ends_with(".ttf") {
+        return true;
+    }
+    if !(lower.ends_with(".ttc") || lower.ends_with(".otf")) {
+        return false;
+    }
+    // assets/<namespace>/font/... for the OpenType containers
+    let mut parts = lower.split('/');
+    parts.next() == Some("assets")
+        && parts.next().is_some_and(|namespace| !namespace.is_empty())
+        && parts.next() == Some("font")
+}
+
+/// Scans a resource-pack `.zip` for FreeType font entries using the same
+/// pure-Rust central-directory reader as every other archive path.
+/// `Minecraft2Shell` (CVE-2026-10701) is triggered by such fonts.
+pub fn scan_resource_pack_fonts(bytes: &[u8]) -> Result<ResourcePackFontScan, ModrinthError> {
+    let names = zip_entry_names(bytes)?;
+    let font_entries: Vec<String> = names
+        .into_iter()
+        .filter(|name| is_resource_pack_font_entry(name))
+        .collect();
+    Ok(ResourcePackFontScan {
+        contains_truetype_fonts: !font_entries.is_empty(),
+        font_entries,
+    })
+}
+
 /// One extracted archive entry: relative path plus its decoded payload.
 pub type ArchiveEntry = (String, Vec<u8>);
 
@@ -129,5 +172,121 @@ mod tests {
     #[test]
     fn gzip_inflate_rejects_bad_header() {
         assert!(gzip_inflate(b"not gzip data at all!!").is_err());
+    }
+
+    #[test]
+    fn resource_pack_font_entries_match_like_minecraft() {
+        assert!(is_resource_pack_font_entry(
+            "assets/minecraft/font/custom.ttf"
+        ));
+        assert!(is_resource_pack_font_entry(
+            "assets/example/font/nested/display.TTF"
+        ));
+        assert!(is_resource_pack_font_entry(
+            r"assets\minecraft\font\backslash.ttf"
+        ));
+        assert!(is_resource_pack_font_entry(
+            "assets/minecraft/font/collection.otf"
+        ));
+        assert!(is_resource_pack_font_entry(
+            "assets/minecraft/font/collection.ttc"
+        ));
+
+        // clean texture-only entries never trigger the warning
+        assert!(!is_resource_pack_font_entry("pack.mcmeta"));
+        assert!(!is_resource_pack_font_entry(
+            "assets/minecraft/textures/block/stone.png"
+        ));
+        // OpenType containers outside assets/<ns>/font/ are ignored
+        assert!(!is_resource_pack_font_entry("assets/minecraft/otf/x.otf"));
+        assert!(!is_resource_pack_font_entry("font/x.otf"));
+    }
+
+    /// Minimal stored-entry ZIP: just enough structure for the central
+    /// directory reader, with zero-length payloads.
+    fn zip_with_names(names: &[&str]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut offsets = Vec::with_capacity(names.len());
+        for name in names {
+            offsets.push(out.len() as u32);
+            out.extend_from_slice(b"PK\x03\x04");
+            out.extend_from_slice(&20u16.to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(&0u32.to_le_bytes());
+            out.extend_from_slice(&0u32.to_le_bytes());
+            out.extend_from_slice(&0u32.to_le_bytes());
+            out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(name.as_bytes());
+        }
+        let cd_offset = out.len() as u32;
+        for (name, offset) in names.iter().zip(offsets) {
+            out.extend_from_slice(b"PK\x01\x02");
+            out.extend_from_slice(&20u16.to_le_bytes());
+            out.extend_from_slice(&20u16.to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(&0u32.to_le_bytes());
+            out.extend_from_slice(&0u32.to_le_bytes());
+            out.extend_from_slice(&0u32.to_le_bytes());
+            out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(&0u32.to_le_bytes());
+            out.extend_from_slice(&offset.to_le_bytes());
+            out.extend_from_slice(name.as_bytes());
+        }
+        let cd_size = out.len() as u32 - cd_offset;
+        out.extend_from_slice(b"PK\x05\x06");
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&(names.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(names.len() as u16).to_le_bytes());
+        out.extend_from_slice(&cd_size.to_le_bytes());
+        out.extend_from_slice(&cd_offset.to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out
+    }
+
+    #[test]
+    fn resource_pack_scan_reports_font_entries() {
+        let zip = zip_with_names(&[
+            "pack.mcmeta",
+            "assets/minecraft/textures/block/stone.png",
+            "assets/minecraft/font/custom.ttf",
+            "assets/minecraft/font/collection.otf",
+            "assets/demo/font/legacy.TTC",
+        ]);
+        let scan = scan_resource_pack_fonts(&zip).unwrap();
+        assert!(scan.contains_truetype_fonts);
+        assert_eq!(
+            scan.font_entries,
+            [
+                "assets/minecraft/font/custom.ttf",
+                "assets/minecraft/font/collection.otf",
+                "assets/demo/font/legacy.TTC",
+            ]
+        );
+    }
+
+    #[test]
+    fn resource_pack_scan_accepts_clean_and_broken_archives() {
+        let clean = zip_with_names(&[
+            "pack.mcmeta",
+            "assets/minecraft/textures/block/stone.png",
+            "assets/minecraft/lang/en_us.json",
+        ]);
+        let scan = scan_resource_pack_fonts(&clean).unwrap();
+        assert!(!scan.contains_truetype_fonts);
+        assert!(scan.font_entries.is_empty());
+
+        assert!(scan_resource_pack_fonts(b"definitely not a zip archive").is_err());
     }
 }

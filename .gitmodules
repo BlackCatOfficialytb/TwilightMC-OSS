@@ -10,3 +10,6 @@
 [submodule "upstream/catppuccin-palette"]
 	path = upstream/catppuccin-palette
 	url = https://github.com/catppuccin/palette.git
+[submodule "upstream/horizon"]
+	path = upstream/horizon
+	url = https://github.com/horizon-rust/horizon.git

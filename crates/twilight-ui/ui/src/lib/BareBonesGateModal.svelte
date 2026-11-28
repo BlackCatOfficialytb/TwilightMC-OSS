@@ -1,4 +1,5 @@
 <script>
+  import { tauriInvoke } from './tauri';
   // The mandatory BareBones Template gate dialog: when a Cleanroom launch is
   // blocked by the pre-flight check, this offers the three install flows
   // instead of a bare error toast — open the pack on CurseForge, 1-click the
@@ -22,7 +23,7 @@
     error = '';
     busy = 'install';
     try {
-      const installed = await window.__TAURI__.core.invoke('install_cleanroom_core_mods', { instanceId });
+      const installed = await tauriInvoke('install_cleanroom_core_mods', { instanceId });
       done = {
         title: t('barebones-installed', { count: installed.length }),
         note: t('barebones-scalar-note'),
@@ -49,7 +50,7 @@
       });
       if (!picked) return;
       busy = 'import';
-      const report = await window.__TAURI__.core.invoke('import_curseforge_pack', {
+      const report = await tauriInvoke('import_curseforge_pack', {
         zipPath: String(picked),
         instanceId,
       });

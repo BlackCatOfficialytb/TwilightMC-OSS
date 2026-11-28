@@ -9,7 +9,7 @@ description = "Desktop launcher interface for TwilightMC"
 tauri-build = { workspace = true }
 
 [dependencies]
-tauri = { workspace = true, features = ["protocol-asset"] }
+tauri = { workspace = true, features = ["protocol-asset", "devtools"] }
 tauri-plugin-dialog = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -22,6 +22,7 @@ twilight-cli = { path = "../twilight-cli" }
 twilight-launch = { path = "../twilight-launch" }
 twilight-manifest = { path = "../twilight-manifest" }
 twilight-modloader = { path = "../twilight-modloader" }
+twilight-cas = { path = "../twilight-cas" }
 twilight-modrinth = { path = "../twilight-modrinth" }
 twilight-server = { path = "../twilight-server" }
 twilight-horizon = { path = "../twilight-horizon" }

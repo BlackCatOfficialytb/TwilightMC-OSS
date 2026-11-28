@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """TwilightMC build helper - run with the Windows launcher: `py build.py <command>`.
 
-  (default)  frontend dist + `cargo build` (debug profile)
+  (default)  frontend dist + `cargo build` (debug profile; add `--workspace`
+             to build every workspace member)
   ui         frontend only (`npm run build` in crates/twilight-ui/ui)
-  release    frontend dist + `cargo build --release`
+  release    frontend dist + `cargo build --release` (honours `--workspace`)
   gates      the CI quality gates: fmt --check / clippy -D warnings / test
   pack       release + a CI-styled zip under `dist/` (exe + docs, sha256)
   all        gates + release + pack
@@ -54,8 +55,10 @@ def ui() -> None:
     run([which("npm"), "run", "build"], cwd=UI)
 
 
-def build(release: bool) -> None:
+def build(release: bool, workspace: bool = False) -> None:
     cmd = [which("cargo"), "build"]
+    if workspace:
+        cmd.append("--workspace")
     if release:
         cmd.append("--release")
     run(cmd)
@@ -126,6 +129,11 @@ def main() -> None:
         help="debug (default) | ui | release | gates | pack | all",
     )
     parser.add_argument("--no-ui", action="store_true", help="skip the frontend build")
+    parser.add_argument(
+        "--workspace",
+        action="store_true",
+        help="cargo build every workspace member (`cargo build --workspace`)",
+    )
     args = parser.parse_args()
 
     if args.command == "gates":
@@ -140,7 +148,7 @@ def main() -> None:
         gates()
     if not args.no_ui:
         ui()
-    build(release)
+    build(release, args.workspace)
     if args.command in ("pack", "all"):
         pack()
 
