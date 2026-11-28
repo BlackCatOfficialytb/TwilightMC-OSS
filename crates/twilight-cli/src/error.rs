@@ -17,6 +17,8 @@ pub enum CliError {
         "no compatible Java runtime found for required majors {majors:?}; install one or pass --java"
     )]
     NoJava { majors: Vec<i32> },
+    #[error("game process exited with {status}")]
+    GameFailed { status: String },
     #[error("malformed manifest for {id}")]
     ManifestParse {
         id: String,
@@ -59,6 +61,4 @@ pub enum CliError {
     Auth(#[from] twilight_auth::AuthError),
     #[error("io failure")]
     Io(#[from] std::io::Error),
-    #[error("game process failed with status {status}")]
-    GameFailed { status: String },
 }

@@ -3,8 +3,9 @@
   // and fetch a runtime through the Rust command. The parent owns applying
   // the returned path; this dialog only reports it back via `oninstalled`.
   import { onMount } from 'svelte';
-  import { tauriInvoke } from './tauri';
+  import { tauriInvoke, tauriListen } from './tauri';
   import { pushOverlay, popOverlay } from './overlays.js';
+  import ProgressBar from './ProgressBar.svelte';
   import { t } from './i18n.svelte.ts';
 
   let { majors = [], instanceId = '', onclose, oninstalled } = $props();
@@ -20,6 +21,7 @@
   let busy = $state(false);
   let installedPath = $state('');
   let error = $state('');
+  let progress = $state(null);
 
   // The caller may narrow the majors (e.g. only the one the instance needs);
   // keep the picker valid if the offered list does not contain the default.
@@ -42,13 +44,21 @@
     busy = true;
     error = '';
     installedPath = '';
+    progress = null;
+    let unlisten = null;
     try {
-      const path = await tauriInvoke('download_adoptium_java', { major });
-      installedPath = String(path ?? '');
-      await oninstalled?.(installedPath);
+      unlisten = await tauriListen('download-progress', (e) => {
+        const p = e.payload;
+        if (p?.task_id === `adoptium-java-${major}`) progress = p;
+      });
+      const installed = await tauriInvoke('download_adoptium_java', { major });
+      const path = String(installed?.executable ?? installed?.home ?? installed?.path ?? '');
+      installedPath = path;
+      await oninstalled?.(installed ?? path);
     } catch (e) {
       error = String(e);
     } finally {
+      if (unlisten) unlisten();
       busy = false;
     }
   }
@@ -103,9 +113,18 @@
           {t('java-download-error', { error })}
         </p>
       {:else if busy}
-        <p class="mt-3 text-[12px] text-(--accent-1)">
-          {t('java-download-working', { major })}
-        </p>
+        <div class="mt-3 space-y-2">
+          <p class="text-[12px] text-(--accent-1)">{t('java-download-working', { major })}</p>
+          {#if progress}
+            <ProgressBar
+              label={progress.label}
+              percent={progress.percent}
+              indeterminate={progress.indeterminate}
+              stage={progress.stage}
+              detail={`${progress.completed_files ?? 0}/${progress.total_files ?? 0}`}
+            />
+          {/if}
+        </div>
       {:else if installedPath}
         <p class="mt-3 break-all text-[12px] text-(--accent-1)" title={installedPath}>
           {t('java-download-done', { major, path: installedPath })}

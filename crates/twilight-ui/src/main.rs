@@ -5,7 +5,9 @@ mod accounts;
 mod cas;
 mod crash_report;
 mod curseforge;
+mod debug_protocol;
 mod devmode;
+mod downloads;
 mod export;
 mod horizon;
 mod import;
@@ -186,6 +188,15 @@ fn main() {
     shortcut::init_startup_launch(&std::env::args().collect::<Vec<_>>());
 
     let result = install_devtools_shortcut()
+        .manage(debug_protocol::DebugTrace::default())
+        .manage(debug_protocol::DebugServer::default())
+        .setup(|app| {
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                debug_protocol::sync_server(&handle).await;
+            });
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             get_version,
@@ -303,6 +314,13 @@ fn main() {
             import::import_instance_archive,
             prefs::get_dev_settings,
             prefs::set_dev_settings,
+            debug_protocol::get_debug_protocol_config,
+            debug_protocol::set_debug_protocol_config,
+            debug_protocol::generate_debug_api_key,
+            debug_protocol::clear_debug_api_key,
+            debug_protocol::list_debug_trace,
+            debug_protocol::export_debug_trace,
+            debug_protocol::report_ui_error,
             prefs::get_raw_config_json,
             prefs::get_dev_diagnostics,
             devmode::list_dev_launch_records,

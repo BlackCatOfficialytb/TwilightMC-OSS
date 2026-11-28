@@ -232,6 +232,10 @@ async fn fetch_json(client: &reqwest::Client, url: &str) -> Result<serde_json::V
 }
 
 /// Deterministic artifact name per software inside the server dir.
+fn server_software_slug(software: &ServerSoftware) -> String {
+    format!("{software:?}").to_ascii_lowercase()
+}
+
 fn jar_name(software: &ServerSoftware) -> &'static str {
     match software {
         ServerSoftware::Pumpkin if cfg!(windows) => "pumpkin.exe",
@@ -249,20 +253,35 @@ async fn fetch_artifact(
     name: &str,
     url: &str,
     sha1: Option<String>,
+    app: Option<&AppHandle>,
+    task_id: &str,
 ) -> Result<PathBuf, String> {
     let dest = dir.join(name);
     if dest.is_file() {
         return Ok(dest);
     }
+    let reqs = [DownloadRequest {
+        url: url.to_owned(),
+        dest: dest.clone(),
+        sha1,
+    }];
     let downloader = ParallelDownloader::new(http_client(), 4);
-    downloader
-        .download_all(&[DownloadRequest {
-            url: url.to_owned(),
-            dest: dest.clone(),
-            sha1,
-        }])
-        .await
-        .map_err(|e| e.to_string())?;
+    if let Some(app) = app {
+        let emitter =
+            crate::downloads::ProgressEmitter::new(app, task_id.to_owned(), name.to_owned());
+        let cb = crate::downloads::parallel_progress_callback(emitter.clone());
+        downloader
+            .with_progress(cb)
+            .download_all(&reqs)
+            .await
+            .map_err(|e| e.to_string())?;
+        emitter.emit_complete(1, 1, 0, None);
+    } else {
+        downloader
+            .download_all(&reqs)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     Ok(dest)
 }
 
@@ -293,6 +312,7 @@ async fn resolve_artifact(
     dir: &Path,
     meta: &ServerMeta,
     emit: &std::sync::Arc<dyn Fn(String) + Send + Sync>,
+    app: Option<&AppHandle>,
 ) -> Result<PathBuf, String> {
     let client = http_client();
     let name = jar_name(&meta.software);
@@ -313,7 +333,19 @@ async fn resolve_artifact(
             let version_json = fetch_json(&client, &version_url).await?;
             let (url, sha1) = engine::vanilla_server_download(&version_json)
                 .ok_or_else(|| "mojang manifest has no server download".to_owned())?;
-            fetch_artifact(dir, name, &url, sha1).await
+            fetch_artifact(
+                dir,
+                name,
+                &url,
+                sha1,
+                app,
+                &format!(
+                    "server-{}-{}",
+                    server_software_slug(&meta.software),
+                    meta.version
+                ),
+            )
+            .await
         }
         ServerSoftware::Paper | ServerSoftware::Velocity => {
             // Fill v3: builds arrive newest first; pick the latest stable.
@@ -333,10 +365,30 @@ async fn resolve_artifact(
             let (url, sha256) = engine::fill_download(&builds).ok_or_else(|| {
                 format!("no stable papermc build for {} {}", project, meta.version)
             })?;
-            fetch_artifact(dir, name, &url, sha256).await
+            fetch_artifact(
+                dir,
+                name,
+                &url,
+                sha256,
+                app,
+                &format!(
+                    "server-{}-{}",
+                    server_software_slug(&meta.software),
+                    meta.version
+                ),
+            )
+            .await
         }
         ServerSoftware::Purpur => {
-            fetch_artifact(dir, name, &engine::purpur_download_url(&meta.version), None).await
+            fetch_artifact(
+                dir,
+                name,
+                &engine::purpur_download_url(&meta.version),
+                None,
+                app,
+                &format!("server-purpur-{}", meta.version),
+            )
+            .await
         }
         ServerSoftware::Fabric => {
             let loader = resolve_fabric_loader(meta.loader_version.as_deref()).await?;
@@ -345,6 +397,8 @@ async fn resolve_artifact(
                 name,
                 &engine::fabric_download_url(&meta.version, &loader),
                 None,
+                app,
+                &format!("server-fabric-{}", meta.version),
             )
             .await
         }
@@ -378,7 +432,19 @@ async fn resolve_artifact(
                 url.rsplit('/').next().unwrap_or(&url),
                 engine::host_cpu_target()
             ));
-            fetch_artifact(dir, name, &url, None).await
+            fetch_artifact(
+                dir,
+                name,
+                &url,
+                None,
+                app,
+                &format!(
+                    "server-{}-{}",
+                    server_software_slug(&meta.software),
+                    meta.version
+                ),
+            )
+            .await
         }
         ServerSoftware::NeoForge => {
             // Step 1: the installer jar; step 2: run `--installServer` once
@@ -388,6 +454,8 @@ async fn resolve_artifact(
                 "neoforge-installer.jar",
                 &engine::neoforge_installer_url(&meta.version),
                 None,
+                app,
+                &format!("server-neoforge-{}", meta.version),
             )
             .await?;
             if !dir.join("libraries").is_dir() {
@@ -405,6 +473,8 @@ async fn resolve_artifact(
                 "forge-installer.jar",
                 &engine::forge_installer_url(&meta.version),
                 None,
+                app,
+                &format!("server-forge-{}", meta.version),
             )
             .await?;
             if !dir.join("libraries").is_dir() {
@@ -657,7 +727,7 @@ async fn start_server_inner(app: &AppHandle, id: &str) -> Result<(), String> {
     let emit = make_emit(app, id);
 
     // resolve/download the artifact first (slow path: clean state on failure)
-    let artifact = match resolve_artifact(&dir, &meta, &emit).await {
+    let artifact = match resolve_artifact(&dir, &meta, &emit, Some(app)).await {
         Ok(a) => a,
         Err(e) => {
             set_state(app, id, "Stopped");

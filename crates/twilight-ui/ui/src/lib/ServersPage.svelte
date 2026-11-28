@@ -14,6 +14,7 @@
   import ServerBackupsTab from './ServerBackupsTab.svelte';
   import ServerNetworkTab from './ServerNetworkTab.svelte';
   import { toast, confirmAlert } from './alerts.svelte.js';
+  import ProgressBar from './ProgressBar.svelte';
   import { t } from './i18n.svelte.ts';
 
   let servers = $state([]);
@@ -23,6 +24,7 @@
   let managing = $state(false);
   let activeTab = $state('console');
   let showNew = $state(false);
+  let downloadProgress = $state(null);
   let busy = $state('');
   let logs = $state({}); // id -> [line]
   let connectMap = $state({}); // id -> { connect, endpoint }
@@ -154,6 +156,13 @@
         unlisteners.push(await tauriListen('server-log', (e) => pushLog(e.payload.id, e.payload.line)));
         unlisteners.push(await tauriListen('server-state', () => refresh()));
         unlisteners.push(await tauriListen('server-connect', () => refresh()));
+        unlisteners.push(await tauriListen('download-progress', (e) => {
+          const p = e.payload;
+          if (typeof p?.task_id === 'string' && (p.task_id.startsWith('server-') || p.task_id.startsWith('horizon-'))) {
+            downloadProgress = p;
+            if (p.stage === 'done' || p.percent === 100) setTimeout(() => { if (downloadProgress?.task_id === p.task_id) downloadProgress = null; }, 1200);
+          }
+        }));
       } catch {}
       await refresh();
     })();
@@ -285,6 +294,9 @@
         + {t('servers-new')}
       </button>
     </div>
+    {#if downloadProgress}
+      <div class="mt-3 rounded border border-(--border) bg-(--bg-subtle) p-3"><ProgressBar label={downloadProgress.label} percent={downloadProgress.percent} indeterminate={downloadProgress.indeterminate} stage={downloadProgress.stage} detail={`${downloadProgress.completed_files ?? 0}/${downloadProgress.total_files ?? 0}`} /></div>
+    {/if}
 
     {#if loading}
       <p class="mt-6 text-[13px] text-(--text-muted)">{t('servers-scanning')}</p>

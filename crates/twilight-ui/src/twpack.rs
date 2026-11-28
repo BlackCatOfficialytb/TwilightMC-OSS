@@ -91,11 +91,18 @@ pub async fn export_instance_twpack(
     manifest.loader = meta.loader.clone();
     manifest.loader_version = meta.loader_version.clone();
 
+    let emitter = crate::downloads::ProgressEmitter::new(
+        &app,
+        format!("twpack-export-{instance_id}"),
+        "Twilight pack export",
+    );
+    emitter.emit(0, 1, 0, None, true);
     let dest_out = dest.clone();
     tokio::task::spawn_blocking(move || export_twpack(&dir, &dest_out, manifest))
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
+    emitter.emit_complete(1, 1, 1, Some(1));
     Ok(dest.display().to_string())
 }
 
@@ -167,6 +174,13 @@ pub async fn install_twpack(
         return Err(format!("instance {id} already exists; pick another name"));
     }
 
+    let emitter = crate::downloads::ProgressEmitter::new(
+        &app,
+        format!("twpack-install-{id}"),
+        manifest.name.clone(),
+    );
+    emitter.set_stage("extracting".to_owned());
+    emitter.emit(0, 1, 0, None, true);
     let extract_into = instance_dir.clone();
     let archive_for_extract = archive.clone();
     let extracted = tokio::task::spawn_blocking(move || {
@@ -176,10 +190,10 @@ pub async fn install_twpack(
     .map_err(|e| e.to_string())?
     .map_err(|e| e.to_string());
     if let Err(e) = extracted {
-        // a refused/half-extracted pack must not surface as a broken instance
         let _ = tokio::fs::remove_dir_all(&instance_dir).await;
         return Err(e);
     }
+    emitter.emit_complete(1, 1, 1, Some(1));
 
     let meta = InstanceMeta {
         version: manifest.minecraft_version.clone(),

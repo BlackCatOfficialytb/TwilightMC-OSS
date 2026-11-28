@@ -894,6 +894,54 @@ pub async fn run_launch_with(
 
     // ---- libraries + client jar (parallel, sha1-verified)
     let downloader = ParallelDownloader::new(client.clone(), 8);
+    let download_sink = sink.clone();
+    let launch_download = |task_id: &'static str, label: String| {
+        let sink = download_sink.clone();
+        let start = std::time::Instant::now();
+        let last = std::sync::Arc::new(std::sync::Mutex::new(0u128));
+        let last_pct = std::sync::Arc::new(std::sync::Mutex::new(-1i64));
+        move |p: twilight_downloader::DownloadProgress| {
+            let percent = p.percent().map(|v| v as f64);
+            let pct_i = percent.map(|v| v.round() as i64).unwrap_or(-1);
+            let now = start.elapsed().as_millis();
+            let stage = if p.total_files > 0 && p.completed_files == p.total_files {
+                "done"
+            } else {
+                "downloading"
+            };
+            let emit = stage == "done"
+                || now.saturating_sub(*last.lock().unwrap_or_else(|e| e.into_inner())) >= 100
+                || (pct_i >= 0 && pct_i != *last_pct.lock().unwrap_or_else(|e| e.into_inner()));
+            if !emit {
+                return;
+            }
+            *last.lock().unwrap_or_else(|e| e.into_inner()) = now;
+            *last_pct.lock().unwrap_or_else(|e| e.into_inner()) = pct_i;
+            if let Some(sink) = sink.clone() {
+                let total_bytes = if p.total_bytes_known {
+                    Some(p.known_total_bytes)
+                } else {
+                    None
+                };
+                let event = twilight_launch::LaunchEvent::Download(
+                    twilight_launch::LaunchDownloadProgress {
+                        task_id: task_id.to_owned(),
+                        label: label.clone(),
+                        stage: stage.to_owned(),
+                        completed_files: p.completed_files,
+                        total_files: p.total_files,
+                        downloaded_bytes: p.downloaded_bytes,
+                        total_bytes,
+                        percent,
+                        indeterminate: total_bytes.is_none() && p.total_files == 0,
+                    },
+                );
+                tokio::spawn(async move {
+                    let _ = sink.send(event).await;
+                });
+            }
+        }
+    };
     let mut requests = Vec::new();
     if let Some(client_info) = version.client() {
         requests.push(DownloadRequest {
@@ -931,7 +979,14 @@ pub async fn run_launch_with(
         })
         .map(|request| (request.dest.clone(), request.sha1.is_some()))
         .collect();
-    let mut downloads = downloader.download_all(&requests).await?;
+    let mut downloads = downloader
+        .clone()
+        .with_progress(launch_download(
+            "launch-libraries",
+            format!("Libraries {}", version.id),
+        ))
+        .download_all(&requests)
+        .await?;
     // loader libraries stage into the same shared store and lead the classpath
     if let Some(profile) = &loader_profile {
         let loader_requests = profile.download_requests(&paths.library_root);
@@ -942,7 +997,16 @@ pub async fn run_launch_with(
                 freetype_requests.push((request.dest.clone(), request.sha1.is_some()));
             }
         }
-        downloads.extend(downloader.download_all(&loader_requests).await?);
+        downloads.extend(
+            downloader
+                .clone()
+                .with_progress(launch_download(
+                    "launch-loader-libs",
+                    format!("Loader libraries {}", version.id),
+                ))
+                .download_all(&loader_requests)
+                .await?,
+        );
     }
     // A refreshed native is the expected outcome of Mojang re-publishing a
     // patched lwjgl-freetype; make the replacement visible in the console.
@@ -976,7 +1040,16 @@ pub async fn run_launch_with(
             .await?;
         }
         let store = AssetStore::new(&paths.assets_root);
-        store.ensure_objects(&index, &downloader).await?;
+        store
+            .ensure_objects_with_progress(
+                &index,
+                &downloader,
+                Some(std::sync::Arc::new(launch_download(
+                    "launch-assets",
+                    format!("Assets {}", paths.assets_id),
+                ))),
+            )
+            .await?;
         let needs_export = index.is_virtual == Some(true) || is_virtual_assets_id(&paths.assets_id);
         if needs_export {
             let virtual_root = paths.assets_root.join("virtual").join(&paths.assets_id);
@@ -1061,6 +1134,11 @@ pub async fn run_launch_with(
                         let _ = sink.send(LaunchEvent::Stderr(line)).await;
                     }
                 }
+                LaunchEvent::Download(progress) => {
+                    if let Some(sink) = &sink {
+                        let _ = sink.send(LaunchEvent::Download(progress)).await;
+                    }
+                }
                 // The raw command was already forwarded to the sink above;
                 // phase timings only feed the desktop Developer tab.
                 LaunchEvent::Command(_) | LaunchEvent::Phase(_, _) => {}
@@ -1100,13 +1178,7 @@ pub async fn run_launch_with(
     if let Err(join_error) = printer.await {
         eprintln!("twilight: output pump terminated early: {join_error}");
     }
-    if status.success() {
-        Ok(0)
-    } else {
-        Err(CliError::GameFailed {
-            status: status.to_string(),
-        })
-    }
+    Ok(status.code().unwrap_or(1))
 }
 
 #[cfg(test)]

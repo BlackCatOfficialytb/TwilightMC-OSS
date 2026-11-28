@@ -6,6 +6,7 @@
   import { onMount } from 'svelte';
   import { pushOverlay, popOverlay } from './overlays.js';
   import { toast } from './alerts.svelte.js';
+  import ProgressBar from './ProgressBar.svelte';
   import { t } from './i18n.svelte.ts';
 
   let { instance, items = [], onclose, ondownloaded } = $props();
@@ -22,6 +23,7 @@
   let checked = $state({});
   let downloading = $state(false);
   let downloadError = $state('');
+  let progress = $state(null);
 
   function fmtSize(bytes) {
     if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -57,7 +59,11 @@
     if (!files.length) return;
     downloading = true;
     downloadError = '';
+    progress = null;
+    const core = window.__TAURI__?.event;
+    let unlisten = null;
     try {
+      if (core?.listen) unlisten = await core.listen('download-progress', (e) => { progress = e.payload; });
       const names = await invoke('install_modrinth_batch', {
         instanceId: instance.id,
         files,
@@ -68,6 +74,7 @@
       downloadError = String(e);
       toast(t('review-download-failed', { error: String(e) }), 'error');
     } finally {
+      if (unlisten) unlisten();
       downloading = false;
     }
   }

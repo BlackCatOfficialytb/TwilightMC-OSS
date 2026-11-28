@@ -73,9 +73,17 @@ pub async fn install_horizon_release(
             platform_asset_name()
         )
     })?;
+    let emitter = crate::downloads::ProgressEmitter::new(
+        &app,
+        format!("horizon-{}", release.tag),
+        asset.name.clone(),
+    );
+    emitter.set_stage("downloading".to_owned());
+    emitter.emit(0, 1, 0, None, true);
     let bytes = download_asset(&client, asset)
         .await
         .map_err(|e| e.to_string())?;
+    emitter.emit_complete(1, 1, bytes.len() as u64, Some(bytes.len() as u64));
     let root = crate::storage::shared_root(&app)
         .await?
         .join("horizon-releases");

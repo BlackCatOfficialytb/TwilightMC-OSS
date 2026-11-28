@@ -4,9 +4,11 @@
   // one flow: the backend creates the instance, then the picked icon and
   // group are stamped onto it.
   import { onMount } from 'svelte';
+  import { tauriListen } from './tauri';
   import { pushOverlay, popOverlay } from './overlays.js';
   import { iconKeyAsset } from './twemoji.js';
   import InstanceIconPicker from './InstanceIconPicker.svelte';
+  import ProgressBar from './ProgressBar.svelte';
   import { t } from './i18n.svelte.ts';
 
   let {
@@ -119,6 +121,7 @@
   let importOutcome = $state(null);
   let importBusy = $state(false);
   let importError = $state('');
+  let importProgress = $state(null);
 
   // ---- accessibility checklist (Blind/Deaf Mode assistive mods) ----
   const BLIND_ASSIST = [
@@ -763,6 +766,9 @@
               <span class="text-[10px] text-(--text-muted)">{t('wizard-import-filter')}</span>
             </div>
 
+            {#if importBusy && importProgress}
+              <div class="mt-3"><ProgressBar label={importProgress.label} percent={importProgress.percent} indeterminate={importProgress.indeterminate} stage={importProgress.stage} detail={`${importProgress.completed_files ?? 0}/${importProgress.total_files ?? 0}`} /></div>
+            {/if}
             {#if importError}
               <p role="alert" class="mt-3 rounded border border-rose-500/30 bg-rose-500/10 px-2 py-1.5 text-[11px] text-rose-400">{importError}</p>
             {/if}

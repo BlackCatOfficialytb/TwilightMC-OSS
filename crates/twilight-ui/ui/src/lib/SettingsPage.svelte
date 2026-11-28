@@ -1,5 +1,5 @@
 <script>
-  import { tauriInvoke } from './tauri';
+  import { tauriInvoke, tauriListen } from './tauri';
   // Full-page settings: a left navigation rail over four sections and a
   // spacious content column. Input values are $bindable so App.svelte keeps
   // owning persistence; actions bubble up as callbacks.
@@ -33,6 +33,14 @@
       jdwpEnabled: false,
       jdwpPort: 5005,
       mixinDebug: false,
+      debugHttpEnabled: false,
+      debugHttpPort: 28445,
+      debugHttpTls: true,
+      debugMcpEnabled: false,
+      debugMcpPort: 28446,
+      debugApiKey: null,
+      debugRequireApiKey: true,
+      debugPermissions: { readState: true, readEvents: true, readLogs: true, readInstances: false, readConfig: false },
     }),
     storage = null,
     runtimes = [],
@@ -67,6 +75,7 @@
   // ---- custom java picker ----
   let addedJava = $state([]);
   let adoptiumMajor = $state(21);
+  let adoptiumProgress = $state(null);
   let javaPickMsg = $state('');
   let javaPickError = $state('');
   let javaBusy = $state(false);
@@ -129,6 +138,7 @@
   let horizonDetected = $state([]);
   let horizonReleases = $state([]);
   let horizonTag = $state('latest');
+  let horizonProgress = $state(null);
 
   async function refreshHorizon() {
     try {
@@ -140,6 +150,18 @@
     }
   }
   refreshHorizon();
+
+  onMount(() => {
+    const off = [];
+    (async () => {
+      try { off.push(await tauriListen('download-progress', (e) => {
+        const p = e.payload;
+        if (typeof p?.task_id === 'string' && p.task_id.startsWith('adoptium-java-')) adoptiumProgress = p;
+        if (typeof p?.task_id === 'string' && p.task_id.startsWith('horizon-')) horizonProgress = p;
+      })); } catch {}
+    })();
+    return () => off.forEach((f) => f());
+  });
 
   async function browseHorizon() {
     const open = window.__TAURI__?.dialog?.open;
@@ -251,6 +273,57 @@
   let devRecords = $state([]);
   let devConfig = $state('');
   let devConfigOpen = $state(false);
+  let debugTrace = $state([]);
+  let debugCertPath = $state(null);
+
+  async function refreshDebugTrace() {
+    try {
+      debugTrace = await tauriInvoke('list_debug_trace', { since: 0 });
+      const cfg = await tauriInvoke('get_debug_protocol_config');
+      debugCertPath = cfg?.certPath ?? cfg?.cert_path ?? null;
+      if (cfg?.apiKey ?? cfg?.api_key) devSettings.debugApiKey = cfg.apiKey ?? cfg.api_key;
+    } catch (e) {
+      debugTrace = [];
+    }
+  }
+
+  async function exportDebugTrace() {
+    try {
+      const payload = await tauriInvoke('export_debug_trace');
+      const blob = new Blob([payload], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `twilight-debug-trace-${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      toast(String(e), 'error');
+    }
+  }
+  async function generateDebugApiKey() {
+    try { devSettings.debugApiKey = await tauriInvoke('generate_debug_api_key'); toast(t('settings-dev-debug-key-generated'), 'success'); }
+    catch (e) { toast(String(e), 'error'); }
+  }
+  async function clearDebugApiKey() {
+    try { await tauriInvoke('clear_debug_api_key'); devSettings.debugApiKey = null; }
+    catch (e) { toast(String(e), 'error'); }
+  }
+  async function copyDebugApiKey() { if (!devSettings.debugApiKey) return; await navigator.clipboard?.writeText(devSettings.debugApiKey); toast(t('settings-dev-debug-copied'), 'success'); }
+  async function copyDebugCertPath() { if (!debugCertPath) return; await navigator.clipboard?.writeText(debugCertPath); toast(t('settings-dev-debug-copied'), 'success'); }
+  async function copyMcpConfig() {
+    const port = devSettings.debugMcpPort || 28446;
+    const key = devSettings.debugApiKey || '<TWILIGHT_DEBUG_KEY>';
+    const snippet = JSON.stringify({ mcpServers: { twilightmc: { type: 'streamable-http', url: `https://127.0.0.1:${port}/mcp`, headers: { Authorization: `Bearer ${key}` } } } }, null, 2);
+    await navigator.clipboard?.writeText(snippet);
+    toast(t('settings-dev-debug-copied'), 'success');
+  }
+
+  $effect(() => {
+    if (devSettings.devMode && (devSettings.debugHttpEnabled || devSettings.debugMcpEnabled)) {
+      void refreshDebugTrace();
+    }
+  });
   let devBusy = $state(false);
 
   // ---- Update channel + strictly manual check (About & Updates) ----
@@ -1084,11 +1157,14 @@
             </select>
             <button
               class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover)"
-              onclick={() => ondownloadjava?.(adoptiumMajor)}
+              onclick={() => { adoptiumProgress = null; ondownloadjava?.(adoptiumMajor); }}
             >
               {t('java-download-action')}
             </button>
           </div>
+          {#if adoptiumProgress}
+            <div class="mt-3"><ProgressBar label={adoptiumProgress.label} percent={adoptiumProgress.percent} indeterminate={adoptiumProgress.indeterminate} stage={adoptiumProgress.stage} detail={`${adoptiumProgress.completed_files ?? 0}/${adoptiumProgress.total_files ?? 0}`} /></div>
+          {/if}
         </div>
 
         <h3 class="mt-8 text-[11px] font-semibold uppercase tracking-wide text-(--text-muted)">{t('settings-memory-title')}</h3>
@@ -1288,11 +1364,14 @@
             <button
               class="rounded bg-(--accent) px-3 py-1.5 text-[12px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-50"
               disabled={horizonBusy}
-              onclick={installHorizonRelease}
+              onclick={() => { horizonProgress = null; installHorizonRelease(); }}
             >
               {t('settings-horizon-install')}
             </button>
           </div>
+          {#if horizonProgress}
+            <div class="mt-2"><ProgressBar label={horizonProgress.label} percent={horizonProgress.percent} indeterminate={horizonProgress.indeterminate} stage={horizonProgress.stage} detail={`${horizonProgress.completed_files ?? 0}/${horizonProgress.total_files ?? 0}`} /></div>
+          {/if}
         {/if}
         <p class="mt-4 rounded border border-(--border) bg-(--bg-subtle) p-3 text-[11px] leading-relaxed text-(--text-muted)">
           {t('settings-horizon-contract')} <span class="font-mono">{t('settings-horizon-contract-line')}</span>.
@@ -1873,6 +1952,105 @@
             <input type="checkbox" bind:checked={devSettings.horizonAllowUnsignedLocal} />
             <span>{t('settings-dev-horizon-allow-unsigned')}</span>
           </label>
+        </div>
+
+        <h3 class="mt-6 text-[12px] font-semibold uppercase tracking-wide text-(--text-muted)">
+          {t('settings-dev-debug-protocol')}
+        </h3>
+        <div class="mt-2 space-y-3 rounded border border-amber-500/40 bg-amber-500/5 p-4">
+          <p class="text-[11px] leading-relaxed text-amber-300">{t('settings-dev-debug-protocol-warning')}</p>
+
+          {#if devSettings.debugHttpEnabled && !devSettings.debugHttpTls}
+            <p role="alert" class="rounded border border-amber-500/50 bg-amber-500/10 p-2 text-[11px] text-amber-200">
+              {t('settings-dev-debug-http-plain-warning')}
+            </p>
+          {/if}
+          {#if (devSettings.debugHttpEnabled || devSettings.debugMcpEnabled) && (!devSettings.debugRequireApiKey || !devSettings.debugApiKey)}
+            <p role="alert" class="rounded border border-rose-500/50 bg-rose-500/10 p-2 text-[11px] text-rose-200">
+              {t('settings-dev-debug-no-auth-warning')}
+            </p>
+          {/if}
+
+          <div class="grid gap-3 md:grid-cols-2">
+            <div class="space-y-2 rounded border border-(--border) bg-(--bg-surface) p-3">
+              <label class="flex items-center gap-2 text-[12px]">
+                <input type="checkbox" bind:checked={devSettings.debugHttpEnabled} />
+                {t('settings-dev-debug-http-enabled')}
+              </label>
+              <label class="flex items-center gap-2 text-[12px]">
+                <span class="text-(--text-muted)">{t('settings-dev-debug-protocol-port')}</span>
+                <input type="number" min="1" max="65535" class="h-7 w-24 rounded border border-(--border) bg-(--bg-subtle) px-2 font-mono text-[12px]" bind:value={devSettings.debugHttpPort} />
+              </label>
+              <label class="flex items-center gap-2 text-[12px]">
+                <input type="checkbox" bind:checked={devSettings.debugHttpTls} />
+                {t('settings-dev-debug-http-tls')}
+              </label>
+              <p class="text-[11px] text-(--text-muted)">{t('settings-dev-debug-http-bind')}</p>
+            </div>
+            <div class="space-y-2 rounded border border-(--border) bg-(--bg-surface) p-3">
+              <label class="flex items-center gap-2 text-[12px]">
+                <input type="checkbox" bind:checked={devSettings.debugMcpEnabled} />
+                {t('settings-dev-debug-mcp-enabled')}
+              </label>
+              <label class="flex items-center gap-2 text-[12px]">
+                <span class="text-(--text-muted)">{t('settings-dev-debug-mcp-port')}</span>
+                <input type="number" min="1" max="65535" class="h-7 w-24 rounded border border-(--border) bg-(--bg-subtle) px-2 font-mono text-[12px]" bind:value={devSettings.debugMcpPort} />
+              </label>
+              <p class="text-[11px] text-(--text-muted)">{t('settings-dev-debug-mcp-bind')}</p>
+            </div>
+          </div>
+
+          <div class="space-y-2 rounded border border-(--border) bg-(--bg-surface) p-3">
+            <label class="flex items-center gap-2 text-[12px]">
+              <input type="checkbox" bind:checked={devSettings.debugRequireApiKey} />
+              {t('settings-dev-debug-require-key')}
+            </label>
+            <div class="flex flex-wrap items-center gap-2">
+              <input type="password" readonly value={devSettings.debugApiKey ?? ''} placeholder={t('settings-dev-debug-no-key')} class="h-8 min-w-[220px] flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2 font-mono text-[11px]" />
+              <button class="rounded border border-(--border) px-2 py-1 text-[11px]" onclick={generateDebugApiKey}>{t('settings-dev-debug-generate-key')}</button>
+              <button class="rounded border border-(--border) px-2 py-1 text-[11px]" onclick={clearDebugApiKey}>{t('settings-dev-debug-clear-key')}</button>
+              <button class="rounded border border-(--border) px-2 py-1 text-[11px]" onclick={copyDebugApiKey} disabled={!devSettings.debugApiKey}>{t('settings-dev-debug-copy-key')}</button>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 text-[11px]">
+              <span class="text-(--text-muted)">{t('settings-dev-debug-cert')}:</span>
+              <code class="rounded bg-(--bg-subtle) px-1 py-0.5">{debugCertPath ?? t('settings-dev-debug-cert-pending')}</code>
+              <button class="rounded border border-(--border) px-2 py-1" onclick={copyDebugCertPath} disabled={!debugCertPath}>{t('settings-dev-debug-copy-cert')}</button>
+            </div>
+          </div>
+
+          <div class="space-y-2 rounded border border-(--border) bg-(--bg-surface) p-3">
+            <div class="text-[12px] font-medium">{t('settings-dev-debug-scopes')}</div>
+            <div class="grid gap-1 text-[12px] sm:grid-cols-2">
+              <label class="flex items-center gap-2"><input type="checkbox" bind:checked={devSettings.debugPermissions.readState} />read_state</label>
+              <label class="flex items-center gap-2"><input type="checkbox" bind:checked={devSettings.debugPermissions.readEvents} />read_events</label>
+              <label class="flex items-center gap-2"><input type="checkbox" bind:checked={devSettings.debugPermissions.readLogs} />read_logs</label>
+              <label class="flex items-center gap-2"><input type="checkbox" bind:checked={devSettings.debugPermissions.readInstances} />read_instances</label>
+              <label class="flex items-center gap-2"><input type="checkbox" bind:checked={devSettings.debugPermissions.readConfig} />read_config</label>
+            </div>
+          </div>
+
+          <div class="flex flex-wrap gap-2">
+            <button class="rounded border border-(--border) px-3 py-1.5 text-[12px]" onclick={copyMcpConfig}>{t('settings-dev-debug-copy-mcp')}</button>
+            <button class="rounded border border-(--border) px-3 py-1.5 text-[12px]" onclick={refreshDebugTrace}>{t('settings-dev-debug-protocol-refresh')}</button>
+            <button class="rounded border border-(--border) px-3 py-1.5 text-[12px]" onclick={exportDebugTrace}>{t('settings-dev-debug-protocol-export')}</button>
+          </div>
+          <p class="text-[11px] text-(--text-muted)">{t('settings-dev-debug-skill-path')}: <code>.agents/skills/twilight-debug/SKILL.md</code></p>
+
+          <div class="max-h-56 overflow-auto rounded border border-(--border) bg-(--bg-surface) p-2 font-mono text-[10px] leading-relaxed">
+            {#if debugTrace.length === 0}
+              <div class="text-(--text-muted)">{t('settings-dev-debug-protocol-empty')}</div>
+            {:else}
+              {#each debugTrace.slice(-200) as ev}
+                <div class="border-b border-(--border)/40 py-1">
+                  <span class="text-(--text-muted)">#{ev.seq}</span>
+                  <span class="ml-2 text-(--accent)">{ev.kind}</span>
+                  <span class="ml-2">{ev.source}</span>
+                  {#if ev.duration_ms != null}<span class="ml-2 text-(--text-muted)">{ev.duration_ms}ms</span>{/if}
+                  <div class="truncate text-(--text-muted)" title={ev.summary}>{ev.summary}</div>
+                </div>
+              {/each}
+            {/if}
+          </div>
         </div>
 
         <h3 class="mt-6 text-[12px] font-semibold uppercase tracking-wide text-(--text-muted)">

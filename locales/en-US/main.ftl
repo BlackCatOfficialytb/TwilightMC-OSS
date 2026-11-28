@@ -1279,3 +1279,43 @@ crash-sending = Sending…
 crash-sent = Report sent.
 crash-error = Could not send report: { $error }
 crash-close = Close
+
+## Debug protocol (dev mode)
+
+settings-dev-debug-protocol = Debug protocol
+settings-dev-debug-protocol-warning = Dev-only localhost debug protocol. It exposes redacted diagnostics on 127.0.0.1 only. Never enable on untrusted machines or shared networks.
+settings-dev-debug-protocol-enabled = Enable localhost debug protocol
+settings-dev-debug-protocol-port = Port
+settings-dev-debug-protocol-bind = Binds read-only HTTP to 127.0.0.1. Endpoints: /health, /state, /events?since=<seq>, /logs.
+settings-dev-debug-http-enabled = Enable HTTP debug endpoint
+settings-dev-debug-http-tls = Enable HTTPS/TLS (recommended)
+settings-dev-debug-http-bind = Binds read-only HTTP/HTTPS to 127.0.0.1. Endpoints: /health, /state, /events?since=<seq>, /logs, /instances, /config.
+settings-dev-debug-http-plain-warning = Plain HTTP mode enabled: TLS is disabled on 127.0.0.1; local loopback traffic is unencrypted.
+settings-dev-debug-no-auth-warning = Unauthenticated Debug Access: No API Key is set! Any local process or browser page on this machine may read granted debug scopes.
+settings-dev-debug-mcp-enabled = Enable MCP over HTTPS
+settings-dev-debug-mcp-port = MCP port
+settings-dev-debug-mcp-bind = Binds MCP Streamable HTTP to https://127.0.0.1:<port>/mcp (TLS required).
+settings-dev-debug-require-key = Require API key for debug endpoints
+settings-dev-debug-no-key = No API key configured
+settings-dev-debug-generate-key = Generate API Key
+settings-dev-debug-clear-key = Clear Key
+settings-dev-debug-copy-key = Copy Key
+settings-dev-debug-cert = TLS cert
+settings-dev-debug-cert-pending = generated on first TLS start
+settings-dev-debug-copy-cert = Copy Cert Path
+settings-dev-debug-scopes = Granted permission scopes
+settings-dev-debug-copy-mcp = Copy MCP Config JSON
+settings-dev-debug-skill-path = Agent skill
+settings-dev-debug-key-generated = Debug API key generated
+settings-dev-debug-copied = Copied to clipboard
+settings-dev-debug-protocol-refresh = Refresh trace
+settings-dev-debug-protocol-export = Export Debug Trace (.json)
+settings-dev-debug-protocol-empty = No debug events captured yet.
+
+## Download progress
+
+download-progress-label = Download
+download-progress-stage-downloading = Downloading
+download-progress-stage-verifying = Verifying
+download-progress-stage-extracting = Extracting
+download-progress-stage-done = Done

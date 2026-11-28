@@ -1,5 +1,5 @@
 <script>
-  import { tauriInvoke } from './tauri';
+  import { tauriInvoke, tauriListen } from './tauri';
   // The New Server wizard: Step 1 software → Step 2 version (live fetch) →
   // Step 3 settings (name/port/RAM) → Step 4 networking (Local Only vs
   // Minekube Connect tunnel + offline mode with the AuthMe recommendation).
@@ -7,6 +7,7 @@
   // the footer Next button, and a full-size Back button sits right next to
   // it on every step after the first.
   import { toast } from './alerts.svelte.js';
+  import ProgressBar from './ProgressBar.svelte';
   import { t } from './i18n.svelte.ts';
 
   let { onclose, oncreated } = $props();
@@ -38,6 +39,7 @@
   let offlineMode = $state(false);
   let busy = $state('');
   let error = $state('');
+  let progress = $state(null);
   let cpuTarget = $state('');
   let fetchToken = 0;
 
@@ -108,7 +110,13 @@
   async function create() {
     error = '';
     busy = 'create';
+    progress = null;
+    let unlisten = null;
     try {
+      unlisten = await tauriListen('download-progress', (e) => {
+        const p = e.payload;
+        if (typeof p?.task_id === 'string' && p.task_id.startsWith('server-')) progress = p;
+      });
       await tauriInvoke('create_server', {
         config: {
           name: name.trim(),
@@ -128,6 +136,7 @@
     } catch (e) {
       error = String(e);
     } finally {
+      if (unlisten) unlisten();
       busy = '';
     }
   }
@@ -261,6 +270,9 @@
           <div class="mt-2 rounded border border-amber-500/40 bg-amber-500/10 p-2.5 text-[11px] text-amber-500">
             {t('newserver-offline-warning')}
           </div>
+        {/if}
+        {#if busy === 'create' && progress}
+          <div class="mt-3"><ProgressBar label={progress.label} percent={progress.percent} indeterminate={progress.indeterminate} stage={progress.stage} detail={`${progress.completed_files ?? 0}/${progress.total_files ?? 0}`} /></div>
         {/if}
         {#if error}
           <p class="mt-3 text-[11px] text-rose-400">{error}</p>

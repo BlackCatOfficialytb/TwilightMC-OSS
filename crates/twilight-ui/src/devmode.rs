@@ -176,6 +176,7 @@ fn sensitive_arg(name: &str) -> bool {
         || name == "apikey"
         || name == "api_key"
         || name == "curseforge_api_key"
+        || name == "debug_api_key"
         || name.contains("secret")
         || name.contains("password")
 }
@@ -217,6 +218,7 @@ fn sensitive_key(key: &str) -> bool {
     let key = key.to_ascii_lowercase().replace('-', "_");
     key.contains("api_key")
         || key.contains("apikey")
+        || key == "debug_api_key"
         || key.contains("token")
         || key.contains("secret")
         || key.contains("password")

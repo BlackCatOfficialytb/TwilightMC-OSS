@@ -1,5 +1,7 @@
 //! Parallel, SHA-1 verified file downloads with atomic writes.
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use futures::stream::{self, StreamExt, TryStreamExt};
 use sha1::{Digest, Sha1};
@@ -15,6 +17,30 @@ pub struct DownloadRequest {
     pub sha1: Option<String>,
 }
 
+/// Aggregate progress for one [`ParallelDownloader::download_all`] call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DownloadProgress {
+    pub completed_files: u64,
+    pub total_files: u64,
+    pub downloaded_bytes: u64,
+    /// Sum of known `Content-Length` values for tasks that reported one.
+    pub known_total_bytes: u64,
+    /// True when every task reported a `Content-Length`.
+    pub total_bytes_known: bool,
+}
+
+impl DownloadProgress {
+    pub fn percent(&self) -> Option<f32> {
+        if self.total_bytes_known && self.known_total_bytes > 0 {
+            Some((self.downloaded_bytes as f32 / self.known_total_bytes as f32) * 100.0)
+        } else if self.total_files > 0 {
+            Some((self.completed_files as f32 / self.total_files as f32) * 100.0)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadedFile {
     pub dest: PathBuf,
@@ -23,10 +49,22 @@ pub struct DownloadedFile {
     pub was_skipped: bool,
 }
 
-#[derive(Debug, Clone)]
+type ProgressCallback = Arc<dyn Fn(DownloadProgress) + Send + Sync>;
+
+#[derive(Clone)]
 pub struct ParallelDownloader {
     client: reqwest::Client,
     concurrency: usize,
+    progress: Option<ProgressCallback>,
+}
+
+impl std::fmt::Debug for ParallelDownloader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ParallelDownloader")
+            .field("concurrency", &self.concurrency)
+            .field("has_progress", &self.progress.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl ParallelDownloader {
@@ -34,7 +72,16 @@ impl ParallelDownloader {
         Self {
             client,
             concurrency,
+            progress: None,
         }
+    }
+
+    pub fn with_progress<F>(mut self, progress: F) -> Self
+    where
+        F: Fn(DownloadProgress) + Send + Sync + 'static,
+    {
+        self.progress = Some(Arc::new(progress));
+        self
     }
 
     /// Downloads all files, up to `concurrency` in flight; fails fast on the
@@ -48,14 +95,20 @@ impl ParallelDownloader {
         &self,
         reqs: &[DownloadRequest],
     ) -> Result<Vec<DownloadedFile>, DownloadError> {
+        let tracker = ProgressTracker::new(reqs.len(), self.progress.clone());
+        tracker.emit();
         let mut futs = Vec::with_capacity(reqs.len());
-        for req in reqs {
-            futs.push(self.download_one(req));
+        for (index, req) in reqs.iter().enumerate() {
+            futs.push(self.download_one(req, index, tracker.clone()));
         }
-        stream::iter(futs)
+        let result: Result<Vec<DownloadedFile>, DownloadError> = stream::iter(futs)
             .buffer_unordered(self.concurrency)
             .try_collect()
-            .await
+            .await;
+        if result.is_ok() {
+            tracker.force_complete();
+        }
+        result
     }
 
     /// Verifies an already-present file against its expected sha1 (hash-only, no clone of bytes).
@@ -73,7 +126,12 @@ impl ParallelDownloader {
         }
     }
 
-    async fn download_one(&self, req: &DownloadRequest) -> Result<DownloadedFile, DownloadError> {
+    async fn download_one(
+        &self,
+        req: &DownloadRequest,
+        task_id: usize,
+        tracker: ProgressTracker,
+    ) -> Result<DownloadedFile, DownloadError> {
         // Existing file with a known-good hash: skip the network entirely.
         if let Some(expected) = req
             .sha1
@@ -83,6 +141,8 @@ impl ParallelDownloader {
             && let Ok(computed) = sha1_of_file(&req.dest).await
             && computed == expected
         {
+            let bytes = req.dest.metadata().ok().map(|m| m.len()).unwrap_or(0);
+            tracker.file_done(task_id, bytes, Some(bytes));
             return Ok(DownloadedFile {
                 dest: req.dest.clone(),
                 sha1: computed,
@@ -126,6 +186,8 @@ impl ParallelDownloader {
             });
         }
         let mut hasher = Sha1::new();
+        let task_total = resp.content_length();
+        let mut task_bytes = 0u64;
         let mut stream = resp.bytes_stream();
         loop {
             match stream.next().await {
@@ -138,6 +200,8 @@ impl ParallelDownloader {
                             path: part.clone(),
                             source: e,
                         })?;
+                    task_bytes = task_bytes.saturating_add(chunk.len() as u64);
+                    tracker.bytes(task_id, task_bytes, task_total);
                 }
                 Some(Err(e)) => {
                     return Err(DownloadError::Http {
@@ -172,11 +236,175 @@ impl ParallelDownloader {
                 path: req.dest.clone(),
                 source: e,
             })?;
+        tracker.file_done(task_id, task_bytes, task_total);
         Ok(DownloadedFile {
             dest: req.dest.clone(),
             sha1: actual,
             was_skipped: false,
         })
+    }
+}
+
+#[derive(Clone, Default)]
+struct TaskProgress {
+    bytes: u64,
+    total: Option<u64>,
+    completed: bool,
+}
+
+#[derive(Clone)]
+struct ProgressTracker {
+    callback: Option<ProgressCallback>,
+    state: Arc<Mutex<ProgressState>>,
+}
+
+struct ProgressState {
+    tasks: Vec<TaskProgress>,
+    last_emit: Instant,
+    last_emitted_bytes: u64,
+}
+
+impl ProgressTracker {
+    fn new(total_files: usize, callback: Option<ProgressCallback>) -> Self {
+        Self {
+            callback,
+            state: Arc::new(Mutex::new(ProgressState {
+                tasks: vec![TaskProgress::default(); total_files],
+                last_emit: Instant::now() - Duration::from_millis(200),
+                last_emitted_bytes: 0,
+            })),
+        }
+    }
+
+    fn snapshot(tasks: &[TaskProgress]) -> DownloadProgress {
+        let mut completed_files = 0u64;
+        let mut downloaded_bytes = 0u64;
+        let mut known_total_bytes = 0u64;
+        let mut total_bytes_known = !tasks.is_empty();
+        for task in tasks {
+            if task.completed {
+                completed_files = completed_files.saturating_add(1);
+            }
+            downloaded_bytes = downloaded_bytes.saturating_add(task.bytes);
+            match task.total {
+                Some(total) => known_total_bytes = known_total_bytes.saturating_add(total),
+                None => total_bytes_known = false,
+            }
+        }
+        DownloadProgress {
+            completed_files,
+            total_files: tasks.len() as u64,
+            downloaded_bytes,
+            known_total_bytes,
+            total_bytes_known,
+        }
+    }
+
+    fn emit(&self) {
+        let Some(callback) = &self.callback else {
+            return;
+        };
+        let snapshot = {
+            let mut state = match self.state.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let snapshot = Self::snapshot(&state.tasks);
+            state.last_emit = Instant::now();
+            state.last_emitted_bytes = snapshot.downloaded_bytes;
+            snapshot
+        };
+        callback(snapshot);
+    }
+
+    fn emit_throttled(&self) {
+        let Some(callback) = &self.callback else {
+            return;
+        };
+        let snapshot = {
+            let mut state = match self.state.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            let snapshot = Self::snapshot(&state.tasks);
+            let bytes_delta = snapshot
+                .downloaded_bytes
+                .saturating_sub(state.last_emitted_bytes);
+            if state.last_emit.elapsed() < Duration::from_millis(100) && bytes_delta < 64 * 1024 {
+                return;
+            }
+            state.last_emit = Instant::now();
+            state.last_emitted_bytes = snapshot.downloaded_bytes;
+            snapshot
+        };
+        callback(snapshot);
+    }
+
+    fn bytes(&self, task_id: usize, task_bytes: u64, task_total: Option<u64>) {
+        if self.callback.is_none() {
+            return;
+        }
+        {
+            let mut state = match self.state.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            if let Some(task) = state.tasks.get_mut(task_id) {
+                task.bytes = task.bytes.max(task_bytes);
+                if task.total.is_none() {
+                    task.total = task_total;
+                }
+            }
+        }
+        self.emit_throttled();
+    }
+
+    fn file_done(&self, task_id: usize, task_bytes: u64, task_total: Option<u64>) {
+        let Some(callback) = &self.callback else {
+            return;
+        };
+        let snapshot = {
+            let mut state = match self.state.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            if let Some(task) = state.tasks.get_mut(task_id) {
+                task.completed = true;
+                task.bytes = task.bytes.max(task_bytes);
+                task.total = task.total.or(task_total);
+                if let Some(total) = task.total {
+                    task.bytes = task.bytes.max(total);
+                }
+            }
+            let snapshot = Self::snapshot(&state.tasks);
+            state.last_emit = Instant::now();
+            state.last_emitted_bytes = snapshot.downloaded_bytes;
+            snapshot
+        };
+        callback(snapshot);
+    }
+
+    fn force_complete(&self) {
+        let Some(callback) = &self.callback else {
+            return;
+        };
+        let snapshot = {
+            let mut state = match self.state.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            for task in &mut state.tasks {
+                task.completed = true;
+                if let Some(total) = task.total {
+                    task.bytes = task.bytes.max(total);
+                }
+            }
+            let snapshot = Self::snapshot(&state.tasks);
+            state.last_emit = Instant::now();
+            state.last_emitted_bytes = snapshot.downloaded_bytes;
+            snapshot
+        };
+        callback(snapshot);
     }
 }
 

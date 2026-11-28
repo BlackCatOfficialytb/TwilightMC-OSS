@@ -532,6 +532,7 @@ async fn install_project_with_deps(
     loader: &str,
     parent: Option<&str>,
     visited: &mut HashSet<String>,
+    app_handle: Option<&AppHandle>,
 ) -> Result<Vec<String>, String> {
     validate_project_id(project_id)?;
     if !visited.insert(project_id.to_owned()) {
@@ -596,6 +597,7 @@ async fn install_project_with_deps(
                 loader,
                 Some(project_id),
                 visited,
+                app_handle,
             ))
             .await?,
         );
@@ -611,14 +613,30 @@ async fn install_project_with_deps(
         ));
     };
     let dest = mods_dir.join(&filename);
-    ParallelDownloader::new(client.clone(), 4)
-        .download_all(&[DownloadRequest {
-            url,
-            dest: dest.clone(),
-            sha1,
-        }])
-        .await
-        .map_err(|e| e.to_string())?;
+    let reqs = [DownloadRequest {
+        url,
+        dest: dest.clone(),
+        sha1,
+    }];
+    if let Some(app) = app_handle {
+        let emitter = crate::downloads::ProgressEmitter::new(
+            app,
+            format!("modrinth-{project_id}"),
+            filename.clone(),
+        );
+        let cb = crate::downloads::parallel_progress_callback(emitter.clone());
+        let downloaded = ParallelDownloader::new(client.clone(), 4)
+            .with_progress(cb)
+            .download_all(&reqs)
+            .await
+            .map_err(|e| e.to_string())?;
+        emitter.emit_complete(downloaded.len() as u64, reqs.len() as u64, 0, None);
+    } else {
+        ParallelDownloader::new(client.clone(), 4)
+            .download_all(&reqs)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     if let Some(cas_root) = cas_root {
         crate::mods::cas_dedupe_dest(cas_root, &dest).await?;
     }
@@ -667,6 +685,7 @@ pub async fn install_mod_with_deps(
         &loader,
         None,
         &mut visited,
+        Some(&app),
     )
     .await
 }
@@ -728,10 +747,23 @@ pub async fn download_modrinth_pack(
         ));
     };
     let dest = dir.join(&filename);
-    ParallelDownloader::new(reqwest::Client::new(), 4)
-        .download_all(&[DownloadRequest { url, dest, sha1 }])
+    let reqs = [DownloadRequest {
+        url,
+        dest: dest.clone(),
+        sha1,
+    }];
+    let emitter = crate::downloads::ProgressEmitter::new(
+        &app,
+        format!("pack-{project_type}-{project_id}"),
+        filename.clone(),
+    );
+    let cb = crate::downloads::parallel_progress_callback(emitter.clone());
+    let downloaded = ParallelDownloader::new(reqwest::Client::new(), 4)
+        .with_progress(cb)
+        .download_all(&reqs)
         .await
         .map_err(|e| e.to_string())?;
+    emitter.emit_complete(downloaded.len() as u64, reqs.len() as u64, 0, None);
     Ok(filename)
 }
 
@@ -1202,10 +1234,14 @@ pub async fn install_modrinth_batch(
         });
     }
     let cas_root = crate::mods::cas_root_if_enabled(&app).await?;
+    let emitter = crate::downloads::ProgressEmitter::new(&app, "modrinth-batch", "Mods download");
+    let cb = crate::downloads::parallel_progress_callback(emitter.clone());
     let downloaded = ParallelDownloader::new(reqwest::Client::new(), 6)
+        .with_progress(cb)
         .download_all(&reqs)
         .await
         .map_err(|e| e.to_string())?;
+    emitter.emit_complete(downloaded.len() as u64, reqs.len() as u64, 0, None);
     if let Some(cas_root) = cas_root.as_deref() {
         for file in &downloaded {
             crate::mods::cas_dedupe_dest(cas_root, &file.dest).await?;
@@ -1270,6 +1306,7 @@ pub async fn install_cleanroom_core_mods(
                 "forge",
                 None,
                 &mut HashSet::new(),
+                Some(&app),
             )
             .await?,
         );
@@ -1636,6 +1673,7 @@ mod tests {
             "fabric",
             None,
             &mut visited,
+            None,
         )
         .await
         .unwrap();
@@ -1694,6 +1732,7 @@ mod tests {
             "quilt",
             None,
             &mut visited,
+            None,
         )
         .await
         .unwrap();
@@ -1739,6 +1778,7 @@ mod tests {
             "fabric",
             Some("parent"),
             &mut visited,
+            None,
         )
         .await
         .unwrap_err();

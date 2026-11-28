@@ -12,7 +12,9 @@ mod meta;
 mod test_server;
 
 pub use asset_index::{AssetIndex, AssetObject};
-pub use download::{DownloadRequest, DownloadedFile, ParallelDownloader, sha1_of_file, to_hex};
+pub use download::{
+    DownloadProgress, DownloadRequest, DownloadedFile, ParallelDownloader, sha1_of_file, to_hex,
+};
 pub use error::DownloadError;
 pub use manifest::{FetchedVersionManifest, ManifestOrigin, fetch_version_manifest};
 pub use meta::{FREESM_META_BASE, MOJANG_MANIFEST_V2, MOJANG_RESOURCES_BASE, PRISM_META_BASE};

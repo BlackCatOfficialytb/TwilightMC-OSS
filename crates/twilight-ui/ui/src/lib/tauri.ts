@@ -21,6 +21,34 @@ type TauriEventApi = {
 
 type TauriGlobal = { core?: TauriCore; event?: TauriEventApi };
 
+let debugCaptureEnabled = false;
+
+export function setDebugCaptureEnabled(enabled: boolean) {
+  debugCaptureEnabled = enabled;
+}
+
+function summarizeArg(value: unknown): string {
+  try {
+    const text = JSON.stringify(value);
+    if (!text) return '';
+    return text.length > 300 ? `${text.slice(0, 300)}...` : text;
+  } catch {
+    return '[unserializable]';
+  }
+}
+
+function reportDebug(kind: string, source: string, summary: string) {
+  if (!debugCaptureEnabled) return;
+  const global = globalThis as typeof globalThis & { __TAURI__?: TauriGlobal };
+  const core = global.__TAURI__?.core;
+  if (!core) return;
+  void core
+    .invoke('report_ui_error', { kind, source, summary })
+    .catch(() => {
+      /* never break UI on debug reporting */
+    });
+}
+
 export function tauriInvoke<T = unknown>(
   command: string,
   args?: Record<string, unknown>,
@@ -30,7 +58,43 @@ export function tauriInvoke<T = unknown>(
   if (!core) {
     return Promise.reject(new Error('Tauri backend unavailable in this preview.'));
   }
-  return core.invoke<T>(command, args);
+  const started = performance.now();
+  return core.invoke<T>(command, args).then(
+    (value) => {
+      reportDebug(
+        'ipc_ok',
+        `invoke:${command}`,
+        `${command} ok ${Math.round(performance.now() - started)}ms args=${summarizeArg(args)}`,
+      );
+      return value;
+    },
+    (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      reportDebug(
+        'ipc_err',
+        `invoke:${command}`,
+        `${command} err ${Math.round(performance.now() - started)}ms ${message}`,
+      );
+      throw error;
+    },
+  );
+}
+
+export function installDebugErrorCapture() {
+  if (typeof window === 'undefined') return () => {};
+  const onError = (event: ErrorEvent) => {
+    reportDebug('ui_error', 'window.error', `${event.message} @ ${event.filename}:${event.lineno}:${event.colno}`);
+  };
+  const onRejection = (event: PromiseRejectionEvent) => {
+    const reason = event.reason instanceof Error ? `${event.reason.name}: ${event.reason.message}` : String(event.reason);
+    reportDebug('ui_error', 'window.unhandledrejection', reason);
+  };
+  window.addEventListener('error', onError);
+  window.addEventListener('unhandledrejection', onRejection);
+  return () => {
+    window.removeEventListener('error', onError);
+    window.removeEventListener('unhandledrejection', onRejection);
+  };
 }
 
 /** Subscribes to a Tauri event; returns a no-op unsubscriber in web preview. */

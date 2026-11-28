@@ -580,11 +580,15 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 /// Streams one URL into `part`, returning the hex SHA-256 of the bytes seen.
-async fn download_to_part(
+async fn download_to_part<F>(
     client: &reqwest::Client,
     url: &str,
     part: &Path,
-) -> Result<String, RuntimeError> {
+    mut on_bytes: F,
+) -> Result<String, RuntimeError>
+where
+    F: FnMut(u64, Option<u64>),
+{
     let mut response = client
         .get(url)
         .header("User-Agent", USER_AGENT)
@@ -597,11 +601,16 @@ async fn download_to_part(
             status: response.status().as_u16(),
         });
     }
+    let total = response.content_length();
     let mut file = tokio::fs::File::create(part).await?;
     let mut hasher = Sha256::new();
+    let mut downloaded = 0u64;
+    on_bytes(downloaded, total);
     while let Some(chunk) = response.chunk().await.map_err(|e| http_error(url, e))? {
         hasher.update(&chunk);
         file.write_all(&chunk).await?;
+        downloaded = downloaded.saturating_add(chunk.len() as u64);
+        on_bytes(downloaded, total);
     }
     file.flush().await?;
     drop(file);
@@ -805,6 +814,21 @@ pub async fn install_adoptium_java(
     root: &Path,
     major: i32,
 ) -> Result<JavaInstallation, RuntimeError> {
+    install_adoptium_java_with_progress(client, api_base, root, major, |_done, _total, _stage| {})
+        .await
+}
+
+/// Same as [`install_adoptium_java`], but reports coarse download progress.
+pub async fn install_adoptium_java_with_progress<F>(
+    client: &reqwest::Client,
+    api_base: &str,
+    root: &Path,
+    major: i32,
+    mut on_progress: F,
+) -> Result<JavaInstallation, RuntimeError>
+where
+    F: FnMut(u64, Option<u64>, &str),
+{
     let asset = fetch_adoptium_asset(client, api_base, major).await?;
     let destination = root.join(format!("temurin-{major}"));
     tokio::fs::create_dir_all(&destination).await?;
@@ -817,13 +841,19 @@ pub async fn install_adoptium_java(
     let archive = root.join(format!("temurin-{major}.{suffix}"));
     let part = root.join(format!("temurin-{major}.{suffix}.part"));
 
-    let computed = match download_to_part(client, &asset.url, &part).await {
+    on_progress(0, None, "downloading");
+    let computed = match download_to_part(client, &asset.url, &part, |bytes, total| {
+        on_progress(bytes, total, "downloading");
+    })
+    .await
+    {
         Ok(digest) => digest,
         Err(error) => {
             let _ = tokio::fs::remove_file(&part).await;
             return Err(error);
         }
     };
+    on_progress(1, Some(1), "verifying");
     let expected = asset.sha256.trim().to_ascii_lowercase();
     if computed != expected {
         let _ = tokio::fs::remove_file(&part).await;
@@ -835,6 +865,7 @@ pub async fn install_adoptium_java(
     let _ = tokio::fs::remove_file(&archive).await;
     tokio::fs::rename(&part, &archive).await?;
 
+    on_progress(1, Some(1), "extracting");
     let bytes = tokio::fs::read(&archive).await?;
     let entries = if asset.package_type == "zip" {
         zip_entries(&bytes)?
@@ -871,7 +902,7 @@ pub async fn install_adoptium_java(
         .map(Path::to_path_buf)
         .unwrap_or_else(|| destination.clone());
 
-    match crate::probe_java_installation(&executable).await {
+    let result = match crate::probe_java_installation(&executable).await {
         Ok(installation) => Ok(installation),
         // Cross-architecture archives and slim test fixtures may not be
         // runnable here; the `release` marker is the next best version source.
@@ -883,7 +914,9 @@ pub async fn install_adoptium_java(
                 version,
             })
         }
-    }
+    };
+    on_progress(1, Some(1), "done");
+    result
 }
 
 #[cfg(test)]

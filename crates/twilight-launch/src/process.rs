@@ -23,8 +23,22 @@ pub struct LaunchPlan {
     pub env: HashMap<String, String>,
 }
 
+/// Download progress forwarded from launch-time artifact fetches.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LaunchDownloadProgress {
+    pub task_id: String,
+    pub label: String,
+    pub stage: String,
+    pub completed_files: u64,
+    pub total_files: u64,
+    pub downloaded_bytes: u64,
+    pub total_bytes: Option<u64>,
+    pub percent: Option<f64>,
+    pub indeterminate: bool,
+}
+
 /// Line-oriented output pump target.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum LaunchEvent {
     /// The exact JVM command assembled for this launch (Developer Mode uses
     /// it for "Copy Raw Launch Command"). Never printed in normal consoles.
@@ -35,6 +49,8 @@ pub enum LaunchEvent {
     Stderr(String),
     /// Pipeline stage duration in milliseconds (Developer Mode diagnostics).
     Phase(&'static str, u64),
+    /// Throttled download progress for launch artifact fetches.
+    Download(LaunchDownloadProgress),
 }
 
 /// Builds a tokio `Command` (for inspection in tests and `run`).

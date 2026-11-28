@@ -336,6 +336,83 @@ pub struct DevSettings {
     pub jdwp_enabled: bool,
     pub jdwp_port: u16,
     pub mixin_debug: bool,
+    #[serde(default)]
+    pub debug_http_enabled: bool,
+    #[serde(default = "default_debug_http_port")]
+    pub debug_http_port: u16,
+    #[serde(default = "default_true")]
+    pub debug_http_tls: bool,
+    #[serde(default)]
+    pub debug_mcp_enabled: bool,
+    #[serde(default = "default_debug_mcp_port")]
+    pub debug_mcp_port: u16,
+    #[serde(default)]
+    pub debug_api_key: Option<String>,
+    #[serde(default = "default_true")]
+    pub debug_require_api_key: bool,
+    #[serde(default)]
+    pub debug_permissions: DebugPermissionsDto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugPermissionsDto {
+    #[serde(default = "default_true")]
+    pub read_state: bool,
+    #[serde(default = "default_true")]
+    pub read_events: bool,
+    #[serde(default = "default_true")]
+    pub read_logs: bool,
+    #[serde(default)]
+    pub read_instances: bool,
+    #[serde(default)]
+    pub read_config: bool,
+}
+
+impl Default for DebugPermissionsDto {
+    fn default() -> Self {
+        Self {
+            read_state: true,
+            read_events: true,
+            read_logs: true,
+            read_instances: false,
+            read_config: false,
+        }
+    }
+}
+
+impl From<crate::accounts::DebugPermissions> for DebugPermissionsDto {
+    fn from(p: crate::accounts::DebugPermissions) -> Self {
+        Self {
+            read_state: p.read_state,
+            read_events: p.read_events,
+            read_logs: p.read_logs,
+            read_instances: p.read_instances,
+            read_config: p.read_config,
+        }
+    }
+}
+
+impl From<DebugPermissionsDto> for crate::accounts::DebugPermissions {
+    fn from(p: DebugPermissionsDto) -> Self {
+        Self {
+            read_state: p.read_state,
+            read_events: p.read_events,
+            read_logs: p.read_logs,
+            read_instances: p.read_instances,
+            read_config: p.read_config,
+        }
+    }
+}
+
+fn default_debug_http_port() -> u16 {
+    28445
+}
+fn default_debug_mcp_port() -> u16 {
+    28446
+}
+fn default_true() -> bool {
+    true
 }
 
 #[tauri::command]
@@ -353,6 +430,26 @@ pub async fn get_dev_settings(app: AppHandle) -> Result<DevSettings, String> {
             settings.jdwp_port
         },
         mixin_debug: settings.mixin_debug,
+        debug_http_enabled: settings.debug_http_enabled || settings.debug_protocol_enabled,
+        debug_http_port: if settings.debug_http_port == 0 {
+            if settings.debug_protocol_port == 0 {
+                default_debug_http_port()
+            } else {
+                settings.debug_protocol_port
+            }
+        } else {
+            settings.debug_http_port
+        },
+        debug_http_tls: settings.debug_http_tls,
+        debug_mcp_enabled: settings.debug_mcp_enabled,
+        debug_mcp_port: if settings.debug_mcp_port == 0 {
+            default_debug_mcp_port()
+        } else {
+            settings.debug_mcp_port
+        },
+        debug_api_key: settings.debug_api_key.clone(),
+        debug_require_api_key: settings.debug_require_api_key,
+        debug_permissions: settings.debug_permissions.into(),
     })
 }
 
@@ -370,7 +467,33 @@ pub async fn set_dev_settings(app: AppHandle, settings: DevSettings) -> Result<(
         settings.jdwp_port
     };
     stored.mixin_debug = settings.mixin_debug;
-    save_settings(&settings_path(&app).await?, &stored).await
+    stored.debug_http_enabled = settings.dev_mode && settings.debug_http_enabled;
+    stored.debug_http_port = if settings.debug_http_port == 0 {
+        default_debug_http_port()
+    } else {
+        settings.debug_http_port
+    };
+    stored.debug_http_tls = settings.debug_http_tls;
+    stored.debug_mcp_enabled = settings.dev_mode && settings.debug_mcp_enabled;
+    stored.debug_mcp_port = if settings.debug_mcp_port == 0 {
+        default_debug_mcp_port()
+    } else {
+        settings.debug_mcp_port
+    };
+    stored.debug_api_key = settings
+        .debug_api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned);
+    stored.debug_require_api_key = settings.debug_require_api_key;
+    stored.debug_permissions = settings.debug_permissions.into();
+    // legacy sync
+    stored.debug_protocol_enabled = stored.debug_http_enabled;
+    stored.debug_protocol_port = stored.debug_http_port;
+    save_settings(&settings_path(&app).await?, &stored).await?;
+    crate::debug_protocol::sync_server(&app).await;
+    Ok(())
 }
 
 /// Raw `twilight_config.json` (`settings.json`) contents for the Developer tab.

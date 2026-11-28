@@ -79,14 +79,37 @@ pub async fn download_adoptium_java(
     }
     let root = std::path::PathBuf::from(crate::storage::get_storage(app.clone()).await?.java_dir);
     let client = reqwest::Client::new();
-    let installed = twilight_runtime::install_adoptium_java(
+    let emitter = crate::downloads::ProgressEmitter::new(
+        &app,
+        format!("adoptium-java-{major}"),
+        format!("Java {major} (Temurin)"),
+    );
+    let emitter_cb = emitter.clone();
+    let installed = twilight_runtime::install_adoptium_java_with_progress(
         &client,
         twilight_runtime::ADOPTIUM_API_BASE,
         &root,
         major,
+        move |downloaded, total, stage| {
+            emitter_cb.set_stage(stage.to_owned());
+            match stage {
+                "downloading" => {
+                    emitter_cb.emit(0, 1, downloaded, total, false);
+                }
+                "verifying" | "extracting" => {
+                    emitter_cb.emit(0, 1, downloaded, total, true);
+                }
+                "done" => {
+                    let total_bytes = total.unwrap_or(downloaded);
+                    emitter_cb.emit_complete(1, 1, total_bytes, Some(total_bytes));
+                }
+                _ => {}
+            }
+        },
     )
     .await
     .map_err(|e| e.to_string())?;
+    emitter.emit_complete(1, 1, 1, Some(1));
     let executable = installed.executable.display().to_string();
     crate::prefs::add_custom_java(app.clone(), executable.clone()).await?;
     crate::prefs::apply_java_runtime(app, Some(executable.clone())).await?;

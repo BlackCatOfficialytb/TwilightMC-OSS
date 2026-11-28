@@ -1,10 +1,11 @@
 <script>
-  import { tauriInvoke } from './tauri';
+  import { tauriInvoke, tauriListen } from './tauri';
   // Global .mrpack drop target: shows the pack's identity (name, summary,
   // target version, loader, file counts) and installs it into a new managed
   // instance named by the input. The parent owns grid refresh + selection.
   import { onMount } from 'svelte';
   import { pushOverlay, popOverlay } from './overlays.js';
+  import ProgressBar from './ProgressBar.svelte';
   import { t } from './i18n.svelte.ts';
 
   let { path, onclose, oninstalled } = $props();
@@ -14,6 +15,7 @@
   let name = $state('');
   let busy = $state(false);
   let error = $state('');
+  let progress = $state(null);
 
   function fmtSize(bytes) {
     if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -41,7 +43,10 @@
     if (busy) return;
     busy = true;
     error = '';
+    progress = null;
+    let unlisten = null;
     try {
+      unlisten = await tauriListen('download-progress', (e) => { progress = e.payload; });
       const id = await tauriInvoke('install_mrpack', {
         pathOrUrl: path,
         instanceName: name.trim(),
@@ -50,6 +55,7 @@
     } catch (e) {
       error = String(e);
     } finally {
+      if (unlisten) unlisten();
       busy = false;
     }
   }
@@ -109,6 +115,9 @@
           bind:value={name}
         />
 
+        {#if busy && progress}
+          <div class="mt-3"><ProgressBar label={progress.label} percent={progress.percent} indeterminate={progress.indeterminate} stage={progress.stage} detail={`${progress.completed_files ?? 0}/${progress.total_files ?? 0}`} /></div>
+        {/if}
         {#if error}
           <p class="mt-3 text-[12px] text-red-400">{error}</p>
         {/if}

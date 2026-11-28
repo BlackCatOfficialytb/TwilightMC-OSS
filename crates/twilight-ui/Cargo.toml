@@ -29,3 +29,7 @@ twilight-horizon = { path = "../twilight-horizon" }
 twilight-pack = { path = "../twilight-pack" }
 reqwest = { workspace = true }
 sysinfo = "0.40.3"
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
+rcgen = { workspace = true }
+rustls-pemfile = { workspace = true }

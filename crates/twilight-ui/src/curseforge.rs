@@ -305,14 +305,20 @@ pub async fn install_curseforge_mod(
     if !host.ends_with("forgecdn.net") {
         return Err("downloads must come from the CurseForge CDN".to_owned());
     }
-    ParallelDownloader::new(reqwest::Client::new(), 1)
-        .download_all(&[DownloadRequest {
-            url: download_url,
-            dest: dir.join(&name),
-            sha1,
-        }])
+    let reqs = [DownloadRequest {
+        url: download_url.clone(),
+        dest: dir.join(&name),
+        sha1: sha1.clone(),
+    }];
+    let emitter =
+        crate::downloads::ProgressEmitter::new(&app, format!("cf-mod-{instance_id}"), name.clone());
+    let cb = crate::downloads::parallel_progress_callback(emitter.clone());
+    let downloaded = ParallelDownloader::new(reqwest::Client::new(), 1)
+        .with_progress(cb)
+        .download_all(&reqs)
         .await
         .map_err(|e| e.to_string())?;
+    emitter.emit_complete(downloaded.len() as u64, reqs.len() as u64, 0, None);
     let dest = dir.join(&name);
     if let Some(cas_root) = crate::mods::cas_root_if_enabled(&app).await? {
         crate::mods::cas_dedupe_dest(&cas_root, &dest).await?;
@@ -363,14 +369,23 @@ pub async fn install_curseforge_pack(
     if !host.ends_with("forgecdn.net") {
         return Err("downloads must come from the CurseForge CDN".to_owned());
     }
-    ParallelDownloader::new(reqwest::Client::new(), 1)
-        .download_all(&[DownloadRequest {
-            url: download_url,
-            dest: dir.join(&name),
-            sha1,
-        }])
+    let reqs = [DownloadRequest {
+        url: download_url,
+        dest: dir.join(&name),
+        sha1,
+    }];
+    let emitter = crate::downloads::ProgressEmitter::new(
+        &app,
+        format!("cf-pack-{instance_id}-{dir_name}"),
+        name.clone(),
+    );
+    let cb = crate::downloads::parallel_progress_callback(emitter.clone());
+    let downloaded = ParallelDownloader::new(reqwest::Client::new(), 1)
+        .with_progress(cb)
+        .download_all(&reqs)
         .await
         .map_err(|e| e.to_string())?;
+    emitter.emit_complete(downloaded.len() as u64, reqs.len() as u64, 0, None);
     Ok(name)
 }
 

@@ -93,9 +93,25 @@ impl AssetStore {
         index: &AssetIndex,
         downloader: &ParallelDownloader,
     ) -> Result<(), HorizonError> {
-        downloader
-            .download_all(&self.download_requests(index))
-            .await?;
+        self.ensure_objects_with_progress(index, downloader, None)
+            .await
+    }
+
+    /// Like [`ensure_objects`], but forwards download progress to a callback.
+    pub async fn ensure_objects_with_progress(
+        &self,
+        index: &AssetIndex,
+        downloader: &ParallelDownloader,
+        progress: Option<
+            std::sync::Arc<dyn Fn(twilight_downloader::DownloadProgress) + Send + Sync>,
+        >,
+    ) -> Result<(), HorizonError> {
+        let dl = if let Some(progress) = progress {
+            downloader.clone().with_progress(move |p| progress(p))
+        } else {
+            downloader.clone()
+        };
+        dl.download_all(&self.download_requests(index)).await?;
         self.verify_all(index).await
     }
 

@@ -1,5 +1,10 @@
 <script>
-  import { tauriInvoke, tauriListen } from './lib/tauri';
+  import {
+    tauriInvoke,
+    tauriListen,
+    installDebugErrorCapture,
+    setDebugCaptureEnabled,
+  } from './lib/tauri';
   import { onMount } from 'svelte';
   import InstanceGrid from './lib/InstanceGrid.svelte';
   import EditInstancePage from './lib/EditInstancePage.svelte';
@@ -20,6 +25,7 @@
   import CrashReportModal from './lib/CrashReportModal.svelte';
   import JavaDownloadModal from './lib/JavaDownloadModal.svelte';
   import ToastContainer from './lib/ToastContainer.svelte';
+  import ProgressBar from './lib/ProgressBar.svelte';
   import { toast, promptAlert } from './lib/alerts.svelte.js';
   import { topOverlay } from './lib/overlays.js';
   import { isDarkTheme, loadSavedAccent, normalizeThemeId, applyTheme } from './lib/theme';
@@ -102,14 +108,35 @@
     jdwpEnabled: false,
     jdwpPort: 5005,
     mixinDebug: false,
+    debugHttpEnabled: false,
+    debugHttpPort: 28445,
+    debugHttpTls: true,
+    debugMcpEnabled: false,
+    debugMcpPort: 28446,
+    debugApiKey: null,
+    debugRequireApiKey: true,
+    debugPermissions: {
+      readState: true,
+      readEvents: true,
+      readLogs: true,
+      readInstances: false,
+      readConfig: false,
+    },
   });
   let devMode = $derived(devSettings.devMode);
+  let debugCaptureEnabled = $derived(
+    devSettings.devMode && (devSettings.debugHttpEnabled || devSettings.debugMcpEnabled),
+  );
 
   $effect(() => {
     localStorage.setItem('twilight-dev-mode', String(devSettings.devMode));
     window.__TAURI__?.core
       .invoke('set_dev_settings', { settings: devSettings })
       .catch(() => {});
+  });
+
+  $effect(() => {
+    setDebugCaptureEnabled(debugCaptureEnabled);
   });
 
   $effect(() => {
@@ -178,16 +205,28 @@
   // ---- Crash review: non-zero exit; sending only on an explicit click ----
   let crashReport = $state(null); // { report, canSend, config }
   let crashPromptDisabled = $state(false);
+  let crashPromptedLaunch = null; // prevent double-trigger (reject + launch-exit)
 
-  async function offerCrashReport(instanceId, exitCode) {
-    if (crashPromptDisabled || exitCode === 0 || !Number.isFinite(exitCode)) return;
+  function recentConsoleTail(maxLines = 200) {
+    return logLines.slice(-maxLines).map((entry) => `[${entry.stream}] ${entry.line}`);
+  }
+
+  async function offerCrashReport(instanceId, exitCode, killedByUser = false) {
+    if (crashPromptDisabled || killedByUser || exitCode === 0 || !Number.isFinite(exitCode))
+      return;
+    const key = `${instanceId}:${exitCode}:${killedByUser ? 1 : 0}`;
+    if (crashPromptedLaunch === key) return;
+    crashPromptedLaunch = key;
     try {
       const config = await api('get_crash_report_config');
       if (!config.promptEnabled) return;
       const prepared = await api('prepare_crash_report', {
         instanceId,
         exitCode,
+        killedByUser,
+        tailLines: recentConsoleTail(),
       });
+      if (!prepared) return;
       crashReport = {
         report: prepared.report,
         canSend: Boolean(config.enabled && config.endpoint),
@@ -289,6 +328,7 @@
   let drawerOpen = $state(false);
   let gameRunning = $state(false);
   let consoleEl = $state(null);
+  let downloadProgress = $state(null);
 
   // Keep the newest line in view while the game streams output.
   $effect(() => {
@@ -378,19 +418,22 @@
     const inst = instances.find((i) => i.id === id);
     const label = inst ? inst.name : id;
     gameRunning = true;
+    crashPromptedLaunch = null;
     if (world) setStatus('status-launching-world', { name: label, world });
     else if (server) setStatus('status-launching-server', { name: label, server });
     else setStatus('status-launching', { name: label });
     drawerOpen = true;
+    let launchFailed = false;
     try {
       const code = await api('launch_instance', { instanceId: id, server, world });
       logLine({ stream: 'stdout', line: t('console-exit-code', { code }) });
       await loadInstances();
-      setStatus('status-ready');
-      await offerCrashReport(id, Number(code));
+      // launch-exit event carries killedByUser; keep this as fallback.
+      await offerCrashReport(id, Number(code), false);
     } catch (e) {
       // every backend failure surfaces here: bright red in the auto-opened
       // drawer, never a silent no-op
+      launchFailed = true;
       console.error('Launch failed:', e);
       logLine({ stream: 'stderr', line: `[ERROR] ${t('status-launch-failed')}: ${e}` });
       if (String(e).includes('BareBones Template')) {
@@ -401,9 +444,10 @@
         toast(t('toast-launch-failed', { error: String(e) }), 'error');
       }
       setStatus('status-launch-failed');
+      await offerCrashReport(id, 1, false);
     } finally {
       gameRunning = false;
-      if (status.key !== 'status-launch-failed') setStatus('status-ready');
+      if (!launchFailed) setStatus('status-ready');
     }
   }
 
@@ -644,6 +688,16 @@
           jdwpEnabled: dev.jdwpEnabled ?? false,
           jdwpPort: dev.jdwpPort ?? 5005,
           mixinDebug: dev.mixinDebug ?? false,
+          debugHttpEnabled: dev.debugHttpEnabled ?? dev.debugProtocolEnabled ?? false,
+          debugHttpPort: dev.debugHttpPort ?? dev.debugProtocolPort ?? 28445,
+          debugHttpTls: dev.debugHttpTls ?? true,
+          debugMcpEnabled: dev.debugMcpEnabled ?? false,
+          debugMcpPort: dev.debugMcpPort ?? 28446,
+          debugApiKey: dev.debugApiKey ?? null,
+          debugRequireApiKey: dev.debugRequireApiKey ?? true,
+          debugPermissions: dev.debugPermissions ?? {
+            readState: true, readEvents: true, readLogs: true, readInstances: false, readConfig: false,
+          },
         };
       } catch {
         // plain web build: developer tools stay off
@@ -755,6 +809,7 @@
 
   onMount(() => {
     const unlisteners = [];
+    const removeDebugCapture = installDebugErrorCapture();
     const onKey = (e) => {
       if (e.key === 'Escape') {
         // frontend modals own their closers; pop the frontmost one
@@ -817,6 +872,27 @@
           await tauriListen('launch-log', (e) => logLine(e.payload)),
         );
         unlisteners.push(
+          await tauriListen('launch-exit', (e) => {
+            const payload = e.payload ?? {};
+            const instanceId = String(payload.instanceId ?? '');
+            const exitCode = Number(payload.exitCode);
+            const killedByUser = Boolean(payload.killedByUser);
+            // Authoritative exit signal; overrides the fallback return-path prompt.
+            crashPromptedLaunch = null;
+            void offerCrashReport(instanceId, exitCode, killedByUser);
+          }),
+        );
+        unlisteners.push(
+          await tauriListen('download-progress', (e) => {
+            downloadProgress = e.payload ?? null;
+            if (downloadProgress?.percent === 100 || downloadProgress?.stage === 'done') {
+              setTimeout(() => {
+                if (downloadProgress?.task_id === e.payload?.task_id) downloadProgress = null;
+              }, 1200);
+            }
+          }),
+        );
+        unlisteners.push(
           await tauriListen('tauri://drag-drop', (e) => {
             const path = e.payload?.paths?.[0];
             if (!path) return;
@@ -848,7 +924,10 @@
         // plain web build: no startup flag
       }
     })();
-    return () => unlisteners.forEach((off) => off());
+    return () => {
+      removeDebugCapture();
+      unlisteners.forEach((off) => off());
+    };
   });
 </script>
 
@@ -1182,6 +1261,17 @@
           {/if}
         </button>
         <div class="flex shrink-0 items-center gap-3 text-[11px]">
+          {#if downloadProgress}
+            <div class="w-56 max-w-[30vw]">
+              <ProgressBar
+                label={downloadProgress.label}
+                percent={downloadProgress.percent}
+                indeterminate={downloadProgress.indeterminate}
+                stage={downloadProgress.stage}
+                detail={`${downloadProgress.completed_files ?? 0}/${downloadProgress.total_files ?? 0}`}
+              />
+            </div>
+          {/if}
           <button
             class="text-(--text-muted) hover:text-(--text-main) disabled:opacity-40"
             disabled={!consoleLines.length}

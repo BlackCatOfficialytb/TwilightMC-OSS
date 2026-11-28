@@ -34,7 +34,9 @@ pub use natives::{
     clean_natives_dir, extract_natives, extract_natives_with_7z, extract_natives_with_fallback,
     find_seven_zip, sevenzip_arguments,
 };
-pub use process::{LaunchEvent, LaunchPlan, build_command, command_line, run};
+pub use process::{
+    LaunchDownloadProgress, LaunchEvent, LaunchPlan, build_command, command_line, run,
+};
 pub use security::{
     MINECRAFT2SHELL_ADVISORY, Minecraft2ShellAssessment, Minecraft2ShellExposure,
     assess_minecraft2shell, is_lwjgl_freetype_artifact, requires_resource_pack_font_confirmation,

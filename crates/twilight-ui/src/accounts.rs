@@ -103,6 +103,34 @@ pub(crate) struct Settings {
     /// Whether a non-zero game exit opens the review dialog.
     #[serde(default = "default_true")]
     pub(crate) crash_prompt_enabled: bool,
+    /// Legacy localhost-only read-only debug protocol flag (kept for migration).
+    #[serde(default)]
+    pub(crate) debug_protocol_enabled: bool,
+    /// Legacy debug protocol port (kept for migration).
+    #[serde(default = "default_debug_protocol_port")]
+    pub(crate) debug_protocol_port: u16,
+    /// Read-only HTTP/HTTPS debug endpoint (Developer Mode only).
+    #[serde(default)]
+    pub(crate) debug_http_enabled: bool,
+    #[serde(default = "default_debug_protocol_port")]
+    pub(crate) debug_http_port: u16,
+    /// HTTPS/TLS enabled by default for local debug HTTP endpoint.
+    #[serde(default = "default_true")]
+    pub(crate) debug_http_tls: bool,
+    /// Read-only MCP over HTTPS endpoint (Developer Mode only).
+    #[serde(default)]
+    pub(crate) debug_mcp_enabled: bool,
+    #[serde(default = "default_debug_mcp_port")]
+    pub(crate) debug_mcp_port: u16,
+    /// Optional API key for debug endpoints (redacted in logs/trace/config export).
+    #[serde(default)]
+    pub(crate) debug_api_key: Option<String>,
+    /// Require API key when debug endpoints are enabled.
+    #[serde(default = "default_true")]
+    pub(crate) debug_require_api_key: bool,
+    /// Explicit user-granted debug scopes.
+    #[serde(default)]
+    pub(crate) debug_permissions: DebugPermissions,
     /// Horizon (native Rust engine) binary; empty = Horizon instances refuse
     /// to launch with a "set it in Settings" message. Never bundled.
     #[serde(default)]
@@ -153,6 +181,41 @@ fn default_jdwp_port() -> u16 {
     5005
 }
 
+fn default_debug_protocol_port() -> u16 {
+    28445
+}
+
+fn default_debug_mcp_port() -> u16 {
+    28446
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DebugPermissions {
+    #[serde(default = "default_true")]
+    pub read_state: bool,
+    #[serde(default = "default_true")]
+    pub read_events: bool,
+    #[serde(default = "default_true")]
+    pub read_logs: bool,
+    #[serde(default)]
+    pub read_instances: bool,
+    #[serde(default)]
+    pub read_config: bool,
+}
+
+impl Default for DebugPermissions {
+    fn default() -> Self {
+        Self {
+            read_state: true,
+            read_events: true,
+            read_logs: true,
+            read_instances: false,
+            read_config: false,
+        }
+    }
+}
+
 fn default_true() -> bool {
     true
 }
@@ -192,6 +255,16 @@ impl Default for Settings {
             crash_reporter_enabled: false,
             crash_endpoint: None,
             crash_prompt_enabled: true,
+            debug_protocol_enabled: false,
+            debug_protocol_port: default_debug_protocol_port(),
+            debug_http_enabled: false,
+            debug_http_port: default_debug_protocol_port(),
+            debug_http_tls: true,
+            debug_mcp_enabled: false,
+            debug_mcp_port: default_debug_mcp_port(),
+            debug_api_key: None,
+            debug_require_api_key: true,
+            debug_permissions: DebugPermissions::default(),
             horizon_path: None,
             gc_preset: None,
             custom_gc_flags: Vec::new(),

@@ -17,6 +17,11 @@ pub struct CrashReport {
     pub prompted: bool,
 }
 
+/// Non-zero exits that were not user-killed are reportable crashes.
+pub fn should_prompt_crash_report(exit_code: i32, killed_by_user: bool) -> bool {
+    exit_code != 0 && !killed_by_user
+}
+
 const MAX_LOG_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_MODS: usize = 512;
 
@@ -60,15 +65,20 @@ async fn list_mod_names(dir: &Path) -> Vec<String> {
 }
 
 /// Builds a scrubbed, reviewable report. Nothing here touches the network.
+/// `tail_lines` is an optional fallback from the live console drawer when
+/// `logs/latest.log` is missing or unreadable.
 #[tauri::command]
 pub async fn prepare_crash_report(
     app: AppHandle,
     instance_id: String,
     exit_code: i32,
-) -> Result<CrashReport, String> {
-    // The exit code only decides whether the caller opens a prompt; putting it
-    // in the report would make reports for identical failures differ.
-    let _ = exit_code;
+    killed_by_user: Option<bool>,
+    tail_lines: Option<Vec<String>>,
+) -> Result<Option<CrashReport>, String> {
+    let killed_by_user = killed_by_user.unwrap_or(false);
+    if !should_prompt_crash_report(exit_code, killed_by_user) {
+        return Ok(None);
+    }
     crate::instances::validate_instance_id(&instance_id)?;
 
     let settings =
@@ -79,9 +89,18 @@ pub async fn prepare_crash_report(
     let meta = crate::instances::read_meta(&instance_dir).await;
 
     let logs = crate::instances::instance_subdir(&root, &instance_id, "logs");
-    let tail_log = read_tail_text(&logs.join("latest.log"))
+    let mut tail_log = read_tail_text(&logs.join("latest.log"))
         .await
         .unwrap_or_default();
+    if tail_log.trim().is_empty()
+        && let Some(lines) = tail_lines
+    {
+        tail_log = lines.join("\n");
+        if tail_log.len() as u64 > MAX_LOG_BYTES {
+            let start = tail_log.len().saturating_sub(MAX_LOG_BYTES as usize);
+            tail_log = tail_log[start..].to_owned();
+        }
+    }
     let mods = crate::instances::instance_subdir(&root, &instance_id, "mods");
     let mod_filenames = list_mod_names(&mods).await;
     let public_mods = crate::provenance::public_mods(&instance_dir);
@@ -120,10 +139,10 @@ pub async fn prepare_crash_report(
         public_mods,
     };
 
-    Ok(CrashReport {
+    Ok(Some(CrashReport {
         report: scrub_crash_report(&input),
         prompted,
-    })
+    }))
 }
 
 /// Uploads the exact user-reviewed report. Refuses to run unless reporting is
@@ -163,4 +182,22 @@ pub async fn send_crash_report(app: AppHandle, report: String) -> Result<(), Str
         return Err(format!("crash report upload failed with HTTP {status}"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crash_classification_skips_clean_and_user_killed_exits() {
+        assert!(!should_prompt_crash_report(0, false));
+        assert!(!should_prompt_crash_report(0, true));
+        assert!(!should_prompt_crash_report(1, true));
+    }
+
+    #[test]
+    fn crash_classification_reports_nonzero_unexpected_exit() {
+        assert!(should_prompt_crash_report(1, false));
+        assert!(should_prompt_crash_report(-1, false));
+    }
 }

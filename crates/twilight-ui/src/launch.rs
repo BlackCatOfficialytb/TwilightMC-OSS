@@ -29,11 +29,22 @@ struct LaunchLine {
     line: String,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LaunchExit {
+    instance_id: String,
+    exit_code: i32,
+    killed_by_user: bool,
+}
+
 /// One game per app run: the pipeline stages artifacts in shared scratch dirs.
 static RUNNING: AtomicBool = AtomicBool::new(false);
 /// Live game pid (0 = none); set from the pipeline's `Started` event so
 /// `kill_instance` can stop the process tree.
 static GAME_PID: AtomicU32 = AtomicU32::new(0);
+/// Set when the user explicitly requested a kill so non-zero exits from the
+/// resulting signal are not reported as crashes.
+static KILLED_BY_USER: AtomicBool = AtomicBool::new(false);
 /// Most recent assembled command per instance, captured from the pipeline's
 /// `Command` event for Developer Mode's "Copy Raw Launch Command" action.
 static LAST_COMMAND: std::sync::Mutex<Option<(String, String)>> = std::sync::Mutex::new(None);
@@ -75,6 +86,7 @@ pub async fn launch_instance(
         return Err("a game is already running".to_owned());
     }
 
+    KILLED_BY_USER.store(false, Ordering::SeqCst);
     let result = run(&app, &instance_id, server, world).await;
     GAME_PID.store(0, Ordering::SeqCst);
     RUNNING.store(false, Ordering::SeqCst);
@@ -88,6 +100,7 @@ pub async fn kill_instance() -> Result<(), String> {
     if pid == 0 {
         return Err("no game is running".to_owned());
     }
+    KILLED_BY_USER.store(true, Ordering::SeqCst);
     kill_pid(pid).await
 }
 
@@ -734,6 +747,30 @@ async fn run(
                     LaunchEvent::Phase(name, ms) => {
                         devmode::record_phase(&instance_id, name, ms);
                     }
+                    LaunchEvent::Download(p) => {
+                        let payload = crate::downloads::DownloadProgressPayload {
+                            task_id: p.task_id,
+                            label: p.label,
+                            stage: p.stage,
+                            completed_files: p.completed_files,
+                            total_files: p.total_files,
+                            downloaded_bytes: p.downloaded_bytes,
+                            total_bytes: p.total_bytes,
+                            percent: p.percent.map(|v| v as f32),
+                            indeterminate: p.indeterminate,
+                        };
+                        crate::debug_protocol::trace(&emitters).record(
+                            "download",
+                            "launch",
+                            format!(
+                                "{} {}%",
+                                payload.label,
+                                payload.percent.map(|v| v.round() as i32).unwrap_or(-1)
+                            ),
+                            None,
+                        );
+                        let _ = emitters.emit("download-progress", payload);
+                    }
                 }
             }
         })
@@ -794,6 +831,7 @@ async fn run(
     let code = run_launch_with(cfg, Some(sink_tx))
         .await
         .map_err(|e| e.to_string())?;
+    let killed_by_user = KILLED_BY_USER.load(Ordering::SeqCst);
 
     // session duration accrues into the instance's total play time
     instances::stamp_last_played(app, instance_id, started.elapsed().as_secs()).await;
@@ -805,6 +843,14 @@ async fn run(
         LaunchLine {
             stream: "stdout",
             line: format!("process exited (code {code})"),
+        },
+    );
+    let _ = app.emit(
+        "launch-exit",
+        LaunchExit {
+            instance_id: instance_id.to_owned(),
+            exit_code: code,
+            killed_by_user,
         },
     );
     Ok(code)

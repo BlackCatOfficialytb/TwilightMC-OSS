@@ -202,6 +202,9 @@ pub(crate) async fn install_pack(
     if path_or_url.is_empty() {
         return Err("modpack path or URL is required".into());
     }
+    let emitter = crate::downloads::ProgressEmitter::new(app, "modpack-install", "Modpack install");
+    emitter.set_stage("downloading".to_owned());
+    emitter.emit(0, 1, 0, None, true);
     let (size, _mrpack, index) = load_pack(path_or_url).await?;
     let (loader, loader_version) = detect_loader(&index.dependencies)?;
 
@@ -221,9 +224,12 @@ pub(crate) async fn install_pack(
         temp_dir: None,
         dry_run: false,
     };
+    emitter.set_stage("installing".to_owned());
+    emitter.emit(0, 1, 0, None, true);
     twilight_cli::modpack::run_install(args)
         .await
         .map_err(|e| e.to_string())?;
+    emitter.emit_complete(1, 1, 1, Some(1));
 
     // Provenance: only jars the pack manifest points at the Modrinth CDN are
     // verified public artifacts; anything else stays an unnamed local mod.
