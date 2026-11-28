@@ -1194,6 +1194,7 @@ about-channel-snapshot = Snapshot
 about-channel-snapshot-desc = Rolling build from main, replaced on every push; never patched.
 about-ecosystem-title = Ecosystem & support
 about-link-issues = Report a bug
+about-link-tangled = Tangled mirror (read-only)
 about-link-crowdin = Crowdin translations
 about-link-cas = twilight-cas on crates.io
 about-link-discord = Discord community
@@ -1304,3 +1305,13 @@ download-progress-stage-verifying = Đang xác minh
 download-progress-stage-extracting = Đang giải nén
 
 download-progress-stage-done = Hoàn tất
+client-oneclient-title = OneClient
+client-oneclient-attribution = bởi Polyfrost, tải qua Modrinth
+client-oneclient-install = Cài & Chạy
+client-oneclient-update = Cập nhật & Chạy
+client-oneclient-installed = Đã cài { $name }
+client-oneclient-installing = Đang cài...
+client-twilightmc-client-title = Gói client TwilightMC
+client-twilightmc-client-coming-soon = Sắp ra mắt
+client-twilightmc-client-desc = TwilightCoreMod sẽ phát hành ở kho riêng.
+

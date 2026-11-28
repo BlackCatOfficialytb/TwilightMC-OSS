@@ -1,7 +1,8 @@
 name: alpha
 
-# Bolide (alpha) channel. Pushing an `alpha-*` tag (e.g. `alpha-v0.5.1`)
-# triggers the shared build pipeline, which publishes the release as
+# Bolide (alpha) channel. Pushing a compact `vX.Y.ZaN` tag (e.g.
+# `v0.7.1a1`) or a legacy `alpha-*` tag (e.g. `alpha-v0.5.1`) triggers the
+# shared build pipeline, which publishes the release as
 # `TwilightMC Bolide (<tag>)` with `is_prerelease: true`. Backport tags
 # (`alpha-v0.0.X`) get the `TwilightMC Bolide v0.0.X (Backported)` title.
 #
@@ -10,7 +11,9 @@ name: alpha
 
 on:
   push:
-    tags: ['alpha-*']
+    tags:
+      - 'alpha-*'
+      - 'v[0-9]*.[0-9]*.[0-9]*a[0-9]*'
 
 permissions:
   contents: write

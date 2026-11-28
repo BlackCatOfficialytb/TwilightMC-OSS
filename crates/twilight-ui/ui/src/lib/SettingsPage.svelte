@@ -750,6 +750,7 @@
   }
 
   const REPO = 'https://github.com/BlackCatOfficialytb/TwilightMC-OSS';
+  const TANGLED = 'https://tangled.org/quanvm0501.tngl.sh/twilightmc-oss';
   const CROWDIN = 'https://crowdin.com/project/twilightmc-oss';
   const CAS_CRATE = 'https://crates.io/crates/twilight-cas';
   const DISCORD = 'https://dsc.gg/blackcatofficial';
@@ -1836,6 +1837,9 @@
         <div class="mt-2 flex flex-wrap gap-2 text-[12px]">
           <button class="rounded border border-(--border) px-3 py-1.5 text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)" onclick={() => onopenurl?.(REPO)}>
             ↗ {t('settings-github')}
+          </button>
+          <button class="rounded border border-(--border) px-3 py-1.5 text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)" onclick={() => onopenurl?.(TANGLED)}>
+            ↗ {t('about-link-tangled')}
           </button>
           <button class="rounded border border-(--border) px-3 py-1.5 text-(--text-muted) hover:border-(--accent) hover:text-(--text-main)" onclick={() => onopenurl?.(`${REPO}/issues`)}>
             ↗ {t('about-link-issues')}

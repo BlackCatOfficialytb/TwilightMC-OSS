@@ -19,6 +19,7 @@ mod modpack;
 mod modrinth;
 mod mods;
 mod net;
+mod oneclient;
 mod prefs;
 mod provenance;
 mod scrubber;
@@ -310,6 +311,8 @@ fn main() {
             modpack::install_mrpack,
             modpack::install_modpack,
             modpack::import_curseforge_pack,
+            oneclient::list_oneclient_versions,
+            oneclient::install_oneclient_instance,
             import::inspect_instance_import,
             import::import_instance_archive,
             prefs::get_dev_settings,

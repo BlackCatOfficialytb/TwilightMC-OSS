@@ -27,6 +27,7 @@ twilight-modrinth = { path = "../twilight-modrinth" }
 twilight-server = { path = "../twilight-server" }
 twilight-horizon = { path = "../twilight-horizon" }
 twilight-pack = { path = "../twilight-pack" }
+twilight-oneclient-modpack-compatible-layer = { path = "../twilight-oneclient-modpack-compatible-layer" }
 reqwest = { workspace = true }
 sysinfo = "0.40.3"
 rustls = { workspace = true }

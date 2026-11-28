@@ -47,6 +47,7 @@
     { id: 'forge', label: 'Forge' },
     { id: 'fabric', label: 'Fabric' },
     { id: 'quilt', label: 'Quilt' },
+    { id: 'ornithe', label: 'Ornithe' },
     { id: 'liteloader', label: 'LiteLoader' },
     { id: 'cleanroom', label: 'Cleanroom' },
     { id: 'legacyfabric', label: 'Legacy Fabric' },
@@ -59,8 +60,8 @@
   }
 
   // The backend loader catalog covers fabric/quilt/forge/neoforge plus the
-  // legacy fabric and cleanroom forks; LiteLoader still renders but cannot be
-  // created yet.
+  // legacy fabric, cleanroom, and ornithe forks; LiteLoader still renders but
+  // cannot be created yet.
   const SUPPORTED_LOADERS = [
     '',
     'horizon',
@@ -70,8 +71,9 @@
     'neoforge',
     'legacyfabric',
     'cleanroom',
+    'ornithe',
   ];
-  const BUILD_LOADERS = ['fabric', 'quilt', 'forge', 'neoforge', 'legacyfabric', 'cleanroom'];
+  const BUILD_LOADERS = ['fabric', 'quilt', 'forge', 'neoforge', 'legacyfabric', 'cleanroom', 'ornithe'];
 
   // Legacy Fabric targets the pre-1.14 era; auto-recommend it there.
   const LEGACY_MAX = '1.13.2';

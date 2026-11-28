@@ -150,12 +150,13 @@ fn detect_loader(
     // spec keys for the Forge family are `forge` / `neoforge`; legacy fabric
     // publishes under `legacy-fabric`. Cleanroom has no mrpack key: it ships as
     // an MMC component pack, not a Modrinth pack.
-    const KEYS: [(&str, ModLoader); 5] = [
+    const KEYS: [(&str, ModLoader); 6] = [
         ("fabric-loader", ModLoader::Fabric),
         ("quilt-loader", ModLoader::Quilt),
         ("forge", ModLoader::Forge),
         ("neoforge", ModLoader::NeoForge),
         ("legacy-fabric", ModLoader::LegacyFabric),
+        ("ornithe-loader", ModLoader::Ornithe),
     ];
     let claimed: Vec<(ModLoader, Option<String>)> = KEYS
         .iter()

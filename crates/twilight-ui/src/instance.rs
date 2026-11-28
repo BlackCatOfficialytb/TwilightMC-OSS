@@ -52,6 +52,7 @@ pub(crate) fn display_loader(token: Option<&str>) -> &'static str {
             "neoforge" => "NeoForge",
             "legacyfabric" | "legacy-fabric" => "Legacy Fabric",
             "cleanroom" | "cleanroommc" => "Cleanroom",
+            "ornithe" | "ornithemc" => "Ornithe",
             _ => "Vanilla",
         },
     }
@@ -186,7 +187,7 @@ fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
 
 /// Extracts `(minecraft_version, Some((loader_token, loader_version)))` from
 /// an `mmc-pack.json` value; the loader uids it speaks are fabric, quilt,
-/// legacy fabric, forge, neoforge and cleanroom.
+/// legacy fabric, forge, neoforge, cleanroom and ornithe.
 pub(crate) fn parse_mmc_pack(
     raw: &serde_json::Value,
 ) -> (Option<String>, Option<(String, String)>) {
@@ -230,6 +231,7 @@ pub(crate) fn parse_mmc_pack(
             }
             "com.cleanroommc" => loader = Some(("cleanroom", version())),
             "net.neoforged" => loader = Some(("neoforge", version())),
+            uid if uid.starts_with("net.ornithemc.") => loader = Some(("ornithe", version())),
             _ => {}
         }
     }

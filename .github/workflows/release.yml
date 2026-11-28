@@ -2,11 +2,13 @@ name: release
 
 # Stable channel. Pushing a plain `vX.Y.Z` tag (e.g. `v1.0.0`) triggers the
 # shared build pipeline, which publishes `TwilightMC <tag>` as a full release
-# (`is_prerelease: false`).
+# (`is_prerelease: false`). The job-level guard keeps the compact Bolide
+# (`vX.Y.ZaN`) and Star (`vX.Y.ZbN`) tags out even though the broad tag glob
+# below also matches them.
 #
-# Bolide (`alpha-*`) and Star (`beta-*`) tags use alpha.yml / beta.yml; the
-# rolling `snapshot` pre-release is built by snapshot.yml. The tag patterns
-# are disjoint, so a tag never builds twice.
+# Bolide (`vX.Y.ZaN` / `alpha-*`) and Star (`vX.Y.ZbN` / `beta-*`) tags use
+# alpha.yml / beta.yml; the rolling `snapshot` pre-release is built by
+# snapshot.yml. The tag patterns are disjoint, so a tag never builds twice.
 
 on:
   push:
@@ -21,6 +23,9 @@ concurrency:
 
 jobs:
   build:
+    # Stable tags contain digits and dots only. `a`, `b` and `-` mark the
+    # Bolide/Star/snapshot spellings, which their own workflows own.
+    if: ${{ !contains(github.ref_name, 'a') && !contains(github.ref_name, 'b') && !contains(github.ref_name, '-') }}
     uses: ./.github/workflows/_build.yml
     with:
       channel: stable

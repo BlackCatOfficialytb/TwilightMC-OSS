@@ -331,9 +331,16 @@ pub(crate) struct RawProfile {
     intermediary: Option<RawMavenRef>,
     #[serde(default)]
     hashed: Option<RawMavenRef>,
+    /// Ornithe-style mapping jar (`net.ornithemc:calamus:<game_version>`).
+    #[serde(default)]
+    calamus: Option<RawMavenRef>,
     /// Quilt-style loader coordinate (`org.quiltmc:quilt-loader:<version>`).
     #[serde(default)]
     maven: Option<String>,
+    /// Minecraft-style profile id (Ornithe profile/json).
+    #[serde(default)]
+    #[allow(dead_code)]
+    id: Option<String>,
     #[serde(default)]
     launcher_meta: Option<RawLauncherMeta>,
     /// Meta v1: the build string the profile was published under.
@@ -581,7 +588,8 @@ impl RawProfile {
             ModLoader::Forge
             | ModLoader::NeoForge
             | ModLoader::Cleanroom
-            | ModLoader::LegacyFabric => self.into_meta_profile(loader),
+            | ModLoader::LegacyFabric
+            | ModLoader::Ornithe => self.into_meta_profile(loader),
             ModLoader::Fabric | ModLoader::Quilt => self.into_knot_profile(loader),
         }
     }
@@ -598,6 +606,7 @@ impl RawProfile {
             .filter(|version| !version.is_empty())
             .map(str::to_owned)
             .or_else(|| version_from_coordinate(self.maven.as_deref()))
+            .or_else(|| loader_version_from_libraries(&self.libraries, &self.add_libraries))
             .ok_or(LoaderError::MissingField { field: "version" })?;
 
         // Meta v1 profiles normally carry the wrapper class; Forge 1.12.2-era
@@ -728,6 +737,7 @@ impl RawProfile {
         let mapping = match loader {
             ModLoader::Fabric => self.intermediary,
             ModLoader::Quilt => self.hashed,
+            ModLoader::Ornithe => self.calamus,
             ModLoader::Forge
             | ModLoader::NeoForge
             | ModLoader::Cleanroom
@@ -807,6 +817,28 @@ impl RawProfile {
 /// Extracts the version segment of a `group:artifact:version[:...]` coordinate.
 fn version_from_coordinate(coordinate: Option<&str>) -> Option<String> {
     coordinate?.split(':').nth(2).map(str::to_owned)
+}
+
+/// Pulls the loader build from a flat profile library list (Ornithe uses
+/// `net.ornithemc:ornithe-loader:<version>`).
+fn loader_version_from_libraries(
+    libraries: &[RawMetaLib],
+    add_libraries: &[RawMetaLib],
+) -> Option<String> {
+    libraries
+        .iter()
+        .chain(add_libraries.iter())
+        .find_map(|lib| {
+            let mut parts = lib.name.split(':');
+            let group = parts.next()?;
+            let artifact = parts.next()?;
+            let version = parts.next()?;
+            if group == "net.ornithemc" && artifact == "ornithe-loader" {
+                Some(version.to_owned())
+            } else {
+                None
+            }
+        })
 }
 
 /// Resolves one Meta v1 `libraries`/`mavenFiles` entry. The metadata usually

@@ -38,7 +38,7 @@ pub enum CliError {
     #[error(".mrpack install failed")]
     Modrinth(#[from] ModrinthError),
     #[error(
-        "unknown mod loader {given:?} (supported: fabric, quilt, forge, neoforge, legacyfabric, cleanroom)"
+        "unknown mod loader {given:?} (supported: fabric, quilt, forge, neoforge, legacyfabric, cleanroom, ornithe)"
     )]
     UnknownLoader { given: String },
     #[error("{loader} only supports Minecraft {required}, not {given}")]

@@ -251,6 +251,7 @@ fn curse_loader(manifest: &modpack::CurseManifest) -> (String, String) {
         "neoforge" | "neoforged" => "neoforge",
         "legacyfabric" | "legacy-fabric" => "legacyfabric",
         "cleanroom" | "cleanroommc" => "cleanroom",
+        "ornithe" | "ornithemc" => "ornithe",
         _ => token,
     };
     (token.to_owned(), version.to_owned())

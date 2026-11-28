@@ -1,15 +1,18 @@
 name: beta
 
-# Star (beta) channel. Pushing a `beta-*` tag (e.g. `beta-v0.6.0-b1`)
-# triggers the shared build pipeline, which publishes the release as
-# `TwilightMC Star (<tag>)` with `is_prerelease: true`.
+# Star (beta) channel. Pushing a compact `vX.Y.ZbN` tag (e.g. `v0.7.1b1`)
+# or a legacy `beta-*` tag (e.g. `beta-v0.6.0-b1`) triggers the shared build
+# pipeline, which publishes the release as `TwilightMC Star (<tag>)` with
+# `is_prerelease: true`.
 #
 # Stable and Bolide tags use release.yml / alpha.yml; roll-forward pushes use
 # snapshot.yml. The tag patterns are disjoint, so a tag never builds twice.
 
 on:
   push:
-    tags: ['beta-*']
+    tags:
+      - 'beta-*'
+      - 'v[0-9]*.[0-9]*.[0-9]*b[0-9]*'
 
 permissions:
   contents: write

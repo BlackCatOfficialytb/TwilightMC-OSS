@@ -80,12 +80,13 @@ async fn load_pack(
 fn detect_loader(
     dependencies: &std::collections::BTreeMap<String, String>,
 ) -> Result<(String, String), String> {
-    const KEYS: [(&str, &str); 5] = [
+    const KEYS: [(&str, &str); 6] = [
         ("fabric-loader", "fabric"),
         ("quilt-loader", "quilt"),
         ("forge", "forge"),
         ("neoforge", "neoforge"),
         ("legacy-fabric", "legacyfabric"),
+        ("ornithe-loader", "ornithe"),
     ];
     let claimed: Vec<(&str, String)> = KEYS
         .iter()
@@ -190,14 +191,13 @@ pub async fn inspect_modpack(path_or_url: String) -> Result<ModpackInfo, String>
     inspect_modpack_core(&path_or_url).await
 }
 
-/// Core install shared by the drop modal and the wizard's Modpack tab:
-/// stages the pack into the resolved instances library under a user-chosen
-/// (or pack-derived) id and writes the grid metadata, then returns the id.
-pub(crate) async fn install_pack(
+/// Installs a .mrpack into an already-resolved instance directory. Used by
+/// drop/wizard installs and runtime-fetched packs such as OneClient.
+pub(crate) async fn install_pack_into_dir(
     app: &AppHandle,
     path_or_url: &str,
-    instance_name: &str,
-) -> Result<String, String> {
+    instance_dir: &std::path::Path,
+) -> Result<twilight_modrinth::ModpackIndex, String> {
     let path_or_url = path_or_url.trim();
     if path_or_url.is_empty() {
         return Err("modpack path or URL is required".into());
@@ -205,21 +205,16 @@ pub(crate) async fn install_pack(
     let emitter = crate::downloads::ProgressEmitter::new(app, "modpack-install", "Modpack install");
     emitter.set_stage("downloading".to_owned());
     emitter.emit(0, 1, 0, None, true);
-    let (size, _mrpack, index) = load_pack(path_or_url).await?;
-    let (loader, loader_version) = detect_loader(&index.dependencies)?;
-
-    // display name: user's choice, falling back to the pack label
-    let chosen = chosen_id(&index, instance_name);
-    let id = slugify(&chosen);
-    instances::validate_instance_id(&id)?;
+    let (_size, _mrpack, index) = load_pack(path_or_url).await?;
 
     let shared_dir = shared_root(app).await?;
-    let instances_dir = resolved_instances_root(app).await?;
-    let instance_dir = instances_dir.join(&id);
+    tokio::fs::create_dir_all(instance_dir)
+        .await
+        .map_err(|e| format!("cannot create instance dir: {e}"))?;
 
     let args = ModpackArgs {
         path_or_url: path_or_url.to_owned(),
-        instance_dir: Some(instance_dir.clone()),
+        instance_dir: Some(instance_dir.to_path_buf()),
         shared_dir: Some(shared_dir),
         temp_dir: None,
         dry_run: false,
@@ -231,8 +226,6 @@ pub(crate) async fn install_pack(
         .map_err(|e| e.to_string())?;
     emitter.emit_complete(1, 1, 1, Some(1));
 
-    // Provenance: only jars the pack manifest points at the Modrinth CDN are
-    // verified public artifacts; anything else stays an unnamed local mod.
     for file in &index.files {
         let Some(name) = file.path.strip_prefix("mods/") else {
             continue;
@@ -248,7 +241,7 @@ pub(crate) async fn install_pack(
             continue;
         };
         let _ = crate::provenance::record_public_mod(
-            &instance_dir,
+            instance_dir,
             name,
             &project_id,
             None,
@@ -256,11 +249,34 @@ pub(crate) async fn install_pack(
             "modrinth",
         );
     }
+    Ok(index)
+}
 
-    // grid metadata: without it the scan skips the directory entirely
+/// Core install shared by the drop modal and the wizard's Modpack tab:
+/// stages the pack into the resolved instances library under a user-chosen
+/// (or pack-derived) id and writes the grid metadata, then returns the id.
+pub(crate) async fn install_pack(
+    app: &AppHandle,
+    path_or_url: &str,
+    instance_name: &str,
+) -> Result<String, String> {
+    let path_or_url = path_or_url.trim();
+    if path_or_url.is_empty() {
+        return Err("modpack path or URL is required".into());
+    }
+    let (_size, _mrpack, index) = load_pack(path_or_url).await?;
+    let (loader, loader_version) = detect_loader(&index.dependencies)?;
+
+    let chosen = chosen_id(&index, instance_name);
+    let id = slugify(&chosen);
+    instances::validate_instance_id(&id)?;
+
+    let instances_dir = resolved_instances_root(app).await?;
+    let instance_dir = instances_dir.join(&id);
+    install_pack_into_dir(app, path_or_url, &instance_dir).await?;
+
     let meta = meta_from_index(&index, &chosen, &loader, &loader_version);
     write_meta(&instance_dir, &meta).await?;
-    let _ = size; // archive size is inspect-only information
     Ok(id)
 }
 

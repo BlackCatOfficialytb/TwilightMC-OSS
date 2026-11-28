@@ -439,6 +439,7 @@ fn build_diagnostics(
             ModLoader::NeoForge => ("NeoForge Loader", "net.neoforged"),
             ModLoader::LegacyFabric => ("Legacy Fabric Loader", "net.legacyfabric.fabric-loader"),
             ModLoader::Cleanroom => ("Cleanroom Loader", "net.minecraftforge"),
+            ModLoader::Ornithe => ("Ornithe Loader", "net.ornithemc.ornithe-loader"),
         };
         components.push(format!("{display} ({uid}) {}", profile.loader_version));
     }

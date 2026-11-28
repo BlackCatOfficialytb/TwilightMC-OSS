@@ -39,11 +39,12 @@
 
   // Modrinth search categories only know real loaders; vanilla (and any
   // unknown tag) searches across every loader facet instead.
-  const KNOWN_LOADERS = ['fabric', 'quilt', 'forge', 'neoforge', 'legacy-fabric'];
+  const KNOWN_LOADERS = ['fabric', 'quilt', 'forge', 'neoforge', 'legacy-fabric', 'ornithe'];
   const loaderTag = $derived.by(() => {
     const tag = instance.loader_type.toLowerCase();
     if (tag === 'legacy fabric' || tag === 'legacyfabric') return 'legacy-fabric';
     if (tag === 'cleanroom') return 'forge';
+    if (tag === 'ornithemc') return 'ornithe';
     return KNOWN_LOADERS.includes(tag) ? tag : '';
   });
 

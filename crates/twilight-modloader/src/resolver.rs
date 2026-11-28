@@ -33,6 +33,10 @@ pub const CLEANROOM_METADATA_URL: &str =
 /// Java majors Cleanroom's own patch declares (`compatibleJavaMajors`); the
 /// loader is a 1.12.2 fork that runs on modern runtimes only.
 pub const CLEANROOM_JAVA_MAJORS: &[i32] = &[25, 21];
+/// Ornithe metadata host (API v2).
+pub const ORNITHE_META_BASE: &str = "https://meta.ornithemc.net";
+/// Ornithe maven repository (ornithe-loader, calamus, nester).
+pub const ORNITHE_MAVEN_BASE: &str = "https://maven.ornithemc.net/releases/";
 /// Quilt metadata host (API v3).
 pub const QUILT_META_BASE: &str = "https://meta.quiltmc.org";
 /// Forge wrapper main class both Prism Meta v1 Forge and NeoForge profiles
@@ -57,12 +61,15 @@ pub enum ModLoader {
     LegacyFabric,
     /// CleanroomMC: a 1.12.2 Forge fork running on modern Java.
     Cleanroom,
+    /// OrnitheMC: a Fabric-like loader for pre-1.14 and modern versions,
+    /// using Calamus mappings and Ornithe Meta v2.
+    Ornithe,
 }
 
 impl ModLoader {
     /// Maps a case-insensitive CLI token (`fabric`, `quilt`, `forge`,
-    /// `neoforge`, `legacyfabric`, `cleanroom`, whitespace trimmed) onto a
-    /// loader.
+    /// `neoforge`, `legacyfabric`, `cleanroom`, `ornithe`, whitespace trimmed)
+    /// onto a loader.
     pub fn from_token(token: &str) -> Option<Self> {
         match token
             .trim()
@@ -76,15 +83,17 @@ impl ModLoader {
             "neoforge" => Some(Self::NeoForge),
             "legacyfabric" => Some(Self::LegacyFabric),
             "cleanroom" | "cleanroommc" => Some(Self::Cleanroom),
+            "ornithe" | "ornithemc" => Some(Self::Ornithe),
             _ => None,
         }
     }
 
     /// Main class the composited launch spawns when the profile itself does
-    /// not carry one (fabric/quilt Knot launchers, the Forge wrapper).
+    /// not carry one (fabric/quilt/ornithe Knot launchers, the Forge wrapper).
     pub const fn knot_main_class(self) -> &'static str {
         match self {
             Self::Fabric | Self::LegacyFabric => "net.fabricmc.loader.impl.launch.knot.KnotClient",
+            Self::Ornithe => "net.ornithemc.loader.impl.launch.knot.KnotClient",
             Self::Quilt => "org.quiltmc.loader.impl.launch.knot.KnotClient",
             Self::Forge | Self::NeoForge => FORGE_WRAPPER_MAIN,
             // Cleanroom's component pack names its own bootstrap class
@@ -101,6 +110,7 @@ impl ModLoader {
             Self::NeoForge => NEOFORGE_MAVEN_BASE,
             Self::LegacyFabric => LEGACY_FABRIC_MAVEN_BASE,
             Self::Cleanroom => CLEANROOM_MAVEN_BASE,
+            Self::Ornithe => ORNITHE_MAVEN_BASE,
         }
     }
 
@@ -115,6 +125,8 @@ impl ModLoader {
                 "https://repo.maven.apache.org/maven2/",
                 MINECRAFT_MAVEN_BASE,
             ],
+            // ornithe uses Fabric libraries plus its own maven
+            Self::Ornithe => &["https://maven.fabricmc.net/", MINECRAFT_MAVEN_BASE],
             _ => &[],
         }
     }
@@ -122,7 +134,10 @@ impl ModLoader {
     /// True when the loader's classes are a Fabric v2 meta schema (the
     /// composite needs a mapping jar and a synthesized loader artifact).
     pub const fn is_fabric_family(self) -> bool {
-        matches!(self, Self::Fabric | Self::Quilt | Self::LegacyFabric)
+        matches!(
+            self,
+            Self::Fabric | Self::Quilt | Self::LegacyFabric | Self::Ornithe
+        )
     }
 
     /// Java majors the loader itself requires, overriding the vanilla
@@ -169,16 +184,18 @@ impl ModLoader {
                 Some(format!("net.fabricmc:fabric-loader:{version}"))
             }
             Self::Quilt => Some(format!("org.quiltmc:quilt-loader:{version}")),
+            Self::Ornithe => Some(format!("net.ornithemc:ornithe-loader:{version}")),
             Self::Forge | Self::NeoForge | Self::Cleanroom => None,
         }
     }
 
-    /// Envelope field of the mapping jar (`intermediary` / `hashed`); the
-    /// Forge profiles ship their mapping inside the loader payload instead.
+    /// Envelope field of the mapping jar (`intermediary` / `hashed` / `calamus`);
+    /// the Forge profiles ship their mapping inside the loader payload instead.
     pub const fn mapping_field(self) -> &'static str {
         match self {
             Self::Fabric | Self::LegacyFabric => "intermediary",
             Self::Quilt => "hashed",
+            Self::Ornithe => "calamus",
             Self::Forge | Self::NeoForge | Self::Cleanroom => "mappings",
         }
     }
@@ -191,6 +208,7 @@ impl ModLoader {
             Self::Fabric => FABRIC_META_BASE,
             Self::LegacyFabric => LEGACY_FABRIC_META_BASE,
             Self::Quilt => QUILT_META_BASE,
+            Self::Ornithe => ORNITHE_META_BASE,
             // Meta v1 loaders fail over across two hosts; the first wins.
             Self::Forge | Self::NeoForge => self.meta_v1_bases()[0],
             Self::Cleanroom => CLEANROOM_MAVEN_BASE,
@@ -209,7 +227,7 @@ impl ModLoader {
             };
         }
         let api = match self {
-            Self::Fabric | Self::LegacyFabric => "v2",
+            Self::Fabric | Self::LegacyFabric | Self::Ornithe => "v2",
             Self::Quilt => "v3",
             Self::Forge | Self::NeoForge => unreachable!("meta v1 loaders returned above"),
             Self::Cleanroom => unreachable!("cleanroom resolves through component packs"),
@@ -230,6 +248,7 @@ impl fmt::Display for ModLoader {
             Self::NeoForge => "neoforge",
             Self::LegacyFabric => "legacyfabric",
             Self::Cleanroom => "cleanroom",
+            Self::Ornithe => "ornithe",
         })
     }
 }
@@ -327,6 +346,9 @@ pub async fn resolve_loader_profile(
     }
     if loader == ModLoader::LegacyFabric {
         return resolve_legacy_fabric(client, game_version, loader_version).await;
+    }
+    if loader == ModLoader::Ornithe {
+        return resolve_ornithe(client, game_version, loader_version).await;
     }
     let Some(uid) = loader.meta_uid() else {
         let url = profile_url(loader.meta_base(), loader, game_version, loader_version);
@@ -644,6 +666,39 @@ pub fn parse_cleanroom_release(xml: &str) -> Option<String> {
 /// Release asset URL of the MMC component pack for `version`.
 pub fn cleanroom_pack_url(version: &str) -> String {
     format!("{CLEANROOM_RELEASES_BASE}/{version}/cleanroom-{version}.zip")
+}
+
+/// Resolves Ornithe from Meta v2: pick stable build from the list endpoint,
+/// then read the Minecraft-like profile JSON for that build.
+pub async fn resolve_ornithe(
+    client: &Client,
+    game_version: &str,
+    loader_version: Option<&str>,
+) -> Result<LoaderProfile, LoaderError> {
+    let pin = loader_version
+        .map(str::trim)
+        .filter(|version| !version.is_empty())
+        .map(str::to_owned);
+    let resolved = match pin {
+        Some(version) => version,
+        None => {
+            let url = profile_url(ORNITHE_META_BASE, ModLoader::Ornithe, game_version, None);
+            let raw = fetch_json(client, &url).await?;
+            pick_fabric_build(&raw).ok_or_else(|| LoaderError::NoStableProfile {
+                loader: format!("ornithe {game_version}"),
+            })?
+        }
+    };
+    let url = format!(
+        "{}/v2/versions/loader/{game_version}/{resolved}/profile/json",
+        ORNITHE_META_BASE.trim_end_matches('/')
+    );
+    let raw = fetch_json(client, &url).await?;
+    let mut profile = parse_loader_meta(ModLoader::Ornithe, &raw)?;
+    if profile.loader_version.trim().is_empty() {
+        profile.loader_version = resolved;
+    }
+    Ok(profile)
 }
 
 /// Two-step Meta v1 resolution over an ordered host list: pick the build from
@@ -1181,6 +1236,81 @@ pub(crate) const LWJGL2_PATCH_FIXTURE: &str = r#"{
     ]
 }"#;
 
+/// Ornithe Meta v2 list entry for 1.8.9 (fabric-like envelope).
+#[cfg(test)]
+pub(crate) const ORNITHE_LIST_189_FIXTURE: &str = r#"[
+  {
+    "loader": {
+      "version": "0.1.1",
+      "stable": false,
+      "maven": "net.ornithemc:ornithe-loader:0.1.1"
+    },
+    "calamus": {
+      "version": "1.8.9",
+      "stable": true,
+      "maven": "net.ornithemc:calamus:1.8.9"
+    }
+  },
+  {
+    "loader": {
+      "version": "0.1.2",
+      "stable": true,
+      "maven": "net.ornithemc:ornithe-loader:0.1.2"
+    },
+    "calamus": {
+      "version": "1.8.9",
+      "stable": true,
+      "maven": "net.ornithemc:calamus:1.8.9"
+    },
+    "launcherMeta": {
+      "version": 1,
+      "libraries": {
+        "client": [],
+        "common": [
+          { "name": "net.ornithemc:nester:1.0.0", "url": "https://maven.ornithemc.net/releases/" }
+        ],
+        "server": []
+      },
+      "mainClass": { "client": "net.ornithemc.loader.impl.launch.knot.KnotClient" }
+    }
+  }
+]"#;
+
+/// Ornithe profile/json for 1.8.9 - flat Minecraft-style profile.
+#[cfg(test)]
+pub(crate) const ORNITHE_PROFILE_189_FIXTURE: &str = r#"{
+  "id": "ornithe-loader-0.1.2-1.8.9",
+  "inheritsFrom": "1.8.9",
+  "type": "release",
+  "mainClass": "net.ornithemc.loader.impl.launch.knot.KnotClient",
+  "arguments": { "game": [] },
+  "libraries": [
+    { "name": "net.ornithemc:nester:1.0.0", "url": "https://maven.ornithemc.net/releases/" },
+    { "name": "net.fabricmc:tiny-mappings-parser:0.3.0+build.17", "url": "https://maven.fabricmc.net/" },
+    { "name": "net.fabricmc:sponge-mixin:0.11.4+mixin.0.8.5", "url": "https://maven.fabricmc.net/" },
+    { "name": "org.ow2.asm:asm:9.3", "url": "https://maven.fabricmc.net/" },
+    { "name": "net.ornithemc:calamus:1.8.9", "url": "https://maven.ornithemc.net/releases/" },
+    { "name": "net.ornithemc:ornithe-loader:0.1.2", "url": "https://maven.ornithemc.net/releases/" }
+  ]
+}"#;
+
+/// Ornithe profile/json for b1.7.3 - inherits b1.7.3-client, calamus uses client suffix.
+#[cfg(test)]
+pub(crate) const ORNITHE_PROFILE_B173_FIXTURE: &str = r#"{
+  "id": "ornithe-loader-0.1.2-b1.7.3-client",
+  "inheritsFrom": "b1.7.3-client",
+  "type": "release",
+  "mainClass": "net.ornithemc.loader.impl.launch.knot.KnotClient",
+  "arguments": { "game": [] },
+  "libraries": [
+    { "name": "net.ornithemc:nester:1.0.0", "url": "https://maven.ornithemc.net/releases/" },
+    { "name": "net.fabricmc:sponge-mixin:0.11.4+mixin.0.8.5", "url": "https://maven.fabricmc.net/" },
+    { "name": "org.ow2.asm:asm:9.3", "url": "https://maven.fabricmc.net/" },
+    { "name": "net.ornithemc:calamus:b1.7.3-client", "url": "https://maven.ornithemc.net/releases/" },
+    { "name": "net.ornithemc:ornithe-loader:0.1.2", "url": "https://maven.ornithemc.net/releases/" }
+  ]
+}"#;
+
 /// Legacy Fabric's `patches/net.fabricmc.intermediary.json`: additive
 /// `+libraries`.
 #[cfg(test)]
@@ -1301,7 +1431,41 @@ mod tests {
             ModLoader::from_token("CleanroomMC"),
             Some(ModLoader::Cleanroom)
         );
+        assert_eq!(ModLoader::from_token("Ornithe"), Some(ModLoader::Ornithe));
+        assert_eq!(ModLoader::from_token("ornithemc"), Some(ModLoader::Ornithe));
         assert_eq!(ModLoader::from_token("liteloader"), None);
+    }
+
+    #[test]
+    fn ornithe_uses_v2_meta_and_knot_main_class() {
+        assert_eq!(
+            profile_url(ORNITHE_META_BASE, ModLoader::Ornithe, "1.8.9", None),
+            "https://meta.ornithemc.net/v2/versions/loader/1.8.9"
+        );
+        assert_eq!(
+            profile_url(
+                ORNITHE_META_BASE,
+                ModLoader::Ornithe,
+                "1.8.9",
+                Some("0.1.2")
+            ),
+            "https://meta.ornithemc.net/v2/versions/loader/1.8.9/0.1.2"
+        );
+        assert_eq!(ModLoader::Ornithe.maven_base(), ORNITHE_MAVEN_BASE);
+        assert!(
+            ModLoader::Ornithe
+                .maven_fallbacks()
+                .contains(&"https://maven.fabricmc.net/")
+        );
+        assert_eq!(
+            ModLoader::Ornithe.knot_main_class(),
+            "net.ornithemc.loader.impl.launch.knot.KnotClient"
+        );
+        assert_eq!(
+            ModLoader::Ornithe.loader_coordinate("0.1.2").as_deref(),
+            Some("net.ornithemc:ornithe-loader:0.1.2")
+        );
+        assert_eq!(ModLoader::Ornithe.to_string(), "ornithe");
     }
 
     #[test]
@@ -1660,6 +1824,75 @@ mod tests {
             matches!(err, LoaderError::NoStableProfile { ref loader } if loader == "neoforge 1.6.4"),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn ornithe_profile_json_parses_as_meta_profile_189() {
+        let raw: serde_json::Value = serde_json::from_str(ORNITHE_PROFILE_189_FIXTURE).unwrap();
+        let profile = parse_loader_meta(ModLoader::Ornithe, &raw).unwrap();
+        assert_eq!(profile.loader_version, "0.1.2");
+        assert_eq!(
+            profile.main_class,
+            "net.ornithemc.loader.impl.launch.knot.KnotClient"
+        );
+        assert!(
+            profile
+                .libraries
+                .iter()
+                .any(|lib| lib.name == "net.ornithemc:calamus:1.8.9")
+        );
+        assert!(profile.libraries.iter().any(|lib| {
+            lib.name == "net.ornithemc:ornithe-loader:0.1.2"
+                && lib.url.contains(
+                    "https://maven.ornithemc.net/releases/net/ornithemc/ornithe-loader/0.1.2/",
+                )
+        }));
+    }
+
+    #[test]
+    fn ornithe_profile_json_parses_b173_client_inherits() {
+        let raw: serde_json::Value = serde_json::from_str(ORNITHE_PROFILE_B173_FIXTURE).unwrap();
+        let profile = parse_loader_meta(ModLoader::Ornithe, &raw).unwrap();
+        assert_eq!(profile.loader_version, "0.1.2");
+        assert!(
+            profile
+                .libraries
+                .iter()
+                .any(|lib| lib.name == "net.ornithemc:calamus:b1.7.3-client")
+        );
+    }
+
+    #[tokio::test]
+    async fn ornithe_resolution_reads_list_then_profile_json() {
+        let routes: HashMap<String, (u16, Vec<u8>)> = HashMap::from([
+            (
+                "v2/versions/loader/1.8.9".to_owned(),
+                (200u16, ORNITHE_LIST_189_FIXTURE.as_bytes().to_vec()),
+            ),
+            (
+                "v2/versions/loader/1.8.9/0.1.2/profile/json".to_owned(),
+                (200u16, ORNITHE_PROFILE_189_FIXTURE.as_bytes().to_vec()),
+            ),
+        ]);
+        let addr = spawn(routes).await;
+        let base = format!("http://{addr}");
+        // resolve_ornithe uses ORNITHE_META_BASE constant; test the parsing path via
+        // fetch + parse and the URL builder for profile/json.
+        let list = fetch_json(
+            &Client::new(),
+            &profile_url(&base, ModLoader::Ornithe, "1.8.9", None),
+        )
+        .await
+        .unwrap();
+        let build = pick_fabric_build(&list).unwrap();
+        assert_eq!(build, "0.1.2");
+        let profile_url_json = format!(
+            "{}/v2/versions/loader/1.8.9/{build}/profile/json",
+            base.trim_end_matches('/')
+        );
+        let raw = fetch_json(&Client::new(), &profile_url_json).await.unwrap();
+        let profile = parse_loader_meta(ModLoader::Ornithe, &raw).unwrap();
+        assert_eq!(profile.loader_version, "0.1.2");
     }
 
     #[tokio::test]

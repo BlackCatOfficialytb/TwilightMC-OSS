@@ -31,8 +31,8 @@ original work (see [CONTRIBUTING.md](CONTRIBUTING.md)).
   (classic `assets/virtual/<id>` exports included), extracts natives with the
   platform 7-Zip CLI, assembles the JVM command line and spawns the game with
   output streamed back to the console.
-- **Six-loader compositing** — Fabric (meta v2), Quilt (meta v3), Forge,
-  NeoForge, Legacy Fabric and CleanroomMC resolve into one composite launch:
+- **Seven-loader compositing** — Fabric (meta v2), Quilt (meta v3), Forge,
+  NeoForge, Legacy Fabric, CleanroomMC, and OrnitheMC resolve into one composite launch:
   the loader main class takes over, loader libraries join the shared store and
   lead the classpath, and the vanilla client jar stays last. CleanroomMC
   launches pass the BareBones core-mod gate, with 1-click Modrinth installs
@@ -45,7 +45,9 @@ original work (see [CONTRIBUTING.md](CONTRIBUTING.md)).
   global drag-and-drop for `.mrpack`/`.zip`/`.twpack`, Prism/MultiMC instance
   import and CurseForge `manifest.json` packs (keyless imports list skipped
   files instead of failing). `.twpack` is TwilightMC's 7z instance container
-  with a pure-Rust fallback encoder and traversal-guarded extraction.
+  with a pure-Rust fallback encoder and traversal-guarded extraction. Client Mode
+  includes OneClient (by Polyfrost) as a runtime-fetched Modrinth modpack preset
+  with explicit attribution and no bundled GPL artifacts.
 - **Microsoft accounts & 3D skins** — OAuth2 device-code sign-in through the
   Xbox Live → XSTS → Minecraft Services chain, MSA refresh-token grants,
   offline v3 UUIDs, custom Yggdrasil/Ely.by servers with sha256-verified
@@ -79,7 +81,7 @@ original work (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 ## Download & install
 
 Grab a platform archive from the
-[releases page](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/releases)
+[GitHub releases page](https://github.com/BlackCatOfficialytb/TwilightMC-OSS/releases)
 (or the rolling `snapshot` pre-release for the newest build). Every archive
 unpacks into a single `twilight-…-<platform>` folder and contains:
 
@@ -99,6 +101,16 @@ it for the compression step. The `.zip` archives open with any standard
 unzip tool.
 
 Run the GUI with `twilight-ui`, drive everything from scripts with `twilight`.
+
+### Mirrors
+
+The canonical source, issues and release notes live on
+[GitHub](https://github.com/BlackCatOfficialytb/TwilightMC-OSS). A read-only
+[Tangled mirror](https://tangled.org/quanvm0501.tngl.sh/twilightmc-oss) is kept
+in sync by [`.github/workflows/mirror-tangled.yml`](.github/workflows/mirror-tangled.yml),
+including every branch and tag, so either host serves the same commits. Report
+bugs and open pull requests on GitHub; the Tangled mirror is a distribution
+mirror, not a second tracker.
 
 Per-platform notes:
 
@@ -241,12 +253,19 @@ platforms.
 
 ## Versioning & snapshot releases
 
-Versions follow the spec in [VERSION.md](VERSION.md):
+Versions follow the spec in [VERSION.md](VERSION.md) using PEP 440 /
+classic-Minecraft pre-release notation:
 
 ```
-TwilightMC Stable   v1.2.3
+TwilightMC Bolide (v1.2.3a1)                      # alpha build 1 of milestone 1.2.3
+TwilightMC Star   (v1.2.3b1)                      # beta build 1 of milestone 1.2.3
+TwilightMC v1.2.3                                 # stable
 TwilightMC Snapshot vX.Y.Z-ddmmyyyy-<commit>      # ddmmyyyy = UTC build date, <commit> = short hash
 ```
+
+Legacy `alpha-vX.Y.Z` / `beta-vX.Y.Z-bN` tags remain valid and are still
+recognised by the workflows and the in-app updater, but new builds use the
+compact `vX.Y.ZaN` / `vX.Y.ZbN` spelling.
 
 Pushes to `main` (or manual `workflow_dispatch` runs) start the pipeline in
 [`.github/workflows/snapshot.yml`](.github/workflows/snapshot.yml):
@@ -284,9 +303,9 @@ All four channels share the reusable
 | Workflow | Trigger | Release |
 | --- | --- | --- |
 | [`snapshot.yml`](.github/workflows/snapshot.yml) | push to `main`, `workflow_dispatch` | rolling `snapshot` pre-release |
-| [`alpha.yml`](.github/workflows/alpha.yml) | push `alpha-*` | `TwilightMC Bolide (<tag>)`, pre-release |
-| [`beta.yml`](.github/workflows/beta.yml) | push `beta-*` | `TwilightMC Star (<tag>)`, pre-release |
-| [`release.yml`](.github/workflows/release.yml) | push `vX.Y.Z` | `TwilightMC <tag>`, stable |
+| [`alpha.yml`](.github/workflows/alpha.yml) | push `vX.Y.ZaN` or legacy `alpha-*` | `TwilightMC Bolide (<tag>)`, pre-release |
+| [`beta.yml`](.github/workflows/beta.yml) | push `vX.Y.ZbN` or legacy `beta-*` | `TwilightMC Star (<tag>)`, pre-release |
+| [`release.yml`](.github/workflows/release.yml) | push `vX.Y.Z` (no `a`/`b`/`-` suffix) | `TwilightMC <tag>`, stable |
 
 Tagged releases are created by the workflow itself (`gh release create
 --generate-notes`), so the tag patterns stay disjoint and a tag never builds

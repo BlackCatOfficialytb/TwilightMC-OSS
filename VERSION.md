@@ -3,10 +3,13 @@
 ## 1. Version format
 
 Every published artifact — crates, the CLI executable and release tags —
-carries the product version, presented as:
+carries the product version, presented in **PEP 440 / Classic Minecraft**
+notation:
 
 ```
-TwilightMC <release channel> vX.Y.Z
+TwilightMC Bolide (vX.Y.ZaN)
+TwilightMC Star (vX.Y.ZbN)
+TwilightMC vX.Y.Z
 TwilightMC Snapshot vX.Y.Z-ddmmyyyy-<commit>
 ```
 
@@ -17,25 +20,35 @@ and Bolide**; a Snapshot reuses the same triple as its milestone target (§2):
   changed flag semantics, unreadable on-disk formats) increment X.
 - **Y — minor update.** Backwards-compatible features increment Y.
 - **Z — subupdate.** Bug fixes and identical-behaviour repairs increment Z.
-  The subupdate component may be omitted: `v1.2` is shorthand for `v1.2.0`.
-  Presentation strings may use `vX.Y`, while official release tags
-  canonically spell out the full `vX.Y.Z` so comparisons stay unambiguous.
+  The subupdate component may be omitted in prose: `v1.2` is shorthand for
+  `v1.2.0`. Official release tags always spell out the full `vX.Y.Z`.
+- **`aN`** — Bolide (alpha) build `N` of that milestone. `N` starts at `1`
+  and increases for every Bolide build of the same `X.Y.Z`.
+- **`bN`** — Star (beta) build `N` of that milestone. `N` starts at `1` and
+  increases for every Star build of the same `X.Y.Z`.
 - **`<commit>`** in snapshots — short git hash of the built revision
   (minimum 7 characters).
 
 ### Example strings
 
 ```
-v1.2.0                  → TwilightMC Stable v1.2.0
-v2.1.3                  → TwilightMC Stable v2.1.3
-alpha-v1.2.3            → TwilightMC Bolide (alpha-v1.2.3)
-beta-v1.2.3-b1          → TwilightMC Star (beta-v1.2.3-b1)
-v1.2.3-06112026-6c2d471 → TwilightMC Snapshot v1.2.3-06112026-6c2d471
+v1.2.0                   → TwilightMC v1.2.0
+v2.1.3                   → TwilightMC v2.1.3
+v1.2.3a1                 → TwilightMC Bolide (v1.2.3a1)
+v1.2.3a2                 → TwilightMC Bolide (v1.2.3a2)
+v1.2.3b1                 → TwilightMC Star (v1.2.3b1)
+v1.2.3-06112026-6c2d471  → TwilightMC Snapshot v1.2.3-06112026-6c2d471
 ```
 
 The `vX.Y` shorthand is prose-only. Official release tags — the ones that
 trigger the release workflows — always spell out the full `vX.Y.Z`
 (`v1.0.0`, never `v1.0`) so tag ordering and comparisons stay unambiguous.
+Bolide/Star suffixes are lowercase and directly appended, exactly like
+classic Minecraft `1.8.9a`-style builds and PEP 440 pre-releases.
+
+Historical tags `alpha-vX.Y.Z[...]` and `beta-vX.Y.Z-bN` remain valid and
+are still recognised by the release workflows and the in-app updater; new
+builds use the compact `vX.Y.ZaN` / `vX.Y.ZbN` spelling only.
 
 All crates in the workspace share one release train (`version.workspace =
 true` in every crate), so the workspace `version` field is the numeric part
@@ -47,8 +60,8 @@ implicit `.0`.
 | Channel     | Tag / version string              | Meaning |
 |-------------|-----------------------------------|---------|
 | **Stable**    | `vX.Y.Z`                          | No suffix. Fully supported: bug-fix releases are cut against the latest Stable minor only. |
-| **Star**      | `beta-vX.Y.Z-bN`, `N ≥ 1`         | *Beta*. Feature-complete for the upcoming milestone. Public API and on-disk formats are frozen; only bug fixes and polish land. |
-| **Bolide**    | `alpha-vX.Y.Z`, `alpha-vX.Y.Z-bN` | *Alpha*. May crash, may rewrite formats. APIs, CLI flags and staging layouts can change without notice between Bolide numbers. |
+| **Star**      | `vX.Y.ZbN`, `N ≥ 1`               | *Beta*. Feature-complete for the upcoming milestone. Public API and on-disk formats are frozen; only bug fixes and polish land. Legacy `beta-vX.Y.Z-bN` tags are still accepted. |
+| **Bolide**    | `vX.Y.ZaN`, `N ≥ 1`               | *Alpha*. May crash, may rewrite formats. APIs, CLI flags and staging layouts can change without notice between Bolide numbers. Legacy `alpha-vX.Y.Z` / `alpha-vX.Y.Z-bN` tags are still accepted. |
 | **Snapshot**  | tag `snapshot`; `vX.Y.Z-ddmmyyyy-<commit>` | *Rolling*. Built straight from `main`, at least one per week while development is active. `ddmmyyyy` is the build date (two-digit day and month, four-digit year — `06112026` = 6 November 2026). Snapshots are **never patched** — a bad snapshot is superseded by the next one. |
 
 `X.Y.Z` on a Star/Bolide/Snapshot build is the milestone **target** it is
@@ -70,7 +83,7 @@ macOS and as `.tar.zst` (Zstandard) on Linux.
 ### Ascending order for the same milestone
 
 ```
-v1.2.3-06112026-6c2d471 < alpha-v1.2.3 < beta-v1.2.3-b1 < v1.2.3
+v1.2.3-06112026-6c2d471 < v1.2.3a1 < v1.2.3a2 < v1.2.3b1 < v1.2.3
 ```
 
 the last snapshot of a milestone is the last thing you test *before* it goes
@@ -122,8 +135,9 @@ validators — so precedence is defined here:
 ## 6. Current version
 
 - Latest Stable: `v0.2.0`.
-- Bolide line: `v0.7.1` — the workspace `version` carries `0.7.1` from Mission 6
-  onward. Bolide tags `alpha-v0.4.1` … `alpha-v0.5.0` delivered the README
+- Bolide line: `v0.7.1aN` — the workspace `version` carries `0.7.1` from
+  Mission 6 onward, so the next Bolide build publishes as `v0.7.1a1`,
+  `v0.7.1a2`, … . Historical tags `alpha-v0.4.1` … `alpha-v0.5.0` delivered the README
   security/unsigned-binaries guide, the Microsoft OAuth2 device-flow token
   chain with sha256-verified authlib-injector auto-fetch, the account manager
   with its skinview3d viewer and skin/cape editors, and the Launcher/Client
@@ -138,8 +152,9 @@ validators — so precedence is defined here:
   API (`HORIZON_LAUNCHER_DEVELOPER_OFFLINE=1` and `--developer-single-player`
   only under an explicit opt-in), bounded `dev_launches.json` launch records,
   redacted command/config inspection, launcher RSS/CAS and phase-timing
-  diagnostics, and full EN/VI coverage for every developer string. `alpha-v0.7.1`
-  is the Minecraft2Shell security patch: fresh `piston-meta` resolution with
+  diagnostics, and full EN/VI coverage for every developer string. The
+  Minecraft2Shell security patch shipped as the legacy `alpha-v0.7.1` tag:
+  fresh `piston-meta` resolution with
   offline-only caching, SHA-1 verification/replacement of every
   `lwjgl-freetype` artifact before launch, a version/platform exposure advisory
   (Server Resource Packs: Disabled on untrusted servers; avoid untrusted `.zip`
@@ -148,7 +163,7 @@ validators — so precedence is defined here:
   tags `alpha-v0.0.1` … `alpha-v0.0.3` are published as pre-releases titled
   `TwilightMC Bolide v0.0.X (Backported)`; Bolide builds carry no API-stability
   promises (§2).
-- Star (beta) line: `beta-v0.7.1-b1` once the `beta` branch is cut; Star
+- Star (beta) line: `v0.7.1bN` once the `beta` branch is cut; Star
   releases are built from that branch and published as
   `TwilightMC Star (<tag>)` by `.github/workflows/beta.yml`.
 - Snapshot line: `v0.7.1-ddmmyyyy-<commit>`, built as rolling works land on

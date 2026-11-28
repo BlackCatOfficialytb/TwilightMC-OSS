@@ -4327,6 +4327,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "twilight-oneclient-modpack-compatible-layer"
+version = "0.7.1"
+dependencies = [
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
 name = "twilight-pack"
 version = "0.7.1"
 dependencies = [
@@ -4387,6 +4398,7 @@ dependencies = [
  "twilight-manifest",
  "twilight-modloader",
  "twilight-modrinth",
+ "twilight-oneclient-modpack-compatible-layer",
  "twilight-pack",
  "twilight-runtime",
  "twilight-server",

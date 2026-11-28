@@ -9,6 +9,7 @@
   import LauncherIcon from './LauncherIcon.svelte';
   import { skinSource } from './accounts.svelte.js';
   import { t } from './i18n.svelte.ts';
+  import { toast } from './alerts.svelte.js';
 
   let {
     instances = [],
@@ -20,6 +21,12 @@
     onrefresh,
     onopenaccounts,
   } = $props();
+
+  const ONECLIENT_PRESETS = [
+    { id: 'oneclient-1.21.1-fabric', label: 'OneClient 1.21.1 (Fabric)', loader: 'fabric', mc: '1.21.1' },
+    { id: 'oneclient-1.8.9-ornithe', label: 'OneClient 1.8.9 (Ornithe)', loader: 'ornithe', mc: '1.8.9' },
+  ];
+  let oneclientBusy = $state('');
 
   function invoke(cmd, args) {
     const core = window.__TAURI__?.core;
@@ -140,6 +147,26 @@
       }[account.account_type.type] ?? 'account-type-yggdrasil'
     );
   }
+
+  function oneclientInstalled(preset) {
+    return instances.some((i) => i.id === preset.id);
+  }
+
+  async function installOneClient(preset) {
+    if (oneclientBusy) return;
+    oneclientBusy = preset.id;
+    try {
+      const id = await invoke('install_oneclient_instance', { loader: preset.loader, mcVersion: preset.mc });
+      await onrefresh?.();
+      selectedInstance = id;
+      toast(t('client-oneclient-installed', { name: preset.label }), 'success');
+      onlaunch?.(id, null);
+    } catch (e) {
+      toast(String(e), 'error');
+    } finally {
+      oneclientBusy = '';
+    }
+  }
 </script>
 
 <div class="mx-auto flex w-full max-w-4xl flex-col gap-6">
@@ -205,6 +232,34 @@
         <!-- quick launch hub -->
         <div class="rounded-lg border border-(--border) bg-(--bg-surface) p-5">
           <h3 class="text-[11px] font-semibold uppercase tracking-wider text-(--text-muted)">{t('client-quick-launch')}</h3>
+
+          <div class="mt-3 grid gap-2 sm:grid-cols-2">
+            {#each ONECLIENT_PRESETS as preset (preset.id)}
+              {@const installed = oneclientInstalled(preset)}
+              <div class="rounded border border-(--border) bg-(--bg-subtle) p-3">
+                <p class="text-[12px] font-medium">{preset.label}</p>
+                <p class="mt-0.5 text-[10px] text-(--text-muted)">{t('client-oneclient-attribution')}</p>
+                <button
+                  class="mt-2 w-full rounded bg-(--accent) px-2.5 py-1.5 text-[11px] font-medium text-(--on-accent) hover:bg-(--accent-hover) disabled:opacity-50"
+                  disabled={!!oneclientBusy || gameRunning}
+                  onclick={() => installOneClient(preset)}
+                >
+                  {oneclientBusy === preset.id
+                    ? t('client-oneclient-installing')
+                    : installed
+                      ? t('client-oneclient-update')
+                      : t('client-oneclient-install')}
+                </button>
+              </div>
+            {/each}
+            <div class="rounded border border-dashed border-(--border) bg-(--bg-subtle) p-3 opacity-75">
+              <p class="text-[12px] font-medium">{t('client-twilightmc-client-title')}</p>
+              <p class="mt-0.5 text-[10px] text-(--text-muted)">{t('client-twilightmc-client-desc')}</p>
+              <span class="mt-2 inline-block rounded border border-(--border) px-2 py-1 text-[10px] text-(--text-muted)">
+                {t('client-twilightmc-client-coming-soon')}
+              </span>
+            </div>
+          </div>
           <div class="mt-3 flex items-center gap-2">
             <select
               class="h-9 min-w-0 flex-1 rounded border border-(--border) bg-(--bg-subtle) px-2 text-[13px] outline-none focus:border-(--accent)"

@@ -1,0 +1,15 @@
+[package]
+name = "twilight-oneclient-modpack-compatible-layer"
+version.workspace = true
+edition.workspace = true
+license = "Apache-2.0"
+description = "Runtime OneClient modpack compatibility layer for TwilightMC, fetching metadata from Modrinth without bundling GPL artifacts"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+reqwest = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }

@@ -22,12 +22,16 @@ const QFAPI_ID: &str = "qvIfYCYJ";
 /// Modrinth project id of Legacy Fabric API (`legacy-fabric-api`).
 const LEGACY_FABRIC_API_ID: &str = "9CJED7xi";
 
+/// Modrinth project id of Ornithe Standard Libraries (`osl`).
+const OSL_ID: &str = "EHGtwpJv";
+
 /// Loaders a version search covers, native-first. Quilt runs Fabric mods
 /// through QFAPI, so quilt searches resolve both `quilt` AND `fabric`
 /// builds (native quilt preferred, fabric as fallback). Legacy Fabric is the
 /// mirror image: it prefers its own `legacy-fabric` tag and falls back to the
-/// plain `fabric` tag for mods that never retagged. Everything else resolves
-/// its own loader only.
+/// plain `fabric` tag for mods that never retagged. Ornithe uses its own
+/// loader tag and can also consume plain Fabric builds where compatible.
+/// Everything else resolves its own loader only.
 fn loader_candidates(loader: &str) -> Vec<String> {
     let tag = loader.trim().to_ascii_lowercase();
     match tag.as_str() {
@@ -35,6 +39,7 @@ fn loader_candidates(loader: &str) -> Vec<String> {
         "legacyfabric" | "legacy-fabric" => {
             vec!["legacy-fabric".to_owned(), "fabric".to_owned()]
         }
+        "ornithe" | "ornithemc" => vec!["ornithe".to_owned(), "fabric".to_owned()],
         _ => vec![tag],
     }
 }
@@ -80,6 +85,7 @@ fn loader_label(tag: &str) -> String {
     match tag {
         "neoforge" => "NeoForge".to_owned(),
         "legacy-fabric" => "Legacy Fabric".to_owned(),
+        "ornithe" | "ornithemc" => "Ornithe".to_owned(),
         _ => {
             let mut chars = tag.chars();
             match chars.next() {
@@ -163,9 +169,9 @@ async fn cross_loader_dep_note(
 }
 
 /// Dependency substitution for compatibility layers: a Fabric mod's
-/// `fabric-api` requirement is rewired to `qfapi` on Quilt and to
-/// `legacy-fabric-api` on Legacy Fabric, so neither instance ends up with the
-/// conflicting modern Fabric API jar.
+/// `fabric-api` requirement is rewired to `qfapi` on Quilt, `legacy-fabric-api`
+/// on Legacy Fabric, and `osl` on Ornithe, so instances get the compatible
+/// runtime library for their loader.
 fn substitute_dependency<'a>(project_id: &'a str, loader: &str) -> &'a str {
     let tag = loader.trim().to_ascii_lowercase();
     if project_id != FABRIC_API_ID {
@@ -174,6 +180,7 @@ fn substitute_dependency<'a>(project_id: &'a str, loader: &str) -> &'a str {
     match tag.as_str() {
         "quilt" => QFAPI_ID,
         "legacyfabric" | "legacy-fabric" => LEGACY_FABRIC_API_ID,
+        "ornithe" | "ornithemc" => OSL_ID,
         _ => project_id,
     }
 }
@@ -1494,12 +1501,17 @@ mod tests {
             substitute_dependency("cloth-config", "quilt"),
             "cloth-config"
         );
+        assert_eq!(substitute_dependency(FABRIC_API_ID, "ornithe"), OSL_ID);
         // loader candidates: quilt resolves native quilt first, then fabric
         assert_eq!(
             loader_candidates("Quilt"),
             vec!["quilt".to_owned(), "fabric".to_owned()]
         );
         assert_eq!(loader_candidates("Fabric"), vec!["fabric".to_owned()]);
+        assert_eq!(
+            loader_candidates("ornithe"),
+            vec!["ornithe".to_owned(), "fabric".to_owned()]
+        );
         assert_eq!(loader_candidates(""), vec![String::new()]);
     }
 

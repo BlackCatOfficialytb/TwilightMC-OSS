@@ -61,6 +61,13 @@ govern those snapshots themselves.
   `cdn.modrinth.com` power the in-app mods browser and the drag-and-drop
   pack installer. The planned **Minecraft Access** integration for the Blind
   Mode accessibility profile installs straight from Modrinth.
+- **OrnitheMC** — [ornithemc.net](https://ornithemc.net/) provides the
+  Ornithe loader/meta/maven stack used for legacy and modern Ornithe
+  instances (Calamus mappings, `ornithe-loader`, Ornithe Meta v2).
+- **OneClient (Polyfrost)** — [modrinth.com/modpack/oneclient-modpack](https://modrinth.com/modpack/oneclient-modpack)
+  is a third-party modpack by Polyfrost. TwilightMC's compatibility layer
+  fetches OneClient metadata/artifacts at runtime from Modrinth and does not
+  bundle GPL OneClient code or artifacts in this repository.
 - **MultiMC** — the original launcher whose instance metadata formats Prism
   carried forward and TwilightMC now reads in place.
 - **XMCL** — inspiration for the dynamic accent color engine

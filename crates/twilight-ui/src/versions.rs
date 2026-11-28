@@ -66,8 +66,8 @@ pub struct LoaderVersionRow {
     pub stable: bool,
 }
 
-/// Flattens a fabric/quilt meta `versions/loader/{game}` array into dropdown
-/// rows (`/loader/{version,stable}` pointers).
+/// Flattens a fabric/quilt/ornithe meta `versions/loader/{game}` array into
+/// dropdown rows (`/loader/{version,stable}` pointers).
 pub(crate) fn parse_loader_versions(raw: &serde_json::Value) -> Vec<LoaderVersionRow> {
     raw.as_array()
         .map(|list| {
@@ -111,7 +111,7 @@ pub async fn fetch_loader_versions(
     game_version: String,
 ) -> Result<Vec<LoaderVersionRow>, String> {
     let loader = ModLoader::from_token(&loader).ok_or_else(|| {
-        format!("unsupported loader {loader:?} (fabric, quilt, forge, neoforge, legacyfabric, cleanroom)")
+        format!("unsupported loader {loader:?} (fabric, quilt, forge, neoforge, legacyfabric, cleanroom, ornithe)")
     })?;
     let client = reqwest::Client::new();
 

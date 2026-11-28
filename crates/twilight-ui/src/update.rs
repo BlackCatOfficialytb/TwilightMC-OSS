@@ -6,8 +6,6 @@
 
 use std::cmp::Ordering;
 
-use twilight_server::engine::compare_versions;
-
 /// GitHub API repository root; the UI opens `html_url`, never a guessed URL.
 const API_BASE: &str = "https://api.github.com/repos/BlackCatOfficialytb/TwilightMC-OSS";
 
@@ -42,88 +40,214 @@ struct GitHubRelease {
     draft: bool,
 }
 
-/// Channel → release-tag prefix from VERSION.md §2.
-fn channel_prefix(channel: &str) -> Result<&'static str, String> {
-    match channel {
-        "stable" => Ok("v"),
-        "star" => Ok("beta-v"),
-        "bolide" => Ok("alpha-v"),
-        "snapshot" => Ok("snapshot"),
-        other => Err(format!(
-            "unsupported update channel {other:?}; expected stable, star, bolide or snapshot"
-        )),
+/// Channel → accepted release-tag families (VERSION.md §2).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UpdateChannel {
+    Stable,
+    Star,
+    Bolide,
+    Snapshot,
+}
+
+impl UpdateChannel {
+    fn parse(channel: &str) -> Result<Self, String> {
+        match channel {
+            "stable" => Ok(Self::Stable),
+            "star" => Ok(Self::Star),
+            "bolide" => Ok(Self::Bolide),
+            "snapshot" => Ok(Self::Snapshot),
+            other => Err(format!(
+                "unsupported update channel {other:?}; expected stable, star, bolide or snapshot"
+            )),
+        }
     }
 }
 
-/// Snapshot-style tags reuse a milestone triple but add a zero-padded build
-/// date and a short commit hash: `vX.Y.Z-ddmmyyyy-<commit>`.
-fn is_snapshot_style(tag: &str) -> bool {
-    let Some(rest) = tag.strip_prefix('v') else {
-        return false;
+/// PEP 440-style stage ranking for the same `X.Y.Z` milestone. Snapshots are
+/// built from the in-development milestone, so they rank below its alphas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ReleaseStage {
+    Snapshot,
+    Alpha,
+    Beta,
+    Stable,
+}
+
+/// One parsed release identity. Ordering mirrors VERSION.md §3:
+/// `X.Y.Z` first, then stage (Stable > Star > Bolide > Snapshot), then the
+/// build number or snapshot date/commit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ReleaseVersion {
+    nums: [u64; 3],
+    stage: ReleaseStage,
+    build: u64,
+    snapshot_date: Option<u32>,
+    snapshot_commit: String,
+}
+
+impl ReleaseVersion {
+    fn new(nums: [u64; 3], stage: ReleaseStage, build: u64) -> Self {
+        Self {
+            nums,
+            stage,
+            build,
+            snapshot_date: None,
+            snapshot_commit: String::new(),
+        }
+    }
+}
+
+impl Ord for ReleaseVersion {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.nums
+            .cmp(&other.nums)
+            .then_with(|| self.stage.cmp(&other.stage))
+            .then_with(|| self.build.cmp(&other.build))
+            .then_with(|| self.snapshot_date.cmp(&other.snapshot_date))
+            .then_with(|| self.snapshot_commit.cmp(&other.snapshot_commit))
+    }
+}
+
+impl PartialOrd for ReleaseVersion {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Splits `X.Y.Z` from an arbitrary suffix. Returns `None` unless all three
+/// numeric components are present.
+fn split_triple(text: &str) -> Option<([u64; 3], &str)> {
+    let mut nums = [0u64; 3];
+    let mut rest = text;
+    for (index, slot) in nums.iter_mut().enumerate() {
+        let end = rest
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(rest.len());
+        if end == 0 {
+            return None;
+        }
+        *slot = rest[..end].parse().ok()?;
+        rest = &rest[end..];
+        if index < 2 {
+            rest = rest.strip_prefix('.')?;
+        }
+    }
+    Some((nums, rest))
+}
+
+/// `vX.Y.ZaN` (Bolide) or `vX.Y.ZbN` (Star).
+fn parse_compact(tag: &str, marker: char, stage: ReleaseStage) -> Option<ReleaseVersion> {
+    let text = tag.strip_prefix('v')?;
+    let (nums, rest) = split_triple(text)?;
+    let build = rest.strip_prefix(marker)?;
+    if build.is_empty() || !build.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(ReleaseVersion::new(nums, stage, build.parse().ok()?))
+}
+
+/// Legacy `alpha-vX.Y.Z[-bN]` / `beta-vX.Y.Z[-bN]`.
+fn parse_legacy(tag: &str, prefix: &str, stage: ReleaseStage) -> Option<ReleaseVersion> {
+    let text = tag.strip_prefix(prefix)?;
+    let (nums, rest) = split_triple(text)?;
+    let build = if rest.is_empty() {
+        0
+    } else {
+        let digits = rest.strip_prefix("-b")?;
+        if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        digits.parse().ok()?
     };
-    let mut parts = rest.split('-');
-    let (Some(version), Some(date), Some(commit)) = (parts.next(), parts.next(), parts.next())
-    else {
-        return false;
-    };
-    version
-        .split('.')
-        .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()))
-        && date.len() == 8
-        && date.bytes().all(|b| b.is_ascii_digit())
-        && commit.len() >= 7
-        && commit.bytes().all(|b| b.is_ascii_hexdigit())
+    Some(ReleaseVersion::new(nums, stage, build))
+}
+
+/// Plain `vX.Y.Z` Stable tag; snapshot/alpha/beta suffixes are rejected.
+fn parse_stable(tag: &str) -> Option<ReleaseVersion> {
+    let text = tag.strip_prefix('v')?;
+    let (nums, rest) = split_triple(text)?;
+    rest.is_empty()
+        .then(|| ReleaseVersion::new(nums, ReleaseStage::Stable, 0))
+}
+
+/// Snapshot identity `vX.Y.Z-ddmmyyyy-<commit>` (the leading `v` is optional
+/// because release titles spell the version without it).
+fn parse_snapshot(text: &str) -> Option<ReleaseVersion> {
+    let text = text.strip_prefix('v').unwrap_or(text);
+    let (nums, rest) = split_triple(text)?;
+    let rest = rest.strip_prefix('-')?;
+    let (date, commit) = rest.split_once('-')?;
+    if date.len() != 8
+        || !date.bytes().all(|b| b.is_ascii_digit())
+        || commit.len() < 7
+        || !commit.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return None;
+    }
+    let mut version = ReleaseVersion::new(nums, ReleaseStage::Snapshot, 0);
+    version.snapshot_date = Some(date.parse().ok()?);
+    version.snapshot_commit = commit.to_owned();
+    Some(version)
 }
 
 /// Recovers the version carried in a release title, used only for the rolling
-/// `snapshot` tag (the tag itself holds no version information).
+/// `snapshot` tag (the tag itself holds no version information). Titles wrap
+/// the version in punctuation: `TwilightMC Bolide (v1.2.3a1)`.
 fn version_from_title(title: &str) -> Option<String> {
-    let token = title.split_whitespace().find(|word| {
-        (word.starts_with('v') || word.starts_with("beta-v") || word.starts_with("alpha-v"))
-            && word.len() > 1
-    })?;
-    let version = token
-        .strip_prefix("beta-v")
-        .or_else(|| token.strip_prefix("alpha-v"))
-        .or_else(|| token.strip_prefix('v'))?;
-    if version.starts_with(|c: char| c.is_ascii_digit()) {
-        Some(version.to_owned())
-    } else {
-        None
+    for word in title.split_whitespace() {
+        let token = word.trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '.' && c != '-');
+        let version = token
+            .strip_prefix("beta-v")
+            .or_else(|| token.strip_prefix("alpha-v"))
+            .or_else(|| token.strip_prefix('v'));
+        if let Some(version) = version
+            && version.starts_with(|c: char| c.is_ascii_digit())
+        {
+            return Some(version.to_owned());
+        }
+    }
+    None
+}
+
+/// Channel-specific tag acceptance. Other channels' tags are rejected so a
+/// Stable release never masquerades as a Bolide update.
+fn release_version(
+    channel: UpdateChannel,
+    tag: &str,
+    name: Option<&str>,
+) -> Option<ReleaseVersion> {
+    match channel {
+        UpdateChannel::Stable => parse_stable(tag),
+        UpdateChannel::Star => parse_compact(tag, 'b', ReleaseStage::Beta)
+            .or_else(|| parse_legacy(tag, "beta-v", ReleaseStage::Beta)),
+        UpdateChannel::Bolide => parse_compact(tag, 'a', ReleaseStage::Alpha)
+            .or_else(|| parse_legacy(tag, "alpha-v", ReleaseStage::Alpha)),
+        UpdateChannel::Snapshot => {
+            if tag == "snapshot" {
+                name.and_then(version_from_title)
+                    .and_then(|v| parse_snapshot(&v))
+            } else {
+                parse_snapshot(tag)
+            }
+        }
     }
 }
 
-/// Strips the channel prefix (or reads the snapshot title) and returns the
-/// version string passed to [`compare_versions`]. Other channels' tags are
-/// rejected so a Stable release never masquerades as a Bolide update.
-fn release_version(prefix: &str, tag: &str, name: Option<&str>) -> Option<String> {
-    match prefix {
-        "v" => {
-            let version = tag.strip_prefix('v')?;
-            if is_snapshot_style(tag) || !version.starts_with(|c: char| c.is_ascii_digit()) {
-                return None;
-            }
-            Some(version.to_owned())
-        }
-        "beta-v" | "alpha-v" => {
-            let version = tag.strip_prefix(prefix)?;
-            if version.starts_with(|c: char| c.is_ascii_digit()) {
-                Some(version.to_owned())
-            } else {
-                None
-            }
-        }
-        "snapshot" => {
-            if tag == "snapshot" {
-                name.and_then(version_from_title)
-            } else if is_snapshot_style(tag) {
-                Some(tag.strip_prefix('v')?.to_owned())
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
+/// Interprets the running `CARGO_PKG_VERSION` (plain `X.Y.Z`, possibly with a
+/// compact suffix during development) for comparison with release tags.
+fn parse_current_version(text: &str) -> ReleaseVersion {
+    let text = text.strip_prefix('v').unwrap_or(text);
+    let (nums, rest) = split_triple(text).unwrap_or(([0, 0, 0], ""));
+    let (stage, build) = if let Some(build) = rest.strip_prefix('a') {
+        (ReleaseStage::Alpha, build.parse().unwrap_or(0))
+    } else if let Some(build) = rest.strip_prefix('b') {
+        (ReleaseStage::Beta, build.parse().unwrap_or(0))
+    } else if let Some(build) = rest.strip_prefix("-b") {
+        (ReleaseStage::Beta, build.parse().unwrap_or(0))
+    } else {
+        (ReleaseStage::Stable, 0)
+    };
+    ReleaseVersion::new(nums, stage, build)
 }
 
 /// Newline-normalized, bounded release-notes excerpt (characters, not bytes).
@@ -144,8 +268,8 @@ pub(crate) async fn check_for_updates_core(
     channel: &str,
     current: &str,
 ) -> Result<UpdateInfo, String> {
-    let prefix = channel_prefix(channel)?;
-    let current_version = current.strip_prefix('v').unwrap_or(current);
+    let channel = UpdateChannel::parse(channel)?;
+    let current_version = parse_current_version(current);
     let url = format!("{}/releases?per_page=30", api_base.trim_end_matches('/'));
 
     let response = client
@@ -166,22 +290,20 @@ pub(crate) async fn check_for_updates_core(
     let releases: Vec<GitHubRelease> = serde_json::from_str(&raw)
         .map_err(|e| format!("invalid GitHub releases response from {url}: {e}"))?;
 
-    let mut best: Option<(&GitHubRelease, String)> = None;
+    let mut best: Option<(&GitHubRelease, ReleaseVersion)> = None;
     for release in &releases {
         if release.draft {
             continue;
         }
-        let version = match release_version(prefix, &release.tag_name, release.name.as_deref()) {
+        let version = match release_version(channel, &release.tag_name, release.name.as_deref()) {
             Some(version) => version,
             // A rolling snapshot tag is rebuilt in place; if neither tag nor
             // title carries a version, we cannot claim an update.
-            None if release.tag_name == "snapshot" => current_version.to_owned(),
+            None if release.tag_name == "snapshot" => current_version.clone(),
             None => continue,
         };
         let replace = match &best {
-            Some((_, best_version)) => {
-                compare_versions(&version, best_version) == Ordering::Greater
-            }
+            Some((_, best_version)) => version.cmp(best_version) == Ordering::Greater,
             None => true,
         };
         if replace {
@@ -189,18 +311,30 @@ pub(crate) async fn check_for_updates_core(
         }
     }
     let (release, latest_version) = best.ok_or_else(|| {
-        format!("no {channel} release found in the 30 most recent GitHub releases")
+        format!(
+            "no {} release found in the 30 most recent GitHub releases",
+            channel_name(channel)
+        )
     })?;
 
     Ok(UpdateInfo {
-        channel: channel.to_owned(),
+        channel: channel_name(channel).to_owned(),
         current_version: current.to_owned(),
         latest_tag: release.tag_name.clone(),
-        is_newer: compare_versions(&latest_version, current_version) == Ordering::Greater,
+        is_newer: latest_version.cmp(&current_version) == Ordering::Greater,
         release_notes: notes_summary(release.body.as_deref().unwrap_or_default()),
         release_url: release.html_url.clone(),
         checksums_note: CHECKSUMS_NOTE.to_owned(),
     })
+}
+
+fn channel_name(channel: UpdateChannel) -> &'static str {
+    match channel {
+        UpdateChannel::Stable => "stable",
+        UpdateChannel::Star => "star",
+        UpdateChannel::Bolide => "bolide",
+        UpdateChannel::Snapshot => "snapshot",
+    }
 }
 
 /// Invoked only by the Settings → Check for updates button. The shared
@@ -340,6 +474,86 @@ mod tests {
             .unwrap();
         assert_eq!(info.latest_tag, "beta-v0.7.1-b1");
         assert!(!info.is_newer);
+    }
+
+    #[tokio::test]
+    async fn compact_pep440_tags_are_parsed_per_channel() {
+        let client = reqwest::Client::new();
+
+        let (api, _rx) = loopback(releases_json(&[release(
+            "v0.7.2a1",
+            "compact bolide",
+            "https://x/v0.7.2a1",
+        )]));
+        let info = check_for_updates_core(&client, &api, "bolide", "0.7.1")
+            .await
+            .unwrap();
+        assert_eq!(info.latest_tag, "v0.7.2a1");
+        assert!(info.is_newer);
+
+        // Bolide builds of the current milestone still rank below the release.
+        let (api, _rx) = loopback(releases_json(&[release(
+            "v0.7.1a9",
+            "same milestone",
+            "https://x/v0.7.1a9",
+        )]));
+        let info = check_for_updates_core(&client, &api, "bolide", "0.7.1")
+            .await
+            .unwrap();
+        assert!(!info.is_newer);
+
+        let (api, _rx) = loopback(releases_json(&[release(
+            "v0.7.1b1",
+            "compact star",
+            "https://x/v0.7.1b1",
+        )]));
+        let info = check_for_updates_core(&client, &api, "star", "0.7.1")
+            .await
+            .unwrap();
+        assert_eq!(info.latest_tag, "v0.7.1b1");
+        assert!(!info.is_newer);
+
+        // Compact alpha/beta tags are not Stable releases.
+        let (api, _rx) = loopback(releases_json(&[
+            release("v0.8.0a1", "wrong channel", "https://x/v0.8.0a1"),
+            release("v0.8.0b1", "wrong channel", "https://x/v0.8.0b1"),
+            release("v0.7.2", "stable", "https://x/v0.7.2"),
+        ]));
+        let info = check_for_updates_core(&client, &api, "stable", "0.7.1")
+            .await
+            .unwrap();
+        assert_eq!(info.latest_tag, "v0.7.2");
+        assert!(info.is_newer);
+    }
+
+    #[test]
+    fn compact_build_numbers_sort_numerically() {
+        let alpha9 = parse_compact("v0.7.2a9", 'a', ReleaseStage::Alpha).unwrap();
+        let alpha10 = parse_compact("v0.7.2a10", 'a', ReleaseStage::Alpha).unwrap();
+        let beta1 = parse_compact("v0.7.2b1", 'b', ReleaseStage::Beta).unwrap();
+        let stable = parse_stable("v0.7.2").unwrap();
+        assert!(alpha9 < alpha10);
+        assert!(alpha10 < beta1);
+        assert!(beta1 < stable);
+        assert_eq!(
+            parse_compact("v0.7.2", 'a', ReleaseStage::Alpha),
+            None,
+            "a compact tag must carry its build number"
+        );
+    }
+
+    #[tokio::test]
+    async fn snapshot_style_tag_is_accepted_without_the_rolling_tag() {
+        let (api, _rx) = loopback(releases_json(&[release(
+            "v0.7.2-25112026-6c2d471",
+            "tagged snapshot",
+            "https://x/snapshot",
+        )]));
+        let info = check_for_updates_core(&reqwest::Client::new(), &api, "snapshot", "0.7.1")
+            .await
+            .unwrap();
+        assert_eq!(info.latest_tag, "v0.7.2-25112026-6c2d471");
+        assert!(info.is_newer);
     }
 
     #[tokio::test]

@@ -7,7 +7,7 @@ TwilightMC follows a **multi-tiered licensing model** designed to benefit the op
 ## 1. Workspace Breakdown
 
 * **Core Utilities & Libraries (`Apache-2.0`):**
-  The low-level subsystem crates (`twilight-manifest`, `twilight-downloader`, `twilight-runtime`, `twilight-horizon`, `twilight-cas`, `twilight-pack`, `twilight-modrinth`, `twilight-modloader`, `twilight-server`) are licensed under the permissive **Apache License, Version 2.0**. You are free to integrate and reuse these crates in your own software, provided you retain copyright notices.
+  The low-level subsystem crates (`twilight-manifest`, `twilight-downloader`, `twilight-runtime`, `twilight-horizon`, `twilight-cas`, `twilight-pack`, `twilight-modrinth`, `twilight-modloader`, `twilight-server`, `twilight-oneclient-modpack-compatible-layer`) are licensed under the permissive **Apache License, Version 2.0**. You are free to integrate and reuse these crates in your own software, provided you retain copyright notices. The planned `twilight-other-client-detector` (Beta backlog) is also Apache-2.0.
 
 * **Application & Launch Engine (`AGPL-3.0-or-later`):**
   The top-level client applications (`twilight-cli`, `twilight-ui`, `twilight-launch`, `twilight-auth`) are licensed under the **GNU Affero General Public License v3 (AGPL-3.0-or-later)**. Any distribution, modification, or hosted network deployment of these components must keep the complete source code publicly accessible under the same license terms.
