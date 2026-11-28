@@ -455,9 +455,8 @@ settings-horizon-use = Use
 settings-horizon-releases = Available releases
 settings-horizon-latest = Latest stable
 settings-horizon-install = Install release
-settings-horizon-installed = Installed {$tag}. It is now the active Horizon binary.
+settings-horizon-installed = Installed { $tag }. It is now the active Horizon binary.
 settings-horizon-no-platform = No published build exists for this platform.
-
 dev-mode-unlocked = Developer Mode unlocked. 🛠️
 settings-dev-title = Developer
 settings-dev-desc = Advanced diagnostics and debugging tools for launcher and mod developers. Changes here affect every JVM launch.
@@ -641,9 +640,9 @@ packs-fonts-confirm =
         [one] font file
        *[other] font files
     }: { $fonts }.
-
-
-
+    
+    
+    
     Minecraft 1.20.5 and newer can execute code from a malicious .ttf font in a resource pack (Minecraft2Shell). Only import packs you trust.
 packs-fonts-confirm-action = Import anyway
 packs-fonts-cancelled = Import cancelled: { $name } contains fonts and was not copied.
