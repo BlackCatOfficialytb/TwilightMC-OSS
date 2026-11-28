@@ -642,6 +642,8 @@ packs-fonts-confirm =
        *[other] font files
     }: { $fonts }.
 
+
+
     Minecraft 1.20.5 and newer can execute code from a malicious .ttf font in a resource pack (Minecraft2Shell). Only import packs you trust.
 packs-fonts-confirm-action = Import anyway
 packs-fonts-cancelled = Import cancelled: { $name } contains fonts and was not copied.
